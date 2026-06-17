@@ -1,0 +1,1 @@
+xists helps developers find what already exists before building from scratch.

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from xists.cli import load_env_file, load_repo_ids
+from xists.cli import build_parser, load_env_file, load_repo_ids
 
 
 def test_load_env_file_loads_values(tmp_path, monkeypatch):
@@ -57,5 +57,31 @@ def test_load_repo_ids_skips_blank_lines_and_comments(tmp_path):
         ),
         encoding="utf-8",
     )
-
     assert load_repo_ids(repos_file) == ["facebook/react", "vuejs/core"]
+
+
+def test_ingest_github_parser_uses_default_paths():
+    args = build_parser().parse_args(["ingest", "github"])
+
+    assert args.repos == Path("repos.txt")
+    assert args.output == Path("records.json")
+    assert args.report == Path("report.json")
+
+
+def test_ingest_github_parser_accepts_custom_paths():
+    args = build_parser().parse_args(
+        [
+            "ingest",
+            "github",
+            "--repos",
+            "data/repos.txt",
+            "--output",
+            "data/records.json",
+            "--report",
+            "data/report.json",
+        ]
+    )
+
+    assert args.repos == Path("data/repos.txt")
+    assert args.output == Path("data/records.json")
+    assert args.report == Path("data/report.json")

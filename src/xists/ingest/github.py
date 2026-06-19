@@ -239,7 +239,7 @@ def build_record(snapshot: GitHubSnapshot) -> dict[str, Any]:
         )
 
     return {
-        "record_version": "xists-record-v1",
+        "schema_version": 1,
         "repo_id_requested": snapshot.requested_repo_id,
         "repo_id": metadata.get("full_name"),
         "platform": "github",

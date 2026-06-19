@@ -10,6 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from xists.ingest.github import GitHubAPIError, collect_record, github_token_from_env, github_token_from_file, parse_github_repo
+from xists.profile.llm import (
+    LLMError,
+    LLMNotConfiguredError,
+    attach_llm_profile,
+    generate_llm_profile,
+    llm_config_from_env,
+)
 
 
 def load_env_file(path: Path) -> None:
@@ -43,6 +50,12 @@ def write_json(path: Path, data: Any) -> None:
 
 
 def ingest_github(args: argparse.Namespace) -> int:
+    try:
+        llm_config = llm_config_from_env()
+    except LLMNotConfiguredError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
     repo_ids = load_repo_ids(args.repos)
     token = github_token_from_file(args.token_file) if args.token_file else github_token_from_env()
     records: list[dict[str, Any]] = []
@@ -50,13 +63,24 @@ def ingest_github(args: argparse.Namespace) -> int:
 
     for repo_id in repo_ids:
         try:
-            records.append(collect_record(repo_id, token=token))
+            record = collect_record(repo_id, token=token)
+            profile = generate_llm_profile(record, llm_config)
+            attach_llm_profile(record, profile)
+            records.append(record)
         except GitHubAPIError as error:
             failed.append(
                 {
                     "repo_id": repo_id,
                     "reason": str(error),
                     "status": error.status,
+                }
+            )
+        except LLMError as error:
+            failed.append(
+                {
+                    "repo_id": repo_id,
+                    "reason": str(error),
+                    "status": None,
                 }
             )
         except Exception as error:
@@ -75,6 +99,9 @@ def ingest_github(args: argparse.Namespace) -> int:
         "failed": failed,
         "records_with_readme": sum(1 for record in records if record.get("readme")),
         "records_without_readme": sum(1 for record in records if not record.get("readme")),
+        "records_abstained": sum(
+            1 for record in records if (record.get("llm_profile") or {}).get("abstained")
+        ),
     }
 
     write_json(args.output, records)

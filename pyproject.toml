@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "xists"
+version = "0.0.0"
+description = "Find what already exists before building from scratch."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+xists = "xists.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xists"]

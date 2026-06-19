@@ -93,9 +93,9 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_subparsers = ingest.add_subparsers(dest="source", required=True)
 
     github = ingest_subparsers.add_parser("github", help="Collect records from GitHub repositories")
-    github.add_argument("--repos", type=Path, required=True, help="Text file with one GitHub owner/repo or URL per line")
-    github.add_argument("--output", type=Path, required=True, help="Path to write records JSON")
-    github.add_argument("--report", type=Path, default=None, help="Optional path to write generation report JSON")
+    github.add_argument("--repos", type=Path, default=Path("repos.txt"), help="Text file with one GitHub owner/repo or URL per line")
+    github.add_argument("--output", type=Path, default=Path("records.json"), help="Path to write records JSON")
+    github.add_argument("--report", type=Path, default=Path("report.json"), help="Path to write generation report JSON")
     github.add_argument("--token-file", type=Path, default=None, help="Optional file containing a GitHub token")
     github.set_defaults(func=ingest_github)
 

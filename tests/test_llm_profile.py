@@ -150,7 +150,7 @@ def test_generate_llm_profile_adds_provenance():
 
     assert profile["provider"] == "openai_compatible"
     assert profile["model"] == "test-model"
-    assert profile["base_url"] == "https://api.example.com/v1"
+    assert "base_url" not in profile
     assert profile["generated_at"].endswith("+00:00")
     assert profile["input_evidence_kinds"] == [
         "github_description",

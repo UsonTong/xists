@@ -306,7 +306,6 @@ Example:
     "abstained": false,
     "provider": "openai_compatible",
     "model": "gpt-4o-mini",
-    "base_url": "https://api.openai.com/v1",
     "generated_at": "2026-06-19T14:36:25+00:00",
     "input_evidence_kinds": [
       "github_description",
@@ -333,7 +332,6 @@ xists fills the provenance fields itself so they stay trustworthy:
 
 - `provider`: currently `openai_compatible`.
 - `model`: the model name used.
-- `base_url`: the OpenAI-compatible endpoint used.
 - `generated_at`: UTC time the profile was generated. This is distinct from
   `snapshot_time`, which is when the GitHub facts were collected.
 - `input_evidence_kinds`: which evidence kinds were available as LLM input.

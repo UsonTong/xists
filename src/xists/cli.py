@@ -17,6 +17,13 @@ from xists.profile.llm import (
     generate_llm_profile,
     llm_config_from_env,
 )
+from xists.search.embed import (
+    EmbeddingError,
+    EmbeddingNotConfiguredError,
+    embedding_config_from_env,
+)
+from xists.search.index import build_index, load_index
+from xists.search.query import IndexMismatchError, rank
 
 
 def load_env_file(path: Path) -> None:
@@ -112,6 +119,63 @@ def ingest_github(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def index_build(args: argparse.Namespace) -> int:
+    try:
+        config = embedding_config_from_env()
+    except EmbeddingNotConfiguredError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
+    if not args.records.exists():
+        print(f"Records file not found: {args.records}", file=sys.stderr)
+        return 2
+
+    records = json.loads(args.records.read_text(encoding="utf-8"))
+    try:
+        index = build_index(records, config)
+    except EmbeddingError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+    write_json(args.output, index)
+    print(
+        json.dumps(
+            {
+                "index": str(args.output),
+                "embedding_model": index["embedding_model"],
+                "dimension": index["dimension"],
+                "record_count": index["record_count"],
+                "skipped": index["skipped"],
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+    return 0
+
+
+def search(args: argparse.Namespace) -> int:
+    try:
+        config = embedding_config_from_env()
+    except EmbeddingNotConfiguredError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
+    if not args.index.exists():
+        print(f"Index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
+        return 2
+
+    index = load_index(args.index)
+    try:
+        result = rank(args.query, index, config, top_k=args.top_k)
+    except (IndexMismatchError, EmbeddingError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="xists helps developers find what already exists.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -125,6 +189,19 @@ def build_parser() -> argparse.ArgumentParser:
     github.add_argument("--report", type=Path, default=Path("report.json"), help="Path to write generation report JSON")
     github.add_argument("--token-file", type=Path, default=None, help="Optional file containing a GitHub token")
     github.set_defaults(func=ingest_github)
+
+    index = subparsers.add_parser("index", help="Build the embedding index")
+    index_subparsers = index.add_subparsers(dest="index_command", required=True)
+    index_build_parser = index_subparsers.add_parser("build", help="Build an embedding index from records")
+    index_build_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to index")
+    index_build_parser.add_argument("--output", type=Path, default=Path("index.json"), help="Path to write the embedding index")
+    index_build_parser.set_defaults(func=index_build)
+
+    search_parser = subparsers.add_parser("search", help="Search the embedding index")
+    search_parser.add_argument("query", help="Natural-language query")
+    search_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to search")
+    search_parser.add_argument("--top-k", type=int, default=10, help="Maximum number of results to return")
+    search_parser.set_defaults(func=search)
 
     return parser
 

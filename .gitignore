@@ -2,6 +2,7 @@
 .secrets/
 records.json
 report.json
+index.json
 
 __pycache__/
 *.py[cod]

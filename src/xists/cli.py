@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -65,10 +66,19 @@ def ingest_github(args: argparse.Namespace) -> int:
 
     repo_ids = load_repo_ids(args.repos)
     token = github_token_from_file(args.token_file) if args.token_file else github_token_from_env()
+
+    # Load existing records for incremental update.
+    existing: list[dict[str, Any]] = []
+    if args.output.exists():
+        existing = json.loads(args.output.read_text(encoding="utf-8"))
+    existing_ids = {record.get("repo_id") for record in existing}
+    skipped = [repo_id for repo_id in repo_ids if repo_id in existing_ids]
+    to_ingest = [repo_id for repo_id in repo_ids if repo_id not in existing_ids]
+
     records: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
 
-    for repo_id in repo_ids:
+    for repo_id in to_ingest:
         try:
             record = collect_record(repo_id, token=token)
             profile = generate_llm_profile(record, llm_config)
@@ -99,8 +109,11 @@ def ingest_github(args: argparse.Namespace) -> int:
                 }
             )
 
+    merged = existing + records
+
     report = {
         "input_count": len(repo_ids),
+        "skipped_count": len(skipped),
         "generated_count": len(records),
         "failed_count": len(failed),
         "failed": failed,
@@ -111,11 +124,15 @@ def ingest_github(args: argparse.Namespace) -> int:
         ),
     }
 
-    write_json(args.output, records)
+    write_json(args.output, merged)
     if args.report:
         write_json(args.report, report)
 
-    print(json.dumps({"records": str(args.output), "report": str(args.report) if args.report else None, **report}, ensure_ascii=False, indent=2))
+    print(json.dumps(
+        {"records": str(args.output), "report": str(args.report) if args.report else None, "total_records": len(merged), **report},
+        ensure_ascii=False,
+        indent=2,
+    ))
     return 1 if failed else 0
 
 
@@ -131,21 +148,49 @@ def index_build(args: argparse.Namespace) -> int:
         return 2
 
     records = json.loads(args.records.read_text(encoding="utf-8"))
+
+    # Load existing index for incremental update.
+    existing_index: dict[str, Any] | None = None
+    if args.output.exists():
+        existing_index = json.loads(args.output.read_text(encoding="utf-8"))
+        if existing_index.get("embedding_model") and existing_index["embedding_model"] != config.model:
+            print(
+                f"Index was built with model '{existing_index['embedding_model']}' "
+                f"but configured model is '{config.model}'. "
+                f"Delete {args.output} and rebuild, or set EMBEDDING_MODEL to match.",
+                file=sys.stderr,
+            )
+            return 1
+        existing_ids = {entry.get("repo_id") for entry in existing_index.get("vectors", [])}
+        records = [r for r in records if (r.get("repo_id") or r.get("repo_id_requested")) not in existing_ids]
+
     try:
-        index = build_index(records, config)
+        new_index = build_index(records, config)
     except EmbeddingError as error:
         print(str(error), file=sys.stderr)
         return 1
 
-    write_json(args.output, index)
+    if existing_index and existing_index.get("vectors"):
+        merged = {
+            **new_index,
+            "built_at": datetime.now(timezone.utc).isoformat(),
+            "record_count": len(existing_index["vectors"]) + new_index["record_count"],
+            "skipped": (existing_index.get("skipped") or []) + new_index["skipped"],
+            "vectors": existing_index["vectors"] + new_index["vectors"],
+        }
+    else:
+        merged = new_index
+
+    write_json(args.output, merged)
     print(
         json.dumps(
             {
                 "index": str(args.output),
-                "embedding_model": index["embedding_model"],
-                "dimension": index["dimension"],
-                "record_count": index["record_count"],
-                "skipped": index["skipped"],
+                "embedding_model": merged["embedding_model"],
+                "dimension": merged["dimension"],
+                "record_count": merged["record_count"],
+                "new_vectors": new_index["record_count"],
+                "skipped": merged["skipped"],
             },
             ensure_ascii=False,
             indent=2,

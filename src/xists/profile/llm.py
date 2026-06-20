@@ -227,7 +227,6 @@ def generate_llm_profile(
         {
             "provider": "openai_compatible",
             "model": config.model,
-            "base_url": config.base_url,
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "input_evidence_kinds": input_evidence_kinds(record),
         }

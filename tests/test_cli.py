@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from xists.cli import build_parser, index_build, ingest_github, load_env_file, load_repo_ids
+from xists.search.embed import EmbeddingError
 
 
 def test_load_env_file_loads_values(tmp_path, monkeypatch):
@@ -190,7 +191,7 @@ def test_index_build_skips_existing_vectors(tmp_path, monkeypatch):
         ["index", "build", "--records", str(records_file), "--output", str(output_file)]
     )
 
-    with patch("xists.search.index.call_embeddings", side_effect=fake_call_embeddings):
+    with patch("xists.search.embed.call_embeddings", side_effect=fake_call_embeddings):
         code = index_build(args)
 
     assert code == 0
@@ -228,3 +229,231 @@ def test_index_build_rejects_model_mismatch(tmp_path, monkeypatch):
 
     code = index_build(args)
     assert code == 1
+
+
+def test_ingest_github_force_reprocesses_existing(tmp_path, monkeypatch):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\n", encoding="utf-8")
+
+    output_file = tmp_path / "records.json"
+    output_file.write_text(json.dumps([_make_record("a/b")]), encoding="utf-8")
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    collected = []
+
+    def fake_collect(repo_id, *, token=None):
+        collected.append(repo_id)
+        return _make_record(repo_id)
+
+    def fake_generate(record, config, *, caller=None):
+        return record.get("llm_profile", {})
+
+    args = build_parser().parse_args(
+        ["ingest", "github", "--repos", str(repos_file), "--output", str(output_file),
+         "--report", str(tmp_path / "report.json"), "--force"]
+    )
+
+    with patch("xists.cli.collect_record", side_effect=fake_collect), \
+         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+        code = ingest_github(args)
+
+    assert code == 0
+    assert collected == ["a/b"]
+
+    merged = json.loads(output_file.read_text())
+    assert len(merged) == 1
+
+
+def test_ingest_github_checkpoint_writes_after_each_record(tmp_path, monkeypatch):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\nc/d\ne/f\n", encoding="utf-8")
+
+    output_file = tmp_path / "records.json"
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    call_count = 0
+
+    def fake_collect(repo_id, *, token=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 3:
+            raise Exception("simulated crash")
+        return _make_record(repo_id)
+
+    def fake_generate(record, config, *, caller=None):
+        return record.get("llm_profile", {})
+
+    args = build_parser().parse_args(
+        ["ingest", "github", "--repos", str(repos_file), "--output", str(output_file),
+         "--report", str(tmp_path / "report.json")]
+    )
+
+    with patch("xists.cli.collect_record", side_effect=fake_collect), \
+         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+        code = ingest_github(args)
+
+    # Third repo crashed, but first two should be saved.
+    assert code == 1
+    saved = json.loads(output_file.read_text())
+    assert len(saved) == 2
+    assert [r["repo_id"] for r in saved] == ["a/b", "c/d"]
+
+
+def test_ingest_github_force_ignores_existing(tmp_path, monkeypatch):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\n", encoding="utf-8")
+
+    output_file = tmp_path / "records.json"
+    old_record = _make_record("a/b")
+    old_record["llm_profile"]["summary"] = "old summary"
+    output_file.write_text(json.dumps([old_record]), encoding="utf-8")
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    new_record = _make_record("a/b")
+    new_record["llm_profile"]["summary"] = "new summary"
+
+    def fake_collect(repo_id, *, token=None):
+        return new_record
+
+    def fake_generate(record, config, *, caller=None):
+        return record.get("llm_profile", {})
+
+    args = build_parser().parse_args(
+        ["ingest", "github", "--repos", str(repos_file), "--output", str(output_file),
+         "--report", str(tmp_path / "report.json"), "--force"]
+    )
+
+    with patch("xists.cli.collect_record", side_effect=fake_collect), \
+         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+        code = ingest_github(args)
+
+    assert code == 0
+    saved = json.loads(output_file.read_text())
+    assert len(saved) == 1
+    assert saved[0]["llm_profile"]["summary"] == "new summary"
+
+
+def test_index_build_force_rebuilds_from_scratch(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "local")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps([
+        {"repo_id": "a/b", "github": {"description": "A", "topics": []}, "llm_profile": {"summary": "A summary", "search_phrases": []}},
+    ]), encoding="utf-8")
+
+    output_file = tmp_path / "index.json"
+    output_file.write_text(json.dumps({
+        "index_version": 1,
+        "embedding_model": "BAAI/bge-m3",
+        "embedding_base_url": "http://localhost:6597/v1",
+        "dimension": 4,
+        "built_at": "2026-01-01T00:00:00+00:00",
+        "record_count": 1,
+        "skipped": [],
+        "vectors": [{"repo_id": "a/b", "vector": [1.0, 0.0, 0.0, 0.0]}],
+    }), encoding="utf-8")
+
+    def fake_call_embeddings(config, inputs, *, timeout=60):
+        return [[0.0, 0.0, 1.0, 0.0] for _ in inputs]
+
+    args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file), "--force"]
+    )
+
+    with patch("xists.search.embed.call_embeddings", side_effect=fake_call_embeddings):
+        code = index_build(args)
+
+    assert code == 0
+    index = json.loads(output_file.read_text())
+    assert index["record_count"] == 1
+    assert index["vectors"][0]["vector"] == [0.0, 0.0, 1.0, 0.0]
+
+
+def test_index_build_checkpoint_writes_after_each_batch(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "local")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+
+    records = []
+    for i in range(3):
+        records.append({
+            "repo_id": f"r{i}/repo",
+            "github": {"description": f"Repo {i}", "topics": []},
+            "llm_profile": {"summary": f"Summary {i}", "search_phrases": []},
+        })
+
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps(records), encoding="utf-8")
+
+    output_file = tmp_path / "index.json"
+
+    def fake_call_embeddings(config, inputs, *, timeout=60):
+        return [[float(i)] for i in range(len(inputs))]
+
+    args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file)]
+    )
+
+    with patch("xists.search.embed.call_embeddings", side_effect=fake_call_embeddings):
+        code = index_build(args)
+
+    assert code == 0
+    index = json.loads(output_file.read_text())
+    assert index["record_count"] == 3
+    assert len(index["vectors"]) == 3
+
+
+def test_index_build_checkpoint_saves_partial_on_crash(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "local")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+
+    # Use 65 records to force 2 batches (batch_size=64).
+    records = []
+    for i in range(65):
+        records.append({
+            "repo_id": f"r{i}/repo",
+            "github": {"description": f"Repo {i}", "topics": []},
+            "llm_profile": {"summary": f"Summary {i}", "search_phrases": []},
+        })
+
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps(records), encoding="utf-8")
+
+    output_file = tmp_path / "index.json"
+
+    call_count = 0
+
+    def fake_call_embeddings(config, inputs, *, timeout=60):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise EmbeddingError("simulated crash on second batch")
+        return [[float(i)] for i in range(len(inputs))]
+
+    args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file)]
+    )
+
+    with patch("xists.search.embed.call_embeddings", side_effect=fake_call_embeddings):
+        code = index_build(args)
+
+    assert code == 1
+    # First batch (64 records) should be saved even though second batch crashed.
+    index = json.loads(output_file.read_text())
+    assert index["record_count"] == 64
+    assert len(index["vectors"]) == 64

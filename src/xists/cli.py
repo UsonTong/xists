@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,21 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _ingest_one(repo_id: str, token: str | None, llm_config: Any) -> dict[str, Any]:
+    """Ingest a single repo. Returns a result dict with either 'record' or 'error'."""
+    try:
+        record = collect_record(repo_id, token=token)
+        profile = generate_llm_profile(record, llm_config)
+        attach_llm_profile(record, profile)
+        return {"repo_id": repo_id, "record": record}
+    except GitHubAPIError as error:
+        return {"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": error.status}}
+    except LLMError as error:
+        return {"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": None}}
+    except Exception as error:
+        return {"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": None}}
+
+
 def ingest_github(args: argparse.Namespace) -> int:
     try:
         llm_config = llm_config_from_env()
@@ -81,46 +97,39 @@ def ingest_github(args: argparse.Namespace) -> int:
     with_readme = 0
     without_readme = 0
     abstained = 0
+    workers = getattr(args, "workers", 1) or 1
 
-    for repo_id in to_ingest:
-        try:
-            record = collect_record(repo_id, token=token)
-            profile = generate_llm_profile(record, llm_config)
-            attach_llm_profile(record, profile)
-            merged.append(record)
-            generated += 1
-            if record.get("readme"):
-                with_readme += 1
-            else:
-                without_readme += 1
-            if (record.get("llm_profile") or {}).get("abstained"):
-                abstained += 1
-            # Checkpoint: write after each successful record.
+    def process_result(result: dict[str, Any]) -> None:
+        nonlocal generated, with_readme, without_readme, abstained
+        if "error" in result:
+            failed.append(result["error"])
+            return
+        record = result["record"]
+        merged.append(record)
+        generated += 1
+        if record.get("readme"):
+            with_readme += 1
+        else:
+            without_readme += 1
+        if (record.get("llm_profile") or {}).get("abstained"):
+            abstained += 1
+
+    if workers > 1 and to_ingest:
+        # Multi-threaded: process repos concurrently, write checkpoint after all complete.
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = {
+                executor.submit(_ingest_one, repo_id, token, llm_config): repo_id
+                for repo_id in to_ingest
+            }
+            for future in as_completed(futures):
+                process_result(future.result())
+                # Checkpoint after each thread completes.
+                write_json(args.output, merged)
+    else:
+        # Single-threaded: process one by one with checkpoint after each.
+        for repo_id in to_ingest:
+            process_result(_ingest_one(repo_id, token, llm_config))
             write_json(args.output, merged)
-        except GitHubAPIError as error:
-            failed.append(
-                {
-                    "repo_id": repo_id,
-                    "reason": str(error),
-                    "status": error.status,
-                }
-            )
-        except LLMError as error:
-            failed.append(
-                {
-                    "repo_id": repo_id,
-                    "reason": str(error),
-                    "status": None,
-                }
-            )
-        except Exception as error:
-            failed.append(
-                {
-                    "repo_id": repo_id,
-                    "reason": str(error),
-                    "status": None,
-                }
-            )
 
     report = {
         "input_count": len(repo_ids),
@@ -320,6 +329,7 @@ def build_parser() -> argparse.ArgumentParser:
     github.add_argument("--report", type=Path, default=Path("report.json"), help="Path to write generation report JSON")
     github.add_argument("--token-file", type=Path, default=None, help="Optional file containing a GitHub token")
     github.add_argument("--force", action="store_true", help="Ignore existing records.json and reprocess all repos")
+    github.add_argument("--workers", type=int, default=1, help="Number of concurrent workers (default: 1)")
     github.set_defaults(func=ingest_github)
 
     index = subparsers.add_parser("index", help="Build the embedding index")

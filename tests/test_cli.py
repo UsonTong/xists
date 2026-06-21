@@ -135,6 +135,22 @@ def test_ingest_github_skips_existing_records(tmp_path, monkeypatch):
     assert len(merged) == 2
     assert [r["repo_id"] for r in merged] == ["a/b", "c/d"]
 
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert report["started_at"].endswith("+00:00")
+    assert report["finished_at"].endswith("+00:00")
+    assert report["duration_seconds"] >= 0
+    assert report["workers"] == 1
+    assert report["force"] is False
+    assert report["xists_version"]
+    assert report["llm"] == {
+        "provider": "openai_compatible",
+        "model": "m",
+        "prompt_version": 1,
+    }
+    serialized_report = json.dumps(report)
+    assert "key" not in serialized_report
+    assert "http://test/v1" not in serialized_report
+
 
 def test_ingest_github_creates_new_file_when_no_existing(tmp_path, monkeypatch):
     repos_file = tmp_path / "repos.txt"
@@ -161,7 +177,7 @@ def test_ingest_github_creates_new_file_when_no_existing(tmp_path, monkeypatch):
     assert merged[0]["repo_id"] == "x/y"
 
 
-def test_index_build_skips_existing_vectors(tmp_path, monkeypatch):
+def test_index_build_rebuilds_legacy_vectors_without_fingerprints(tmp_path, monkeypatch):
     monkeypatch.setenv("EMBEDDING_API_KEY", "local")
     monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
     monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
@@ -191,7 +207,7 @@ def test_index_build_skips_existing_vectors(tmp_path, monkeypatch):
         ["index", "build", "--records", str(records_file), "--output", str(output_file)]
     )
 
-    with patch("xists.search.embed.call_embeddings", side_effect=fake_call_embeddings):
+    with patch("xists.cli.call_embeddings", side_effect=fake_call_embeddings):
         code = index_build(args)
 
     assert code == 0
@@ -199,8 +215,9 @@ def test_index_build_skips_existing_vectors(tmp_path, monkeypatch):
     assert index["record_count"] == 2
     assert len(index["vectors"]) == 2
     assert index["vectors"][0]["repo_id"] == "a/b"
-    assert index["vectors"][0]["vector"] == [1.0, 0.0, 0.0, 0.0]
+    assert index["vectors"][0]["vector"] == [0.0, 1.0, 0.0, 0.0]
     assert index["vectors"][1]["repo_id"] == "c/d"
+    assert index["vectors"][1]["embedding_input_fingerprint"]
 
 
 def test_index_build_rejects_model_mismatch(tmp_path, monkeypatch):
@@ -374,7 +391,7 @@ def test_index_build_force_rebuilds_from_scratch(tmp_path, monkeypatch):
         ["index", "build", "--records", str(records_file), "--output", str(output_file), "--force"]
     )
 
-    with patch("xists.search.embed.call_embeddings", side_effect=fake_call_embeddings):
+    with patch("xists.cli.call_embeddings", side_effect=fake_call_embeddings):
         code = index_build(args)
 
     assert code == 0
@@ -408,7 +425,7 @@ def test_index_build_checkpoint_writes_after_each_batch(tmp_path, monkeypatch):
         ["index", "build", "--records", str(records_file), "--output", str(output_file)]
     )
 
-    with patch("xists.search.embed.call_embeddings", side_effect=fake_call_embeddings):
+    with patch("xists.cli.call_embeddings", side_effect=fake_call_embeddings):
         code = index_build(args)
 
     assert code == 0
@@ -449,7 +466,7 @@ def test_index_build_checkpoint_saves_partial_on_crash(tmp_path, monkeypatch):
         ["index", "build", "--records", str(records_file), "--output", str(output_file)]
     )
 
-    with patch("xists.search.embed.call_embeddings", side_effect=fake_call_embeddings):
+    with patch("xists.cli.call_embeddings", side_effect=fake_call_embeddings):
         code = index_build(args)
 
     assert code == 1

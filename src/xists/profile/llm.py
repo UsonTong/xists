@@ -9,8 +9,10 @@ generated_at, input_evidence_kinds) itself so they stay trustworthy.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -19,6 +21,7 @@ from typing import Any
 
 USER_AGENT = "xists-llm-profile"
 CONFIDENCE_VALUES = {"high", "medium", "low"}
+PROFILE_PROMPT_VERSION = 1
 
 PROFILE_SYSTEM_PROMPT = (
     "You analyze a single open-source repository and produce a structured "
@@ -47,6 +50,12 @@ class LLMError(RuntimeError):
 
 class LLMNotConfiguredError(LLMError):
     """Raised when no LLM configuration is available in the environment."""
+
+
+@dataclass(frozen=True)
+class LLMResponse:
+    content: str
+    token_usage: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +137,18 @@ def build_profile_messages(profile_input: dict[str, Any]) -> list[dict[str, str]
     ]
 
 
+def profile_prompt_hash() -> str:
+    payload = json.dumps(
+        {
+            "prompt_version": PROFILE_PROMPT_VERSION,
+            "system_prompt": PROFILE_SYSTEM_PROMPT,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _coerce_str_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
@@ -171,8 +192,8 @@ def parse_llm_profile_response(content: str) -> dict[str, Any]:
     }
 
 
-def call_llm(config: LLMConfig, messages: list[dict[str, str]], *, timeout: int = 60) -> str:
-    """Call an OpenAI-compatible chat completions endpoint, return the content."""
+def call_llm(config: LLMConfig, messages: list[dict[str, str]], *, timeout: int = 60) -> LLMResponse:
+    """Call an OpenAI-compatible chat completions endpoint."""
 
     payload = {
         "model": config.model,
@@ -201,7 +222,10 @@ def call_llm(config: LLMConfig, messages: list[dict[str, str]], *, timeout: int 
         raise LLMError(f"LLM request failed: {error}") from error
 
     try:
-        return data["choices"][0]["message"]["content"]
+        return LLMResponse(
+            content=data["choices"][0]["message"]["content"],
+            token_usage=data.get("usage") if isinstance(data.get("usage"), dict) else None,
+        )
     except (KeyError, IndexError, TypeError) as error:
         raise LLMError(f"Unexpected LLM response shape: {data}") from error
 
@@ -220,7 +244,15 @@ def generate_llm_profile(
 
     profile_input = profile_input_from_record(record)
     messages = build_profile_messages(profile_input)
-    content = caller(config, messages)
+    started = time.perf_counter()
+    response = caller(config, messages)
+    duration_seconds = time.perf_counter() - started
+    if isinstance(response, LLMResponse):
+        content = response.content
+        token_usage = response.token_usage
+    else:
+        content = response
+        token_usage = None
     profile = parse_llm_profile_response(content)
 
     profile.update(
@@ -228,6 +260,10 @@ def generate_llm_profile(
             "provider": "openai_compatible",
             "model": config.model,
             "generated_at": datetime.now(timezone.utc).isoformat(),
+            "prompt_version": PROFILE_PROMPT_VERSION,
+            "prompt_hash": profile_prompt_hash(),
+            "duration_seconds": duration_seconds,
+            "token_usage": token_usage,
             "input_evidence_kinds": input_evidence_kinds(record),
         }
     )

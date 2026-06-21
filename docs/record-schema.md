@@ -48,10 +48,16 @@ Each record should include traceability fields:
 
 ```json
 {
+  "xists_version": "0.0.0",
+  "github_api_version": "2022-11-28",
   "snapshot_source": "github_api",
   "snapshot_time": "2026-06-19T10:37:12.345678+00:00"
 }
 ```
+
+`xists_version` identifies the xists package version that generated the record.
+
+`github_api_version` identifies the GitHub REST API version used for GitHub collection.
 
 `snapshot_source` identifies where the source snapshot came from. For GitHub ingestion, this is currently `github_api`.
 
@@ -71,6 +77,8 @@ A version 1 record currently has this shape:
 ```json
 {
   "schema_version": 1,
+  "xists_version": "0.0.0",
+  "github_api_version": "2022-11-28",
   "repo_id_requested": "facebook/react",
   "repo_id": "react/react",
   "platform": "github",
@@ -307,6 +315,14 @@ Example:
     "provider": "openai_compatible",
     "model": "gpt-4o-mini",
     "generated_at": "2026-06-19T14:36:25+00:00",
+    "prompt_version": 1,
+    "prompt_hash": "...",
+    "duration_seconds": 1.234,
+    "token_usage": {
+      "prompt_tokens": 1000,
+      "completion_tokens": 300,
+      "total_tokens": 1300
+    },
     "input_evidence_kinds": [
       "github_description",
       "github_topics",
@@ -334,6 +350,11 @@ xists fills the provenance fields itself so they stay trustworthy:
 - `model`: the model name used.
 - `generated_at`: UTC time the profile was generated. This is distinct from
   `snapshot_time`, which is when the GitHub facts were collected.
+- `prompt_version`: version of the LLM profile prompt contract.
+- `prompt_hash`: SHA-256 hash of the prompt version and system prompt text.
+- `duration_seconds`: elapsed wall-clock time for the LLM profile call.
+- `token_usage`: token usage returned by the OpenAI-compatible endpoint, or `null`
+  if the endpoint did not return usage.
 - `input_evidence_kinds`: which evidence kinds were available as LLM input.
 
 ### Rules
@@ -343,3 +364,30 @@ xists fills the provenance fields itself so they stay trustworthy:
 - It must not invent facts. Missing information stays empty, not guessed.
 - LLM profile generation does not replace collected source fields. It adds
   interpretation on top of traceable evidence.
+
+## Embedding index traceability
+
+`index.json` is derived from `records.json`. Each vector entry records the
+fingerprint of the exact embedding input text used to generate the vector:
+
+```json
+{
+  "index_version": 1,
+  "embedding_model": "BAAI/bge-m3",
+  "embedding_input_version": 1,
+  "dimension": 1024,
+  "vectors": [
+    {
+      "repo_id": "react/react",
+      "embedding_input_fingerprint": "...",
+      "vector": [0.01, -0.02]
+    }
+  ]
+}
+```
+
+The fingerprint is a SHA-256 hash over the embedding input version and the exact
+text produced by `embedding_text_from_record()`. During incremental index builds,
+xists reuses an existing vector only when the repo id, embedding model, vector
+dimension, and embedding input fingerprint still match. Older indexes without
+fingerprints are treated as stale and re-embedded.

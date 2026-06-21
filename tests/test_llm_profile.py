@@ -6,6 +6,8 @@ from xists.profile.llm import (
     LLMConfig,
     LLMError,
     LLMNotConfiguredError,
+    LLMResponse,
+    PROFILE_PROMPT_VERSION,
     attach_llm_profile,
     build_profile_messages,
     generate_llm_profile,
@@ -13,6 +15,7 @@ from xists.profile.llm import (
     llm_config_from_env,
     parse_llm_profile_response,
     profile_input_from_record,
+    profile_prompt_hash,
 )
 
 
@@ -152,6 +155,10 @@ def test_generate_llm_profile_adds_provenance():
     assert profile["model"] == "test-model"
     assert "base_url" not in profile
     assert profile["generated_at"].endswith("+00:00")
+    assert profile["prompt_version"] == PROFILE_PROMPT_VERSION
+    assert profile["prompt_hash"] == profile_prompt_hash()
+    assert profile["duration_seconds"] >= 0
+    assert profile["token_usage"] is None
     assert profile["input_evidence_kinds"] == [
         "github_description",
         "github_topics",
@@ -159,6 +166,26 @@ def test_generate_llm_profile_adds_provenance():
         "structure_signals",
     ]
     assert profile["summary"] == "React is a UI library."
+
+
+def test_generate_llm_profile_records_token_usage():
+    config = LLMConfig(api_key="key", base_url="https://api.example.com/v1", model="test-model")
+
+    def fake_caller(cfg, messages):
+        return LLMResponse(
+            content=json.dumps(
+                {
+                    "summary": "React is a UI library.",
+                    "confidence": "high",
+                    "abstained": False,
+                }
+            ),
+            token_usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        )
+
+    profile = generate_llm_profile(make_record(), config, caller=fake_caller)
+
+    assert profile["token_usage"] == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
 
 
 def test_attach_llm_profile():

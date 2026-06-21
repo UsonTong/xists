@@ -6,23 +6,30 @@ import argparse
 import json
 import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from xists import __version__
 from xists.ingest.github import GitHubAPIError, collect_record, github_token_from_env, github_token_from_file, parse_github_repo
 from xists.profile.llm import (
     LLMError,
     LLMNotConfiguredError,
+    PROFILE_PROMPT_VERSION,
     attach_llm_profile,
     generate_llm_profile,
     llm_config_from_env,
 )
 from xists.search.embed import (
+    EMBEDDING_INPUT_VERSION,
     EmbeddingError,
     EmbeddingNotConfiguredError,
+    call_embeddings,
     embedding_config_from_env,
+    embedding_input_fingerprint,
+    embedding_text_from_record,
 )
 from xists.search.index import INDEX_VERSION, load_index
 from xists.search.query import IndexMismatchError, rank
@@ -74,6 +81,9 @@ def _ingest_one(repo_id: str, token: str | None, llm_config: Any) -> dict[str, A
 
 
 def ingest_github(args: argparse.Namespace) -> int:
+    started_at = datetime.now(timezone.utc)
+    start_time = time.perf_counter()
+
     try:
         llm_config = llm_config_from_env()
     except LLMNotConfiguredError as error:
@@ -131,7 +141,19 @@ def ingest_github(args: argparse.Namespace) -> int:
             process_result(_ingest_one(repo_id, token, llm_config))
             write_json(args.output, merged)
 
+    finished_at = datetime.now(timezone.utc)
     report = {
+        "started_at": started_at.isoformat(),
+        "finished_at": finished_at.isoformat(),
+        "duration_seconds": time.perf_counter() - start_time,
+        "xists_version": __version__,
+        "workers": workers,
+        "force": bool(args.force),
+        "llm": {
+            "provider": "openai_compatible",
+            "model": llm_config.model,
+            "prompt_version": PROFILE_PROMPT_VERSION,
+        },
         "input_count": len(repo_ids),
         "skipped_count": len(skipped),
         "generated_count": generated,
@@ -159,6 +181,7 @@ def _index_write_checkpoint(
     index_version: int,
     embedding_model: str,
     embedding_base_url: str,
+    embedding_input_version: int,
     dimension: int | None,
     record_count: int,
     skipped: list[str],
@@ -170,6 +193,7 @@ def _index_write_checkpoint(
             "index_version": index_version,
             "embedding_model": embedding_model,
             "embedding_base_url": embedding_base_url,
+            "embedding_input_version": embedding_input_version,
             "dimension": dimension,
             "built_at": datetime.now(timezone.utc).isoformat(),
             "record_count": record_count,
@@ -193,10 +217,11 @@ def index_build(args: argparse.Namespace) -> int:
     records = json.loads(args.records.read_text(encoding="utf-8"))
     batch_size = 64
 
-    # Load existing index for incremental update (skip with --force).
+    # Load existing index for fingerprint-aware incremental update (skip with --force).
     vectors: list[dict[str, Any]] = []
     skipped: list[str] = []
     dimension: int | None = None
+    reusable_vectors: dict[str, dict[str, Any]] = {}
 
     if not args.force and args.output.exists():
         existing_index = json.loads(args.output.read_text(encoding="utf-8"))
@@ -208,15 +233,10 @@ def index_build(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        vectors = existing_index.get("vectors", [])
-        skipped = existing_index.get("skipped", [])
         dimension = existing_index.get("dimension")
-        existing_ids = {entry.get("repo_id") for entry in vectors}
-        records = [r for r in records if (r.get("repo_id") or r.get("repo_id_requested")) not in existing_ids]
+        reusable_vectors = {entry.get("repo_id"): entry for entry in existing_index.get("vectors", []) if entry.get("repo_id")}
 
-    # Prepare embeddable records.
-    from xists.search.embed import call_embeddings, embedding_text_from_record
-
+    # Prepare embeddable records and reuse unchanged vectors.
     embeddable: list[dict[str, Any]] = []
     for record in records:
         text = embedding_text_from_record(record)
@@ -224,7 +244,16 @@ def index_build(args: argparse.Namespace) -> int:
         if not text:
             skipped.append(repo_id or "<unknown>")
             continue
-        embeddable.append({"repo_id": repo_id, "text": text})
+        fingerprint = embedding_input_fingerprint(record)
+        existing = reusable_vectors.get(repo_id)
+        if existing and existing.get("embedding_input_fingerprint") == fingerprint:
+            vector = existing.get("vector") or []
+            if dimension is None:
+                dimension = len(vector)
+            if len(vector) == dimension:
+                vectors.append(existing)
+                continue
+        embeddable.append({"repo_id": repo_id, "text": text, "fingerprint": fingerprint})
 
     new_count = 0
     for start in range(0, len(embeddable), batch_size):
@@ -249,7 +278,13 @@ def index_build(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
                 return 1
-            vectors.append({"repo_id": item["repo_id"], "vector": vector})
+            vectors.append(
+                {
+                    "repo_id": item["repo_id"],
+                    "embedding_input_fingerprint": item["fingerprint"],
+                    "vector": vector,
+                }
+            )
             new_count += 1
 
         # Checkpoint: write after each batch.
@@ -258,19 +293,20 @@ def index_build(args: argparse.Namespace) -> int:
             index_version=INDEX_VERSION,
             embedding_model=config.model,
             embedding_base_url=config.base_url,
+            embedding_input_version=EMBEDDING_INPUT_VERSION,
             dimension=dimension,
             record_count=len(vectors),
             skipped=skipped,
             vectors=vectors,
         )
 
-    # Write final checkpoint if no batches were processed (empty input).
     if not embeddable:
         _index_write_checkpoint(
             args.output,
             index_version=INDEX_VERSION,
             embedding_model=config.model,
             embedding_base_url=config.base_url,
+            embedding_input_version=EMBEDDING_INPUT_VERSION,
             dimension=dimension,
             record_count=len(vectors),
             skipped=skipped,

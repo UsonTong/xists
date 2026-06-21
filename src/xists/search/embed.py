@@ -11,6 +11,7 @@ queries the repository is a poor fit for.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import urllib.error
@@ -19,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 USER_AGENT = "xists-embedding"
+EMBEDDING_INPUT_VERSION = 1
 
 
 class EmbeddingError(RuntimeError):
@@ -109,6 +111,21 @@ def embedding_text_from_record(record: dict[str, Any]) -> str:
     name = record.get("repo_id") or record.get("name")
     parts = ([str(name)] if name else []) + content
     return "\n".join(parts).strip()
+
+
+def embedding_input_fingerprint(record: dict[str, Any]) -> str | None:
+    text = embedding_text_from_record(record)
+    if not text:
+        return None
+    payload = json.dumps(
+        {
+            "embedding_input_version": EMBEDDING_INPUT_VERSION,
+            "text": text,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _parse_openai_response(data: Any, count: int) -> list[list[float]] | None:

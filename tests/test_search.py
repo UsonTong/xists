@@ -5,9 +5,11 @@ import pytest
 from xists.search.embed import (
     EmbeddingConfig,
     EmbeddingError,
+    EMBEDDING_INPUT_VERSION,
     EmbeddingNotConfiguredError,
     call_embeddings,
     embedding_config_from_env,
+    embedding_input_fingerprint,
     embedding_text_from_record,
 )
 from xists.search.index import build_index
@@ -66,6 +68,15 @@ def test_embedding_text_empty_when_no_signal():
     assert embedding_text_from_record({"repo_id": None}) == ""
 
 
+def test_embedding_input_fingerprint_changes_with_text():
+    record = make_record()
+    changed = make_record()
+    changed["llm_profile"]["summary"] = "A changed summary."
+
+    assert embedding_input_fingerprint(record) != embedding_input_fingerprint(changed)
+    assert embedding_input_fingerprint({"repo_id": None}) is None
+
+
 def test_call_embeddings_empty_input_returns_empty():
     assert call_embeddings(CONFIG, []) == []
 
@@ -91,9 +102,11 @@ def test_build_index_with_mock(monkeypatch):
     monkeypatch.setattr("xists.search.index.call_embeddings", fake_call)
     index = build_index(records, CONFIG)
     assert index["embedding_model"] == "bge-m3"
+    assert index["embedding_input_version"] == EMBEDDING_INPUT_VERSION
     assert index["dimension"] == 3
     assert index["record_count"] == 2
     assert index["skipped"] == []
+    assert index["vectors"][0]["embedding_input_fingerprint"] == embedding_input_fingerprint(records[0])
 
 
 def test_build_index_skips_empty_records(monkeypatch):

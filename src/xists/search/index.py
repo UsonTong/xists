@@ -14,9 +14,11 @@ from pathlib import Path
 from typing import Any
 
 from xists.search.embed import (
+    EMBEDDING_INPUT_VERSION,
     EmbeddingConfig,
     EmbeddingError,
     call_embeddings,
+    embedding_input_fingerprint,
     embedding_text_from_record,
 )
 
@@ -43,7 +45,7 @@ def build_index(
         if not text:
             skipped.append(repo_id or "<unknown>")
             continue
-        embeddable.append({"repo_id": repo_id, "text": text})
+        embeddable.append({"repo_id": repo_id, "text": text, "fingerprint": embedding_input_fingerprint(record)})
 
     vectors: list[dict[str, Any]] = []
     dimension: int | None = None
@@ -61,12 +63,19 @@ def build_index(
                 raise EmbeddingError(
                     f"Inconsistent embedding dimension: {len(vector)} vs {dimension}"
                 )
-            vectors.append({"repo_id": item["repo_id"], "vector": vector})
+            vectors.append(
+                {
+                    "repo_id": item["repo_id"],
+                    "embedding_input_fingerprint": item["fingerprint"],
+                    "vector": vector,
+                }
+            )
 
     return {
         "index_version": INDEX_VERSION,
         "embedding_model": config.model,
         "embedding_base_url": config.base_url,
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
         "dimension": dimension,
         "built_at": datetime.now(timezone.utc).isoformat(),
         "record_count": len(vectors),

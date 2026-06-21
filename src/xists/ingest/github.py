@@ -14,7 +14,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from xists import __version__
+
 GITHUB_API_BASE = "https://api.github.com"
+GITHUB_API_VERSION = "2022-11-28"
 USER_AGENT = "xists-record-ingest"
 
 
@@ -58,7 +61,7 @@ def request_json(path: str, token: str | None = None) -> dict[str, Any]:
     headers = {
         "Accept": "application/vnd.github+json",
         "User-Agent": USER_AGENT,
-        "X-GitHub-Api-Version": "2022-11-28",
+        "X-GitHub-Api-Version": GITHUB_API_VERSION,
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -240,6 +243,8 @@ def build_record(snapshot: GitHubSnapshot) -> dict[str, Any]:
 
     return {
         "schema_version": 1,
+        "xists_version": __version__,
+        "github_api_version": GITHUB_API_VERSION,
         "repo_id_requested": snapshot.requested_repo_id,
         "repo_id": metadata.get("full_name"),
         "platform": "github",

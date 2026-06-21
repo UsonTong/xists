@@ -120,7 +120,7 @@ This reads `records.json`, computes embeddings via the configured endpoint, and 
 
 #### Incremental update
 
-By default, `xists index build` is incremental. It skips repos that already have vectors in `index.json` and only embeds new records.
+By default, `xists index build` is incremental. It reuses an existing vector only when the repo id, embedding model, vector dimension, and embedding input fingerprint still match the current record. If the record content or embedding text logic changes, xists re-embeds that record automatically.
 
 #### Checkpoint / resume
 
@@ -175,11 +175,11 @@ See [Record Schema](record-schema.md) for the full format.
 
 ### `index.json`
 
-A JSON object containing the embedding index. Includes metadata (model, dimension, timestamp) and a vectors array mapping each repo_id to its embedding vector.
+A JSON object containing the embedding index. Includes metadata (model, dimension, timestamp, embedding input version) and a vectors array mapping each repo_id to its embedding vector and embedding input fingerprint.
 
 ### `report.json`
 
-A JSON report for the ingest run. Includes input count, skipped count (incremental), generated count, failed count, and details for each failure.
+A JSON report for the ingest run. Includes started_at, finished_at, duration_seconds, workers, force, xists_version, safe LLM config (provider/model/prompt_version only), input count, skipped count, generated count, failed count, and details for each failure. It never records API keys, tokens, or endpoint secrets.
 
 ## File management
 

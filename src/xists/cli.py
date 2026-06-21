@@ -23,7 +23,7 @@ from xists.search.embed import (
     EmbeddingNotConfiguredError,
     embedding_config_from_env,
 )
-from xists.search.index import build_index, load_index
+from xists.search.index import INDEX_VERSION, load_index
 from xists.search.query import IndexMismatchError, rank
 
 
@@ -67,23 +67,36 @@ def ingest_github(args: argparse.Namespace) -> int:
     repo_ids = load_repo_ids(args.repos)
     token = github_token_from_file(args.token_file) if args.token_file else github_token_from_env()
 
-    # Load existing records for incremental update.
+    # Load existing records for incremental update (skip with --force).
     existing: list[dict[str, Any]] = []
-    if args.output.exists():
+    if not args.force and args.output.exists():
         existing = json.loads(args.output.read_text(encoding="utf-8"))
     existing_ids = {record.get("repo_id") for record in existing}
     skipped = [repo_id for repo_id in repo_ids if repo_id in existing_ids]
     to_ingest = [repo_id for repo_id in repo_ids if repo_id not in existing_ids]
 
-    records: list[dict[str, Any]] = []
+    merged: list[dict[str, Any]] = list(existing)
     failed: list[dict[str, Any]] = []
+    generated = 0
+    with_readme = 0
+    without_readme = 0
+    abstained = 0
 
     for repo_id in to_ingest:
         try:
             record = collect_record(repo_id, token=token)
             profile = generate_llm_profile(record, llm_config)
             attach_llm_profile(record, profile)
-            records.append(record)
+            merged.append(record)
+            generated += 1
+            if record.get("readme"):
+                with_readme += 1
+            else:
+                without_readme += 1
+            if (record.get("llm_profile") or {}).get("abstained"):
+                abstained += 1
+            # Checkpoint: write after each successful record.
+            write_json(args.output, merged)
         except GitHubAPIError as error:
             failed.append(
                 {
@@ -109,22 +122,17 @@ def ingest_github(args: argparse.Namespace) -> int:
                 }
             )
 
-    merged = existing + records
-
     report = {
         "input_count": len(repo_ids),
         "skipped_count": len(skipped),
-        "generated_count": len(records),
+        "generated_count": generated,
         "failed_count": len(failed),
         "failed": failed,
-        "records_with_readme": sum(1 for record in records if record.get("readme")),
-        "records_without_readme": sum(1 for record in records if not record.get("readme")),
-        "records_abstained": sum(
-            1 for record in records if (record.get("llm_profile") or {}).get("abstained")
-        ),
+        "records_with_readme": with_readme,
+        "records_without_readme": without_readme,
+        "records_abstained": abstained,
     }
 
-    write_json(args.output, merged)
     if args.report:
         write_json(args.report, report)
 
@@ -134,6 +142,32 @@ def ingest_github(args: argparse.Namespace) -> int:
         indent=2,
     ))
     return 1 if failed else 0
+
+
+def _index_write_checkpoint(
+    output: Path,
+    *,
+    index_version: int,
+    embedding_model: str,
+    embedding_base_url: str,
+    dimension: int | None,
+    record_count: int,
+    skipped: list[str],
+    vectors: list[dict[str, Any]],
+) -> None:
+    write_json(
+        output,
+        {
+            "index_version": index_version,
+            "embedding_model": embedding_model,
+            "embedding_base_url": embedding_base_url,
+            "dimension": dimension,
+            "built_at": datetime.now(timezone.utc).isoformat(),
+            "record_count": record_count,
+            "skipped": skipped,
+            "vectors": vectors,
+        },
+    )
 
 
 def index_build(args: argparse.Namespace) -> int:
@@ -148,10 +182,14 @@ def index_build(args: argparse.Namespace) -> int:
         return 2
 
     records = json.loads(args.records.read_text(encoding="utf-8"))
+    batch_size = 64
 
-    # Load existing index for incremental update.
-    existing_index: dict[str, Any] | None = None
-    if args.output.exists():
+    # Load existing index for incremental update (skip with --force).
+    vectors: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    dimension: int | None = None
+
+    if not args.force and args.output.exists():
         existing_index = json.loads(args.output.read_text(encoding="utf-8"))
         if existing_index.get("embedding_model") and existing_index["embedding_model"] != config.model:
             print(
@@ -161,36 +199,84 @@ def index_build(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        existing_ids = {entry.get("repo_id") for entry in existing_index.get("vectors", [])}
+        vectors = existing_index.get("vectors", [])
+        skipped = existing_index.get("skipped", [])
+        dimension = existing_index.get("dimension")
+        existing_ids = {entry.get("repo_id") for entry in vectors}
         records = [r for r in records if (r.get("repo_id") or r.get("repo_id_requested")) not in existing_ids]
 
-    try:
-        new_index = build_index(records, config)
-    except EmbeddingError as error:
-        print(str(error), file=sys.stderr)
-        return 1
+    # Prepare embeddable records.
+    from xists.search.embed import call_embeddings, embedding_text_from_record
 
-    if existing_index and existing_index.get("vectors"):
-        merged = {
-            **new_index,
-            "built_at": datetime.now(timezone.utc).isoformat(),
-            "record_count": len(existing_index["vectors"]) + new_index["record_count"],
-            "skipped": (existing_index.get("skipped") or []) + new_index["skipped"],
-            "vectors": existing_index["vectors"] + new_index["vectors"],
-        }
-    else:
-        merged = new_index
+    embeddable: list[dict[str, Any]] = []
+    for record in records:
+        text = embedding_text_from_record(record)
+        repo_id = record.get("repo_id") or record.get("repo_id_requested")
+        if not text:
+            skipped.append(repo_id or "<unknown>")
+            continue
+        embeddable.append({"repo_id": repo_id, "text": text})
 
-    write_json(args.output, merged)
+    new_count = 0
+    for start in range(0, len(embeddable), batch_size):
+        batch = embeddable[start : start + batch_size]
+        try:
+            results = call_embeddings(config, [item["text"] for item in batch])
+        except EmbeddingError as error:
+            print(str(error), file=sys.stderr)
+            return 1
+        if len(results) != len(batch):
+            print(
+                f"Embedding count mismatch: sent {len(batch)}, received {len(results)}",
+                file=sys.stderr,
+            )
+            return 1
+        for item, vector in zip(batch, results):
+            if dimension is None:
+                dimension = len(vector)
+            elif len(vector) != dimension:
+                print(
+                    f"Inconsistent embedding dimension: {len(vector)} vs {dimension}",
+                    file=sys.stderr,
+                )
+                return 1
+            vectors.append({"repo_id": item["repo_id"], "vector": vector})
+            new_count += 1
+
+        # Checkpoint: write after each batch.
+        _index_write_checkpoint(
+            args.output,
+            index_version=INDEX_VERSION,
+            embedding_model=config.model,
+            embedding_base_url=config.base_url,
+            dimension=dimension,
+            record_count=len(vectors),
+            skipped=skipped,
+            vectors=vectors,
+        )
+
+    # Write final checkpoint if no batches were processed (empty input).
+    if not embeddable:
+        _index_write_checkpoint(
+            args.output,
+            index_version=INDEX_VERSION,
+            embedding_model=config.model,
+            embedding_base_url=config.base_url,
+            dimension=dimension,
+            record_count=len(vectors),
+            skipped=skipped,
+            vectors=vectors,
+        )
+
     print(
         json.dumps(
             {
                 "index": str(args.output),
-                "embedding_model": merged["embedding_model"],
-                "dimension": merged["dimension"],
-                "record_count": merged["record_count"],
-                "new_vectors": new_index["record_count"],
-                "skipped": merged["skipped"],
+                "embedding_model": config.model,
+                "dimension": dimension,
+                "record_count": len(vectors),
+                "new_vectors": new_count,
+                "skipped": skipped,
             },
             ensure_ascii=False,
             indent=2,
@@ -233,6 +319,7 @@ def build_parser() -> argparse.ArgumentParser:
     github.add_argument("--output", type=Path, default=Path("records.json"), help="Path to write records JSON")
     github.add_argument("--report", type=Path, default=Path("report.json"), help="Path to write generation report JSON")
     github.add_argument("--token-file", type=Path, default=None, help="Optional file containing a GitHub token")
+    github.add_argument("--force", action="store_true", help="Ignore existing records.json and reprocess all repos")
     github.set_defaults(func=ingest_github)
 
     index = subparsers.add_parser("index", help="Build the embedding index")
@@ -240,6 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
     index_build_parser = index_subparsers.add_parser("build", help="Build an embedding index from records")
     index_build_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to index")
     index_build_parser.add_argument("--output", type=Path, default=Path("index.json"), help="Path to write the embedding index")
+    index_build_parser.add_argument("--force", action="store_true", help="Ignore existing index.json and rebuild from scratch")
     index_build_parser.set_defaults(func=index_build)
 
     search_parser = subparsers.add_parser("search", help="Search the embedding index")

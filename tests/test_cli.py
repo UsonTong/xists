@@ -69,6 +69,15 @@ def test_ingest_github_parser_uses_default_paths():
     assert args.repos == Path("repos.txt")
     assert args.output == Path("records.json")
     assert args.report == Path("report.json")
+    assert args.github_api == "rest"
+    assert args.github_batch_size == 1
+
+
+def test_ingest_github_parser_accepts_graphql_backend():
+    args = build_parser().parse_args(["ingest", "github", "--github-api", "graphql", "--github-batch-size", "25"])
+
+    assert args.github_api == "graphql"
+    assert args.github_batch_size == 25
 
 
 def test_ingest_github_parser_accepts_custom_paths():
@@ -97,6 +106,50 @@ def _make_record(repo_id: str) -> dict:
         "github": {"description": f"{repo_id} description", "topics": [], "language": "Python"},
         "llm_profile": {"summary": f"{repo_id} summary", "confidence": "high", "abstained": False},
     }
+
+
+def test_ingest_github_uses_graphql_batches(tmp_path, monkeypatch):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\nc/d\ne/f\n", encoding="utf-8")
+
+    output_file = tmp_path / "records.json"
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    batches = []
+
+    def fake_collect(repo_ids, *, token=None):
+        batches.append((list(repo_ids), token))
+        return [_make_record(repo_id) for repo_id in repo_ids]
+
+    def fake_generate(record, config, *, caller=None):
+        return record.get("llm_profile", {})
+
+    args = build_parser().parse_args(
+        [
+            "ingest", "github",
+            "--repos", str(repos_file),
+            "--output", str(output_file),
+            "--report", str(tmp_path / "report.json"),
+            "--github-api", "graphql",
+            "--github-batch-size", "2",
+        ]
+    )
+
+    with patch("xists.cli.collect_records_graphql", side_effect=fake_collect), \
+         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+        code = ingest_github(args)
+
+    assert code == 0
+    assert batches == [(["a/b", "c/d"], "tok"), (["e/f"], "tok")]
+    saved = json.loads(output_file.read_text())
+    assert [r["repo_id"] for r in saved] == ["a/b", "c/d", "e/f"]
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert report["github_api"] == "graphql"
+    assert report["github_batch_size"] == 2
 
 
 def test_ingest_github_skips_existing_records(tmp_path, monkeypatch):
@@ -141,6 +194,8 @@ def test_ingest_github_skips_existing_records(tmp_path, monkeypatch):
     assert report["duration_seconds"] >= 0
     assert report["workers"] == 1
     assert report["force"] is False
+    assert report["github_api"] == "rest"
+    assert report["github_batch_size"] == 1
     assert report["xists_version"]
     assert report["llm"] == {
         "provider": "openai_compatible",

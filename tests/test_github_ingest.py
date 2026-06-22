@@ -7,8 +7,11 @@ from xists.ingest.github import (
     GITHUB_API_VERSION,
     GitHubSnapshot,
     TokenPool,
+    build_graphql_batch_query,
     build_record,
     clean_readme_excerpt,
+    fetch_snapshot_graphql,
+    fetch_snapshots_graphql,
     evidence_gaps,
     github_token_from_env,
     github_token_from_file,
@@ -289,6 +292,165 @@ def test_github_token_from_file_skips_blank_lines(tmp_path):
     token_file = tmp_path / "tokens"
     token_file.write_text("tok_a\n\ntok_b\n  \ntok_c\n", encoding="utf-8")
     assert github_token_from_file(token_file) == ["tok_a", "tok_b", "tok_c"]
+
+
+# --- GraphQL snapshot tests ---
+
+
+def test_build_graphql_batch_query_aliases_multiple_repositories():
+    query, variables, aliases = build_graphql_batch_query(["facebook/react", "vuejs/core"])
+
+    assert "r0: repository(owner: $owner0, name: $name0)" in query
+    assert "r1: repository(owner: $owner1, name: $name1)" in query
+    assert "fragment RepoSnapshotFields on Repository" in query
+    assert variables == {"owner0": "facebook", "name0": "react", "owner1": "vuejs", "name1": "core"}
+    assert aliases == {"r0": ("facebook/react", "facebook"), "r1": ("vuejs/core", "vuejs")}
+
+
+def test_fetch_snapshot_graphql_maps_repository_payload(monkeypatch):
+    def fake_request(query, variables, *, token=None):
+        assert variables == {"owner": "facebook", "name": "react"}
+        assert token == "tok"
+        return {
+            "data": {
+                "repository": {
+                    "nameWithOwner": "facebook/react",
+                    "name": "react",
+                    "url": "https://github.com/facebook/react",
+                    "description": "The library for web and native user interfaces.",
+                    "stargazerCount": 245995,
+                    "forkCount": 49277,
+                    "primaryLanguage": {"name": "JavaScript"},
+                    "licenseInfo": {"spdxId": "MIT"},
+                    "isArchived": False,
+                    "isDisabled": False,
+                    "homepageUrl": "https://react.dev",
+                    "createdAt": "2013-05-24T16:15:54Z",
+                    "updatedAt": "2026-06-19T00:00:00Z",
+                    "pushedAt": "2026-06-19T00:00:00Z",
+                    "issues": {"totalCount": 1900},
+                    "pullRequests": {"totalCount": 100},
+                    "defaultBranchRef": {"name": "main"},
+                    "repositoryTopics": {
+                        "nodes": [
+                            {"topic": {"name": "javascript"}},
+                            {"topic": {"name": "react"}},
+                        ]
+                    },
+                    "readmeMd": {"text": "# React"},
+                    "readmeMarkdown": None,
+                    "readmeRst": None,
+                    "readmeTxt": None,
+                    "readmePlain": None,
+                    "readmemd": None,
+                    "readmeMarkdownLower": None,
+                    "readmeRstLower": None,
+                    "readmeTxtLower": None,
+                    "readmePlainLower": None,
+                    "readmeMdMixed": None,
+                    "readmeMarkdownMixed": None,
+                    "readmeMixed": None,
+                    "tree": {
+                        "entries": [
+                            {"name": "README.md", "type": "blob",
+                             "object": {"entries": []}},
+                            {"name": "packages", "type": "tree",
+                             "object": {"entries": [
+                                 {"name": "react", "type": "tree",
+                                  "object": {"entries": [
+                                      {"name": "__tests__", "type": "tree"}
+                                  ]}}
+                             ]}},
+                        ]
+                    },
+                }
+            }
+        }
+
+    monkeypatch.setattr("xists.ingest.github.request_graphql", fake_request)
+
+    snapshot = fetch_snapshot_graphql("facebook/react", token="tok")
+
+    assert snapshot.requested_repo_id == "facebook/react"
+    assert snapshot.metadata["full_name"] == "facebook/react"
+    assert snapshot.metadata["topics"] == ["javascript", "react"]
+    assert snapshot.metadata["language"] == "JavaScript"
+    assert snapshot.metadata["open_issues_count"] == 2000
+    assert snapshot.readme["path"] == "README.md"
+    assert snapshot.readme_text == "# React"
+    paths = tree_paths(snapshot.tree)
+    assert "README.md" in paths
+    assert "packages/react" in paths
+    assert "packages/react/__tests__" in paths
+
+
+def test_fetch_snapshots_graphql_maps_multiple_repositories(monkeypatch):
+    def fake_request(query, variables, *, token=None):
+        assert token == "tok"
+        return {
+            "data": {
+                "r0": {
+                    "nameWithOwner": "facebook/react",
+                    "name": "react",
+                    "url": "https://github.com/facebook/react",
+                    "description": "React",
+                    "stargazerCount": 1,
+                    "forkCount": 2,
+                    "primaryLanguage": {"name": "JavaScript"},
+                    "licenseInfo": {"spdxId": "MIT"},
+                    "isArchived": False,
+                    "isDisabled": False,
+                    "homepageUrl": None,
+                    "createdAt": "2020-01-01T00:00:00Z",
+                    "updatedAt": "2020-01-02T00:00:00Z",
+                    "pushedAt": "2020-01-03T00:00:00Z",
+                    "issues": {"totalCount": 3},
+                    "pullRequests": {"totalCount": 7},
+                    "defaultBranchRef": {"name": "main"},
+                    "repositoryTopics": {"nodes": []},
+                    "readmeMd": {"text": "# React"},
+                    "readmeMarkdown": None, "readmeRst": None, "readmeTxt": None, "readmePlain": None,
+                    "readmemd": None, "readmeMarkdownLower": None, "readmeRstLower": None,
+                    "readmeTxtLower": None, "readmePlainLower": None, "readmeMdMixed": None,
+                    "readmeMarkdownMixed": None, "readmeMixed": None,
+                    "tree": {"entries": []},
+                },
+                "r1": {
+                    "nameWithOwner": "vuejs/core",
+                    "name": "core",
+                    "url": "https://github.com/vuejs/core",
+                    "description": "Vue",
+                    "stargazerCount": 4,
+                    "forkCount": 5,
+                    "primaryLanguage": {"name": "TypeScript"},
+                    "licenseInfo": {"spdxId": "MIT"},
+                    "isArchived": False,
+                    "isDisabled": False,
+                    "homepageUrl": None,
+                    "createdAt": "2020-01-01T00:00:00Z",
+                    "updatedAt": "2020-01-02T00:00:00Z",
+                    "pushedAt": "2020-01-03T00:00:00Z",
+                    "issues": {"totalCount": 6},
+                    "pullRequests": {"totalCount": 8},
+                    "defaultBranchRef": {"name": "main"},
+                    "repositoryTopics": {"nodes": []},
+                    "readmeMd": {"text": "# Vue"},
+                    "readmeMarkdown": None, "readmeRst": None, "readmeTxt": None, "readmePlain": None,
+                    "readmemd": None, "readmeMarkdownLower": None, "readmeRstLower": None,
+                    "readmeTxtLower": None, "readmePlainLower": None, "readmeMdMixed": None,
+                    "readmeMarkdownMixed": None, "readmeMixed": None,
+                    "tree": {"entries": []},
+                },
+            }
+        }
+
+    monkeypatch.setattr("xists.ingest.github.request_graphql", fake_request)
+
+    snapshots = fetch_snapshots_graphql(["facebook/react", "vuejs/core"], token="tok")
+
+    assert [s.metadata["full_name"] for s in snapshots] == ["facebook/react", "vuejs/core"]
+    assert [s.readme_text for s in snapshots] == ["# React", "# Vue"]
+    assert [s.metadata["open_issues_count"] for s in snapshots] == [10, 14]
 
 
 def test_github_token_from_file_returns_empty_for_missing_file(tmp_path):

@@ -1,12 +1,16 @@
+import threading
+
 import pytest
 
 from xists import __version__
 from xists.ingest.github import (
     GITHUB_API_VERSION,
     GitHubSnapshot,
+    TokenPool,
     build_record,
     clean_readme_excerpt,
     evidence_gaps,
+    github_token_from_env,
     github_token_from_file,
     parse_github_repo,
     structure_signals,
@@ -121,15 +125,15 @@ def test_github_token_from_file_reads_trimmed_token(tmp_path):
     token_file = tmp_path / "github-token"
     token_file.write_text(" token-value\n", encoding="utf-8")
 
-    assert github_token_from_file(token_file) == "token-value"
+    assert github_token_from_file(token_file) == ["token-value"]
 
 
-def test_github_token_from_file_returns_none_for_missing_or_empty_file(tmp_path):
-    assert github_token_from_file(tmp_path / "missing") is None
+def test_github_token_from_file_returns_empty_for_missing_or_empty_file(tmp_path):
+    assert github_token_from_file(tmp_path / "missing") == []
 
     token_file = tmp_path / "empty"
     token_file.write_text("\n", encoding="utf-8")
-    assert github_token_from_file(token_file) is None
+    assert github_token_from_file(token_file) == []
 
 
 def test_build_record_creates_traceable_record():
@@ -200,3 +204,92 @@ def test_build_record_creates_traceable_record():
     assert record["lifecycle_state"] == "candidate"
     assert record["snapshot_source"] == "github_api"
     assert record["snapshot_time"].endswith("+00:00")
+
+
+# --- TokenPool tests ---
+
+
+def test_token_pool_round_robin():
+    pool = TokenPool(["tok_a", "tok_b", "tok_c"])
+    assert pool.next_token() == "tok_a"
+    assert pool.next_token() == "tok_b"
+    assert pool.next_token() == "tok_c"
+    assert pool.next_token() == "tok_a"  # wraps around
+
+
+def test_token_pool_empty_returns_none():
+    pool = TokenPool([])
+    assert pool.next_token() is None
+
+
+def test_token_pool_single_token():
+    pool = TokenPool(["only_tok"])
+    assert pool.next_token() == "only_tok"
+    assert pool.next_token() == "only_tok"
+
+
+def test_token_pool_thread_safety():
+    pool = TokenPool(["tok_a", "tok_b", "tok_c"])
+    results: list[str] = []
+    lock = threading.Lock()
+
+    def collect():
+        for _ in range(100):
+            token = pool.next_token()
+            with lock:
+                results.append(token)
+
+    threads = [threading.Thread(target=collect) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len(results) == 400
+    assert all(t in ("tok_a", "tok_b", "tok_c") for t in results)
+
+
+# --- github_token_from_env tests ---
+
+
+def test_github_token_from_env_returns_single_token(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "single_tok")
+    monkeypatch.delenv("GITHUB_TOKENS", raising=False)
+    assert github_token_from_env() == ["single_tok"]
+
+
+def test_github_token_from_env_returns_multiple_tokens(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKENS", "tok1, tok2, tok3")
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    assert github_token_from_env() == ["tok1", "tok2", "tok3"]
+
+
+def test_github_token_from_env_tokens_overrides_single(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKENS", "tok1,tok2")
+    monkeypatch.setenv("GITHUB_TOKEN", "single_tok")
+    assert github_token_from_env() == ["tok1", "tok2"]
+
+
+def test_github_token_from_env_returns_empty_when_unset(monkeypatch):
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_TOKENS", raising=False)
+    assert github_token_from_env() == []
+
+
+# --- github_token_from_file with multiple lines ---
+
+
+def test_github_token_from_file_reads_multiple_tokens(tmp_path):
+    token_file = tmp_path / "tokens"
+    token_file.write_text("tok_a\ntok_b\ntok_c\n", encoding="utf-8")
+    assert github_token_from_file(token_file) == ["tok_a", "tok_b", "tok_c"]
+
+
+def test_github_token_from_file_skips_blank_lines(tmp_path):
+    token_file = tmp_path / "tokens"
+    token_file.write_text("tok_a\n\ntok_b\n  \ntok_c\n", encoding="utf-8")
+    assert github_token_from_file(token_file) == ["tok_a", "tok_b", "tok_c"]
+
+
+def test_github_token_from_file_returns_empty_for_missing_file(tmp_path):
+    assert github_token_from_file(tmp_path / "missing") == []

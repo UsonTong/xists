@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from xists import __version__
-from xists.ingest.github import GitHubAPIError, collect_record, github_token_from_env, github_token_from_file, parse_github_repo
+from xists.ingest.github import GitHubAPIError, TokenPool, collect_record, github_token_from_env, github_token_from_file, parse_github_repo
 from xists.profile.llm import (
     LLMError,
     LLMNotConfiguredError,
@@ -65,10 +65,10 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _ingest_one(repo_id: str, token: str | None, llm_config: Any) -> dict[str, Any]:
+def _ingest_one(repo_id: str, token_pool: TokenPool, llm_config: Any) -> dict[str, Any]:
     """Ingest a single repo. Returns a result dict with either 'record' or 'error'."""
     try:
-        record = collect_record(repo_id, token=token)
+        record = collect_record(repo_id, token=token_pool.next_token())
         profile = generate_llm_profile(record, llm_config)
         attach_llm_profile(record, profile)
         return {"repo_id": repo_id, "record": record}
@@ -91,7 +91,8 @@ def ingest_github(args: argparse.Namespace) -> int:
         return 2
 
     repo_ids = load_repo_ids(args.repos)
-    token = github_token_from_file(args.token_file) if args.token_file else github_token_from_env()
+    tokens = github_token_from_file(args.token_file) if args.token_file else github_token_from_env()
+    token_pool = TokenPool(tokens)
 
     # Load existing records for incremental update (skip with --force).
     existing: list[dict[str, Any]] = []
@@ -128,7 +129,7 @@ def ingest_github(args: argparse.Namespace) -> int:
         # Multi-threaded: process repos concurrently, write checkpoint after all complete.
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
-                executor.submit(_ingest_one, repo_id, token, llm_config): repo_id
+                executor.submit(_ingest_one, repo_id, token_pool, llm_config): repo_id
                 for repo_id in to_ingest
             }
             for future in as_completed(futures):
@@ -138,7 +139,7 @@ def ingest_github(args: argparse.Namespace) -> int:
     else:
         # Single-threaded: process one by one with checkpoint after each.
         for repo_id in to_ingest:
-            process_result(_ingest_one(repo_id, token, llm_config))
+            process_result(_ingest_one(repo_id, token_pool, llm_config))
             write_json(args.output, merged)
 
     finished_at = datetime.now(timezone.utc)
@@ -148,6 +149,7 @@ def ingest_github(args: argparse.Namespace) -> int:
         "duration_seconds": time.perf_counter() - start_time,
         "xists_version": __version__,
         "workers": workers,
+        "token_count": len(tokens),
         "force": bool(args.force),
         "llm": {
             "provider": "openai_compatible",

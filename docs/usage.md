@@ -22,7 +22,10 @@ Edit `.env` and configure your credentials:
 
 ```env
 # GitHub (required for ingest)
+# Single token:
 GITHUB_TOKEN=your_github_token_here
+# Multiple tokens (comma-separated, for higher rate limits):
+# GITHUB_TOKENS=tok1,tok2,tok3
 
 # LLM (required for ingest)
 LLM_API_KEY=your_llm_api_key_here
@@ -36,6 +39,24 @@ EMBEDDING_MODEL=text-embedding-3-small
 ```
 
 All three sections are required for the full workflow. `.env` is ignored by Git.
+
+#### Multiple GitHub tokens
+
+For large ingestion jobs, a single GitHub token may hit rate limits (5000 requests/hour). Configure multiple tokens to distribute requests across them with round-robin rotation:
+
+```env
+GITHUB_TOKENS=ghp_token1,ghp_token2,ghp_token3
+```
+
+Alternatively, use `--token-file` with one token per line:
+
+```text
+ghp_token1
+ghp_token2
+ghp_token3
+```
+
+When multiple tokens are configured, each API request rotates to the next token, effectively multiplying your available rate limit. This is especially useful with `--workers` for concurrent ingestion.
 
 ## Create a repository list
 
@@ -71,7 +92,7 @@ This fetches data from GitHub, generates LLM profiles, and writes `records.json`
 | `--repos` | `repos.txt` | Input file with one repo per line |
 | `--output` | `records.json` | Output records file |
 | `--report` | `report.json` | Output report file |
-| `--token-file` | (none) | File containing GitHub token instead of env var |
+| `--token-file` | (none) | File containing GitHub token(s), one per line |
 | `--force` | off | Ignore existing records.json and reprocess all repos |
 | `--workers` | `1` | Number of concurrent workers |
 

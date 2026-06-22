@@ -13,7 +13,16 @@ from pathlib import Path
 from typing import Any
 
 from xists import __version__
-from xists.ingest.github import GitHubAPIError, TokenPool, collect_record, github_token_from_env, github_token_from_file, parse_github_repo
+from xists.ingest.github import (
+    GitHubAPIError,
+    TokenPool,
+    collect_record,
+    collect_record_graphql,
+    collect_records_graphql,
+    github_token_from_env,
+    github_token_from_file,
+    parse_github_repo,
+)
 from xists.profile.llm import (
     LLMError,
     LLMNotConfiguredError,
@@ -65,10 +74,11 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _ingest_one(repo_id: str, token_pool: TokenPool, llm_config: Any) -> dict[str, Any]:
+def _ingest_one(repo_id: str, token_pool: TokenPool, llm_config: Any, github_api: str = "rest") -> dict[str, Any]:
     """Ingest a single repo. Returns a result dict with either 'record' or 'error'."""
     try:
-        record = collect_record(repo_id, token=token_pool.next_token())
+        collector = collect_record_graphql if github_api == "graphql" else collect_record
+        record = collector(repo_id, token=token_pool.next_token())
         profile = generate_llm_profile(record, llm_config)
         attach_llm_profile(record, profile)
         return {"repo_id": repo_id, "record": record}
@@ -78,6 +88,38 @@ def _ingest_one(repo_id: str, token_pool: TokenPool, llm_config: Any) -> dict[st
         return {"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": None}}
     except Exception as error:
         return {"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": None}}
+
+
+def _ingest_graphql_batch(repo_ids: list[str], token_pool: TokenPool, llm_config: Any) -> list[dict[str, Any]]:
+    """Fetch multiple repos in one GraphQL request, then generate LLM profiles per record."""
+    try:
+        records = collect_records_graphql(repo_ids, token=token_pool.next_token())
+    except GitHubAPIError as error:
+        return [
+            {"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": error.status}}
+            for repo_id in repo_ids
+        ]
+    except Exception as error:
+        return [
+            {"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": None}}
+            for repo_id in repo_ids
+        ]
+
+    results: list[dict[str, Any]] = []
+    for repo_id, record in zip(repo_ids, records):
+        try:
+            profile = generate_llm_profile(record, llm_config)
+            attach_llm_profile(record, profile)
+            results.append({"repo_id": repo_id, "record": record})
+        except LLMError as error:
+            results.append({"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": None}})
+        except Exception as error:
+            results.append({"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": None}})
+    return results
+
+
+def _chunks(items: list[str], size: int) -> list[list[str]]:
+    return [items[i : i + size] for i in range(0, len(items), size)]
 
 
 def ingest_github(args: argparse.Namespace) -> int:
@@ -109,6 +151,8 @@ def ingest_github(args: argparse.Namespace) -> int:
     without_readme = 0
     abstained = 0
     workers = getattr(args, "workers", 1) or 1
+    github_api = getattr(args, "github_api", "rest")
+    github_batch_size = getattr(args, "github_batch_size", 1) or 1
 
     def process_result(result: dict[str, Any]) -> None:
         nonlocal generated, with_readme, without_readme, abstained
@@ -125,11 +169,28 @@ def ingest_github(args: argparse.Namespace) -> int:
         if (record.get("llm_profile") or {}).get("abstained"):
             abstained += 1
 
-    if workers > 1 and to_ingest:
+    if github_api == "graphql" and github_batch_size > 1 and to_ingest:
+        batches = _chunks(to_ingest, github_batch_size)
+        if workers > 1:
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(_ingest_graphql_batch, batch, token_pool, llm_config): batch
+                    for batch in batches
+                }
+                for future in as_completed(futures):
+                    for result in future.result():
+                        process_result(result)
+                    write_json(args.output, merged)
+        else:
+            for batch in batches:
+                for result in _ingest_graphql_batch(batch, token_pool, llm_config):
+                    process_result(result)
+                write_json(args.output, merged)
+    elif workers > 1 and to_ingest:
         # Multi-threaded: process repos concurrently, write checkpoint after all complete.
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
-                executor.submit(_ingest_one, repo_id, token_pool, llm_config): repo_id
+                executor.submit(_ingest_one, repo_id, token_pool, llm_config, github_api): repo_id
                 for repo_id in to_ingest
             }
             for future in as_completed(futures):
@@ -139,7 +200,7 @@ def ingest_github(args: argparse.Namespace) -> int:
     else:
         # Single-threaded: process one by one with checkpoint after each.
         for repo_id in to_ingest:
-            process_result(_ingest_one(repo_id, token_pool, llm_config))
+            process_result(_ingest_one(repo_id, token_pool, llm_config, github_api))
             write_json(args.output, merged)
 
     finished_at = datetime.now(timezone.utc)
@@ -151,6 +212,8 @@ def ingest_github(args: argparse.Namespace) -> int:
         "workers": workers,
         "token_count": len(tokens),
         "force": bool(args.force),
+        "github_api": github_api,
+        "github_batch_size": github_batch_size,
         "llm": {
             "provider": "openai_compatible",
             "model": llm_config.model,
@@ -368,6 +431,18 @@ def build_parser() -> argparse.ArgumentParser:
     github.add_argument("--token-file", type=Path, default=None, help="Optional file containing a GitHub token")
     github.add_argument("--force", action="store_true", help="Ignore existing records.json and reprocess all repos")
     github.add_argument("--workers", type=int, default=1, help="Number of concurrent workers (default: 1)")
+    github.add_argument(
+        "--github-api",
+        choices=("rest", "graphql"),
+        default="rest",
+        help="GitHub API backend: rest (default) or graphql (lower quota usage)",
+    )
+    github.add_argument(
+        "--github-batch-size",
+        type=int,
+        default=1,
+        help="Repos per GraphQL request when --github-api=graphql (default: 1, recommended: 25-50)",
+    )
     github.set_defaults(func=ingest_github)
 
     index = subparsers.add_parser("index", help="Build the embedding index")

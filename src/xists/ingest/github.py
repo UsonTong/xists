@@ -18,8 +18,87 @@ from typing import Any
 from xists import __version__
 
 GITHUB_API_BASE = "https://api.github.com"
+GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 GITHUB_API_VERSION = "2022-11-28"
 USER_AGENT = "xists-record-ingest"
+README_CANDIDATES = (
+    "README.md", "README.markdown", "README.rst", "README.txt", "README",
+    "readme.md", "readme.markdown", "readme.rst", "readme.txt", "readme",
+    "Readme.md", "Readme.markdown", "Readme",
+)
+
+GRAPHQL_REPOSITORY_FRAGMENT = """
+fragment RepoSnapshotFields on Repository {
+  nameWithOwner
+  name
+  url
+  description
+  stargazerCount
+  forkCount
+  primaryLanguage { name }
+  licenseInfo { spdxId }
+  isArchived
+  isDisabled
+  homepageUrl
+  createdAt
+  updatedAt
+  pushedAt
+  issues(states: OPEN) { totalCount }
+  pullRequests(states: OPEN) { totalCount }
+  defaultBranchRef { name }
+  repositoryTopics(first: 100) { nodes { topic { name } } }
+  readmeMd: object(expression: "HEAD:README.md") { ... on Blob { text } }
+  readmeMarkdown: object(expression: "HEAD:README.markdown") { ... on Blob { text } }
+  readmeRst: object(expression: "HEAD:README.rst") { ... on Blob { text } }
+  readmeTxt: object(expression: "HEAD:README.txt") { ... on Blob { text } }
+  readmePlain: object(expression: "HEAD:README") { ... on Blob { text } }
+  readmemd: object(expression: "HEAD:readme.md") { ... on Blob { text } }
+  readmeMarkdownLower: object(expression: "HEAD:readme.markdown") { ... on Blob { text } }
+  readmeRstLower: object(expression: "HEAD:readme.rst") { ... on Blob { text } }
+  readmeTxtLower: object(expression: "HEAD:readme.txt") { ... on Blob { text } }
+  readmePlainLower: object(expression: "HEAD:readme") { ... on Blob { text } }
+  readmeMdMixed: object(expression: "HEAD:Readme.md") { ... on Blob { text } }
+  readmeMarkdownMixed: object(expression: "HEAD:Readme.markdown") { ... on Blob { text } }
+  readmeMixed: object(expression: "HEAD:Readme") { ... on Blob { text } }
+  tree: object(expression: "HEAD:") {
+    ... on Tree {
+      entries {
+        name
+        type
+        ... on TreeEntry {
+          object {
+            ... on Tree {
+              entries {
+                name
+                type
+                ... on TreeEntry {
+                  object {
+                    ... on Tree {
+                      entries {
+                        name
+                        type
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+GRAPHQL_REPO_SNAPSHOT_QUERY = """
+query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    ...RepoSnapshotFields
+  }
+  rateLimit { cost remaining limit resetAt }
+}
+""" + GRAPHQL_REPOSITORY_FRAGMENT
 
 
 class GitHubAPIError(RuntimeError):
@@ -96,6 +175,165 @@ def request_json(path: str, token: str | None = None) -> dict[str, Any]:
         except Exception:
             message = str(error)
         raise GitHubAPIError(message, status=error.code) from error
+
+
+def request_graphql(query: str, variables: dict[str, Any], token: str | None = None) -> dict[str, Any]:
+    if not token:
+        raise GitHubAPIError("GitHub GraphQL API requires GITHUB_TOKEN")
+
+    body = json.dumps({"query": query, "variables": variables}).encode("utf-8")
+    request = urllib.request.Request(
+        GITHUB_GRAPHQL_URL,
+        data=body,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        try:
+            payload = json.loads(error.read().decode("utf-8"))
+            message = payload.get("message") or str(error)
+        except Exception:
+            message = str(error)
+        raise GitHubAPIError(message, status=error.code) from error
+
+    errors = payload.get("errors") or []
+    if errors:
+        message = "; ".join(err.get("message", "GraphQL error") for err in errors)
+        raise GitHubAPIError(message)
+    return payload
+
+
+def _snapshot_from_graphql_repository(requested: str, owner: str, repository: dict[str, Any]) -> GitHubSnapshot:
+    repo_url = repository.get("url")
+    topics = [
+        node["topic"]["name"]
+        for node in (repository.get("repositoryTopics") or {}).get("nodes", [])
+        if node.get("topic", {}).get("name")
+    ]
+    open_issues = (repository.get("issues") or {}).get("totalCount", 0)
+    open_prs = (repository.get("pullRequests") or {}).get("totalCount", 0)
+    metadata = {
+        "full_name": repository.get("nameWithOwner"),
+        "owner": {"login": owner},
+        "name": repository.get("name"),
+        "html_url": repo_url,
+        "description": repository.get("description"),
+        "topics": topics,
+        "stargazers_count": repository.get("stargazerCount"),
+        "forks_count": repository.get("forkCount"),
+        "language": (repository.get("primaryLanguage") or {}).get("name"),
+        "license": {"spdx_id": (repository.get("licenseInfo") or {}).get("spdxId")},
+        "archived": repository.get("isArchived"),
+        "disabled": repository.get("isDisabled"),
+        "homepage": repository.get("homepageUrl"),
+        "default_branch": (repository.get("defaultBranchRef") or {}).get("name"),
+        "created_at": repository.get("createdAt"),
+        "updated_at": repository.get("updatedAt"),
+        "pushed_at": repository.get("pushedAt"),
+        "open_issues_count": open_issues + open_prs,
+    }
+
+    readme = None
+    readme_text = None
+    readme_keys = (
+        "readmeMd", "readmeMarkdown", "readmeRst", "readmeTxt", "readmePlain",
+        "readmemd", "readmeMarkdownLower", "readmeRstLower", "readmeTxtLower", "readmePlainLower",
+        "readmeMdMixed", "readmeMarkdownMixed", "readmeMixed",
+    )
+    for key, path in zip(readme_keys, README_CANDIDATES):
+        blob = repository.get(key)
+        if blob and blob.get("text"):
+            readme_text = blob["text"]
+            readme = {
+                "path": path,
+                "html_url": f"{repo_url}/blob/HEAD/{path}" if repo_url else None,
+                "download_url": f"{repo_url}/raw/HEAD/{path}" if repo_url else None,
+            }
+            break
+
+    # Flatten the 3-level nested tree into a flat path list.
+    all_paths: list[dict[str, Any]] = []
+    root = repository.get("tree") or {}
+    for e1 in root.get("entries") or []:
+        n1 = e1["name"]
+        all_paths.append({"path": n1, "type": e1.get("type", "blob")})
+        for e2 in (e1.get("object") or {}).get("entries") or []:
+            n2 = f"{n1}/{e2['name']}"
+            all_paths.append({"path": n2, "type": e2.get("type", "blob")})
+            for e3 in (e2.get("object") or {}).get("entries") or []:
+                all_paths.append({"path": f"{n2}/{e3['name']}", "type": e3.get("type", "blob")})
+
+    tree = {"truncated": False, "tree": all_paths}
+
+    return GitHubSnapshot(
+        requested_repo_id=requested,
+        metadata=metadata,
+        readme=readme,
+        readme_text=readme_text,
+        tree=tree,
+    )
+
+
+def fetch_snapshot_graphql(repo_id: str, token: str | None = None) -> GitHubSnapshot:
+    requested = parse_github_repo(repo_id)
+    owner, name = requested.split("/", 1)
+    payload = request_graphql(GRAPHQL_REPO_SNAPSHOT_QUERY, {"owner": owner, "name": name}, token=token)
+    repository = (payload.get("data") or {}).get("repository")
+    if not repository:
+        raise GitHubAPIError(f"GitHub repository not found: {requested}", status=404)
+    return _snapshot_from_graphql_repository(requested, owner, repository)
+
+
+def build_graphql_batch_query(repo_ids: list[str]) -> tuple[str, dict[str, Any], dict[str, tuple[str, str]]]:
+    if not repo_ids:
+        raise ValueError("repo_ids must not be empty")
+
+    variables: dict[str, Any] = {}
+    aliases: dict[str, tuple[str, str]] = {}
+    variable_defs: list[str] = []
+    repository_fields: list[str] = []
+    for index, repo_id in enumerate(repo_ids):
+        requested = parse_github_repo(repo_id)
+        owner, name = requested.split("/", 1)
+        owner_var = f"owner{index}"
+        name_var = f"name{index}"
+        alias = f"r{index}"
+        variables[owner_var] = owner
+        variables[name_var] = name
+        aliases[alias] = (requested, owner)
+        variable_defs.extend([f"${owner_var}: String!", f"${name_var}: String!"])
+        repository_fields.append(
+            f"{alias}: repository(owner: ${owner_var}, name: ${name_var}) {{ ...RepoSnapshotFields }}"
+        )
+
+    query = (
+        f"query({', '.join(variable_defs)}) {{\n"
+        + "\n".join(repository_fields)
+        + "\nrateLimit { cost remaining limit resetAt }\n}\n"
+        + GRAPHQL_REPOSITORY_FRAGMENT
+    )
+    return query, variables, aliases
+
+
+def fetch_snapshots_graphql(repo_ids: list[str], token: str | None = None) -> list[GitHubSnapshot]:
+    query, variables, aliases = build_graphql_batch_query(repo_ids)
+    payload = request_graphql(query, variables, token=token)
+    data = payload.get("data") or {}
+    snapshots: list[GitHubSnapshot] = []
+    for alias, (requested, owner) in aliases.items():
+        repository = data.get(alias)
+        if not repository:
+            raise GitHubAPIError(f"GitHub repository not found: {requested}", status=404)
+        snapshots.append(_snapshot_from_graphql_repository(requested, owner, repository))
+    return snapshots
 
 
 def fetch_snapshot(repo_id: str, token: str | None = None) -> GitHubSnapshot:
@@ -309,6 +547,14 @@ def build_record(snapshot: GitHubSnapshot) -> dict[str, Any]:
 
 def collect_record(repo_id: str, token: str | None = None) -> dict[str, Any]:
     return build_record(fetch_snapshot(repo_id, token=token))
+
+
+def collect_record_graphql(repo_id: str, token: str | None = None) -> dict[str, Any]:
+    return build_record(fetch_snapshot_graphql(repo_id, token=token))
+
+
+def collect_records_graphql(repo_ids: list[str], token: str | None = None) -> list[dict[str, Any]]:
+    return [build_record(snapshot) for snapshot in fetch_snapshots_graphql(repo_ids, token=token)]
 
 
 def github_token_from_file(path: Path) -> list[str]:

@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import re
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -34,6 +35,24 @@ class GitHubSnapshot:
     readme: dict[str, Any] | None
     readme_text: str | None
     tree: dict[str, Any] | None
+
+
+class TokenPool:
+    """Round-robin token pool for distributing GitHub API requests across multiple tokens."""
+
+    def __init__(self, tokens: list[str]) -> None:
+        self._tokens = tokens
+        self._index = 0
+        self._lock = threading.Lock()
+
+    def next_token(self) -> str | None:
+        """Return the next token in round-robin order, or None if the pool is empty."""
+        if not self._tokens:
+            return None
+        with self._lock:
+            token = self._tokens[self._index % len(self._tokens)]
+            self._index += 1
+            return token
 
 
 def parse_github_repo(value: str) -> str:
@@ -292,13 +311,23 @@ def collect_record(repo_id: str, token: str | None = None) -> dict[str, Any]:
     return build_record(fetch_snapshot(repo_id, token=token))
 
 
-def github_token_from_file(path: Path) -> str | None:
+def github_token_from_file(path: Path) -> list[str]:
+    """Read tokens from a file. One token per line. Returns list of non-empty tokens."""
     try:
-        token = path.read_text(encoding="utf-8").strip()
+        lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
-        return None
-    return token or None
+        return []
+    tokens = [line.strip() for line in lines if line.strip()]
+    return tokens
 
 
-def github_token_from_env() -> str | None:
-    return os.environ.get("GITHUB_TOKEN")
+def github_token_from_env() -> list[str]:
+    """Resolve tokens from environment.
+
+    Priority: GITHUB_TOKENS (comma-separated) > GITHUB_TOKEN (single).
+    """
+    tokens_raw = os.environ.get("GITHUB_TOKENS", "").strip()
+    if tokens_raw:
+        return [t.strip() for t in tokens_raw.split(",") if t.strip()]
+    single = os.environ.get("GITHUB_TOKEN", "").strip()
+    return [single] if single else []

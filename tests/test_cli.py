@@ -152,6 +152,45 @@ def test_ingest_github_uses_graphql_batches(tmp_path, monkeypatch):
     assert report["github_batch_size"] == 2
 
 
+def test_ingest_github_graphql_batch_reports_errors(tmp_path, monkeypatch):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\nc/d\n", encoding="utf-8")
+
+    output_file = tmp_path / "records.json"
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    def fake_collect(repo_ids, *, token=None):
+        raise Exception("GraphQL batch failed")
+
+    def fake_generate(record, config, *, caller=None):
+        return record.get("llm_profile", {})
+
+    args = build_parser().parse_args(
+        [
+            "ingest", "github",
+            "--repos", str(repos_file),
+            "--output", str(output_file),
+            "--report", str(tmp_path / "report.json"),
+            "--github-api", "graphql",
+            "--github-batch-size", "2",
+        ]
+    )
+
+    with patch("xists.cli.collect_records_graphql", side_effect=fake_collect), \
+         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+        code = ingest_github(args)
+
+    assert code == 1
+    report = json.loads((tmp_path / "report.json").read_text())
+    assert report["failed_count"] == 2
+    assert {e["repo_id"] for e in report["failed"]} == {"a/b", "c/d"}
+    assert all("GraphQL batch failed" in e["reason"] for e in report["failed"])
+
+
 def test_ingest_github_skips_existing_records(tmp_path, monkeypatch):
     repos_file = tmp_path / "repos.txt"
     repos_file.write_text("a/b\nc/d\n", encoding="utf-8")

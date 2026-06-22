@@ -307,65 +307,66 @@ def test_build_graphql_batch_query_aliases_multiple_repositories():
     assert aliases == {"r0": ("facebook/react", "facebook"), "r1": ("vuejs/core", "vuejs")}
 
 
+def _fake_graphql_repository():
+    """Return a realistic GraphQL repository payload for testing."""
+    return {
+        "nameWithOwner": "facebook/react",
+        "name": "react",
+        "url": "https://github.com/facebook/react",
+        "description": "The library for web and native user interfaces.",
+        "stargazerCount": 245995,
+        "forkCount": 49277,
+        "primaryLanguage": {"name": "JavaScript"},
+        "licenseInfo": {"spdxId": "MIT"},
+        "isArchived": False,
+        "isDisabled": False,
+        "homepageUrl": "https://react.dev",
+        "createdAt": "2013-05-24T16:15:54Z",
+        "updatedAt": "2026-06-19T00:00:00Z",
+        "pushedAt": "2026-06-19T00:00:00Z",
+        "issues": {"totalCount": 1900},
+        "pullRequests": {"totalCount": 100},
+        "defaultBranchRef": {"name": "main"},
+        "repositoryTopics": {
+            "nodes": [
+                {"topic": {"name": "javascript"}},
+                {"topic": {"name": "react"}},
+            ]
+        },
+        "readmeMd": {"text": "# React"},
+        "readmeMarkdown": None,
+        "readmeRst": None,
+        "readmeTxt": None,
+        "readmePlain": None,
+        "readmemd": None,
+        "readmeMarkdownLower": None,
+        "readmeRstLower": None,
+        "readmeTxtLower": None,
+        "readmePlainLower": None,
+        "readmeMdMixed": None,
+        "readmeMarkdownMixed": None,
+        "readmeMixed": None,
+        "tree": {
+            "entries": [
+                {"name": "README.md", "type": "blob",
+                 "object": {"entries": []}},
+                {"name": "packages", "type": "tree",
+                 "object": {"entries": [
+                     {"name": "react", "type": "tree",
+                      "object": {"entries": [
+                          {"name": "__tests__", "type": "tree"}
+                      ]}}
+                 ]}},
+            ]
+        },
+    }
+
+
 def test_fetch_snapshot_graphql_maps_repository_payload(monkeypatch):
     def fake_request(query, variables, *, token=None):
         assert variables == {"owner": "facebook", "name": "react"}
         assert token == "tok"
-        return {
-            "data": {
-                "repository": {
-                    "nameWithOwner": "facebook/react",
-                    "name": "react",
-                    "url": "https://github.com/facebook/react",
-                    "description": "The library for web and native user interfaces.",
-                    "stargazerCount": 245995,
-                    "forkCount": 49277,
-                    "primaryLanguage": {"name": "JavaScript"},
-                    "licenseInfo": {"spdxId": "MIT"},
-                    "isArchived": False,
-                    "isDisabled": False,
-                    "homepageUrl": "https://react.dev",
-                    "createdAt": "2013-05-24T16:15:54Z",
-                    "updatedAt": "2026-06-19T00:00:00Z",
-                    "pushedAt": "2026-06-19T00:00:00Z",
-                    "issues": {"totalCount": 1900},
-                    "pullRequests": {"totalCount": 100},
-                    "defaultBranchRef": {"name": "main"},
-                    "repositoryTopics": {
-                        "nodes": [
-                            {"topic": {"name": "javascript"}},
-                            {"topic": {"name": "react"}},
-                        ]
-                    },
-                    "readmeMd": {"text": "# React"},
-                    "readmeMarkdown": None,
-                    "readmeRst": None,
-                    "readmeTxt": None,
-                    "readmePlain": None,
-                    "readmemd": None,
-                    "readmeMarkdownLower": None,
-                    "readmeRstLower": None,
-                    "readmeTxtLower": None,
-                    "readmePlainLower": None,
-                    "readmeMdMixed": None,
-                    "readmeMarkdownMixed": None,
-                    "readmeMixed": None,
-                    "tree": {
-                        "entries": [
-                            {"name": "README.md", "type": "blob",
-                             "object": {"entries": []}},
-                            {"name": "packages", "type": "tree",
-                             "object": {"entries": [
-                                 {"name": "react", "type": "tree",
-                                  "object": {"entries": [
-                                      {"name": "__tests__", "type": "tree"}
-                                  ]}}
-                             ]}},
-                        ]
-                    },
-                }
-            }
-        }
+        return {"data": {"repository": _fake_graphql_repository()}}
 
     monkeypatch.setattr("xists.ingest.github.request_graphql", fake_request)
 
@@ -382,6 +383,37 @@ def test_fetch_snapshot_graphql_maps_repository_payload(monkeypatch):
     assert "README.md" in paths
     assert "packages/react" in paths
     assert "packages/react/__tests__" in paths
+
+
+def test_collect_record_graphql_sets_snapshot_source(monkeypatch):
+    from xists.ingest.github import collect_record_graphql
+
+    def fake_request(query, variables, *, token=None):
+        return {"data": {"repository": _fake_graphql_repository()}}
+
+    monkeypatch.setattr("xists.ingest.github.request_graphql", fake_request)
+
+    record = collect_record_graphql("facebook/react", token="tok")
+
+    assert record["snapshot_source"] == "github_graphql"
+    assert record["repo_id"] == "facebook/react"
+
+
+def test_collect_records_graphql_sets_snapshot_source(monkeypatch):
+    from xists.ingest.github import collect_records_graphql
+
+    repo2 = {**_fake_graphql_repository(), "nameWithOwner": "vuejs/core", "name": "core", "url": "https://github.com/vuejs/core"}
+
+    def fake_request(query, variables, *, token=None):
+        return {"data": {"r0": _fake_graphql_repository(), "r1": repo2}}
+
+    monkeypatch.setattr("xists.ingest.github.request_graphql", fake_request)
+
+    records = collect_records_graphql(["facebook/react", "vuejs/core"], token="tok")
+
+    assert len(records) == 2
+    assert all(r["snapshot_source"] == "github_graphql" for r in records)
+    assert [r["repo_id"] for r in records] == ["facebook/react", "vuejs/core"]
 
 
 def test_fetch_snapshots_graphql_maps_multiple_repositories(monkeypatch):

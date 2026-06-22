@@ -382,7 +382,7 @@ def clean_readme_excerpt(text: str | None, max_chars: int = 1200) -> str | None:
             continue
         if line.startswith("[!") or line.startswith("!["):
             continue
-        if line.count("img.shields.io") or line.count("badge.svg"):
+        if "img.shields.io" in line or "badge.svg" in line:
             continue
         if re.fullmatch(r"[#*`_\-\s]+", line):
             continue
@@ -550,11 +550,16 @@ def collect_record(repo_id: str, token: str | None = None) -> dict[str, Any]:
 
 
 def collect_record_graphql(repo_id: str, token: str | None = None) -> dict[str, Any]:
-    return build_record(fetch_snapshot_graphql(repo_id, token=token))
+    record = build_record(fetch_snapshot_graphql(repo_id, token=token))
+    record["snapshot_source"] = "github_graphql"
+    return record
 
 
 def collect_records_graphql(repo_ids: list[str], token: str | None = None) -> list[dict[str, Any]]:
-    return [build_record(snapshot) for snapshot in fetch_snapshots_graphql(repo_ids, token=token)]
+    records = [build_record(snapshot) for snapshot in fetch_snapshots_graphql(repo_ids, token=token)]
+    for record in records:
+        record["snapshot_source"] = "github_graphql"
+    return records
 
 
 def github_token_from_file(path: Path) -> list[str]:

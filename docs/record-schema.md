@@ -57,9 +57,11 @@ Each record should include traceability fields:
 
 `xists_version` identifies the xists package version that generated the record.
 
-`github_api_version` identifies the GitHub REST API version used for GitHub collection.
+`github_api_version` identifies the GitHub API version used for collection.
 
-`snapshot_source` identifies where the source snapshot came from. For GitHub ingestion, this is currently `github_api`.
+`snapshot_source` is `github_api` for REST or `github_graphql` for GraphQL.
+
+`snapshot_source` identifies where the source snapshot came from. For GitHub ingestion, this is `github_api` for REST API collection or `github_graphql` for GraphQL API collection.
 
 `snapshot_time` is the UTC time when xists generated the record from the collected source data. It is not the repository creation time, update time, or push time.
 

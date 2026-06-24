@@ -18,6 +18,7 @@ from xists.search.query import (
     confidence_bucket,
     cosine_similarity,
     rank,
+    rank_many,
 )
 
 CONFIG = EmbeddingConfig(api_key="k", base_url="http://localhost/v1", model="bge-m3")
@@ -173,3 +174,44 @@ def test_rank_rejects_dimension_mismatch():
 
     with pytest.raises(IndexMismatchError):
         rank("x", index, CONFIG, embed=fake_embed)
+
+
+def test_rank_many_batches_embeddings_and_matches_rank_order():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {"repo_id": "react/react", "vector": [1.0, 0.0]},
+            {"repo_id": "vuejs/core", "vector": [0.8, 0.2]},
+            {"repo_id": "postgres/postgres", "vector": [0.0, 1.0]},
+        ],
+    }
+    batches = []
+
+    def fake_embed_many(config, queries):
+        batches.append(list(queries))
+        return [[1.0, 0.0] if query == "frontend" else [0.0, 1.0] for query in queries]
+
+    results = rank_many(["frontend", "database"], index, CONFIG, top_k=2, batch_size=1, embed_many=fake_embed_many)
+
+    assert batches == [["frontend"], ["database"]]
+    assert results[0]["results"][0]["repo_id"] == "react/react"
+    assert results[0]["results"][1]["repo_id"] == "vuejs/core"
+    assert results[1]["results"][0]["repo_id"] == "postgres/postgres"
+    assert results[0]["considered"] == 3
+
+
+def test_rank_many_abstains_when_all_weak():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [{"repo_id": "react/react", "vector": [0.0, 1.0]}],
+    }
+
+    def fake_embed_many(config, queries):
+        return [[1.0, 0.0] for _ in queries]
+
+    result = rank_many(["frontend"], index, CONFIG, embed_many=fake_embed_many)[0]
+
+    assert result["abstained"] is True
+    assert result["results"] == []

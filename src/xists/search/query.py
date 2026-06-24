@@ -8,10 +8,13 @@ returning weak guesses.
 
 from __future__ import annotations
 
+import heapq
 import math
 from typing import Any
 
-from xists.search.embed import EmbeddingConfig, EmbeddingError, embed_query
+import numpy as np
+
+from xists.search.embed import EmbeddingConfig, EmbeddingError, call_embeddings, embed_query
 
 # Cosine similarity thresholds. Tunable; conservative by default so weak
 # matches abstain instead of being presented as answers.
@@ -62,6 +65,94 @@ def ensure_index_matches_model(index: dict[str, Any], config: EmbeddingConfig) -
         )
 
 
+def _normalized_matrix(vectors: list[list[float]]) -> np.ndarray:
+    matrix = np.asarray(vectors, dtype=np.float32)
+    if matrix.ndim != 2:
+        raise IndexMismatchError("Index vectors must be a two-dimensional matrix")
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    return np.divide(matrix, norms, out=np.zeros_like(matrix), where=norms != 0)
+
+
+def _top_indices(scores: np.ndarray, top_k: int) -> np.ndarray:
+    top_count = min(max(top_k, 0), scores.shape[1])
+    if top_count == 0:
+        return np.empty((scores.shape[0], 0), dtype=np.int64)
+    unsorted = np.argpartition(scores, -top_count, axis=1)[:, -top_count:]
+    top_scores = np.take_along_axis(scores, unsorted, axis=1)
+    order = np.argsort(top_scores, axis=1)[:, ::-1]
+    return np.take_along_axis(unsorted, order, axis=1)
+
+
+def rank_many(
+    queries: list[str],
+    index: dict[str, Any],
+    config: EmbeddingConfig,
+    *,
+    top_k: int = 10,
+    batch_size: int = 64,
+    embed_many: Any = call_embeddings,
+) -> list[dict[str, Any]]:
+    """Rank multiple queries with batched embeddings and matrix similarity."""
+
+    ensure_index_matches_model(index, config)
+    if not queries:
+        return []
+
+    entries = index.get("vectors", [])
+    repo_ids = [entry.get("repo_id") for entry in entries]
+    vectors = [entry["vector"] for entry in entries]
+    dimension = index.get("dimension")
+    if dimension is not None and any(len(vector) != dimension for vector in vectors):
+        raise IndexMismatchError("Index contains vectors that do not match its dimension")
+
+    query_vectors: list[list[float]] = []
+    for start in range(0, len(queries), batch_size):
+        query_vectors.extend(embed_many(config, queries[start : start + batch_size]))
+    if len(query_vectors) != len(queries):
+        raise EmbeddingError(f"Embedding count mismatch: sent {len(queries)}, received {len(query_vectors)}")
+    if dimension is not None and any(len(vector) != dimension for vector in query_vectors):
+        raise IndexMismatchError(
+            f"One or more query vectors do not match index dimension {dimension}. "
+            "Rebuild the index or check the model."
+        )
+
+    if not entries:
+        return [
+            {"query": query, "abstained": True, "results": [], "considered": 0}
+            for query in queries
+        ]
+
+    index_matrix = _normalized_matrix(vectors)
+    query_matrix = _normalized_matrix(query_vectors)
+    scores = query_matrix @ index_matrix.T
+    top = _top_indices(scores, top_k)
+
+    ranked: list[dict[str, Any]] = []
+    for row, query in enumerate(queries):
+        results: list[dict[str, Any]] = []
+        for column in top[row]:
+            score = float(scores[row, column])
+            confidence = confidence_bucket(score)
+            if confidence == "abstain":
+                continue
+            results.append(
+                {
+                    "repo_id": repo_ids[int(column)],
+                    "score": score,
+                    "confidence": confidence,
+                }
+            )
+        ranked.append(
+            {
+                "query": query,
+                "abstained": len(results) == 0,
+                "results": results,
+                "considered": len(entries),
+            }
+        )
+    return ranked
+
+
 def rank(
     query: str,
     index: dict[str, Any],
@@ -86,6 +177,7 @@ def rank(
             f"dimension {dimension}. Rebuild the index or check the model."
         )
 
+    top_count = max(top_k, 0)
     scored: list[dict[str, Any]] = []
     for entry in index.get("vectors", []):
         score = cosine_similarity(query_vector, entry["vector"])
@@ -97,8 +189,11 @@ def rank(
             }
         )
 
-    scored.sort(key=lambda item: item["score"], reverse=True)
-    presented = [item for item in scored if item["confidence"] != "abstain"][:top_k]
+    if top_count:
+        candidates = heapq.nlargest(top_count, scored, key=lambda item: item["score"])
+        presented = [item for item in candidates if item["confidence"] != "abstain"]
+    else:
+        presented = []
 
     return {
         "query": query,

@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from xists import __version__
+from xists.eval.run import evaluate_dataset
+from xists.eval.schema import EvaluationDatasetError
 from xists.ingest.github import (
     GitHubAPIError,
     TokenPool,
@@ -417,6 +419,47 @@ def search(args: argparse.Namespace) -> int:
     return 0
 
 
+def eval_run(args: argparse.Namespace) -> int:
+    try:
+        config = embedding_config_from_env()
+    except EmbeddingNotConfiguredError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+
+    llm_judge_config = None
+    if args.llm_judge:
+        try:
+            llm_judge_config = llm_config_from_env()
+        except LLMNotConfiguredError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        if args.records is None:
+            print("--records is required when --llm-judge is enabled", file=sys.stderr)
+            return 2
+
+    if not args.index.exists():
+        print(f"Index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
+        return 2
+
+    try:
+        report = evaluate_dataset(
+            args.cases,
+            args.index,
+            config,
+            top_k=args.top_k,
+            batch_size=args.batch_size,
+            llm_judge_config=llm_judge_config,
+            records_path=args.records,
+        )
+    except (EvaluationDatasetError, FileNotFoundError, IndexMismatchError, EmbeddingError, ValueError, LLMError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+    write_json(args.output, report)
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="xists helps developers find what already exists.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -458,6 +501,18 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to search")
     search_parser.add_argument("--top-k", type=int, default=10, help="Maximum number of results to return")
     search_parser.set_defaults(func=search)
+
+    eval_parser = subparsers.add_parser("eval", help="Evaluate retrieval quality")
+    eval_subparsers = eval_parser.add_subparsers(dest="eval_command", required=True)
+    eval_run_parser = eval_subparsers.add_parser("run", help="Run retrieval evaluation against an index")
+    eval_run_parser.add_argument("--cases", type=Path, default=Path("eval-cases.json"), help="Evaluation dataset JSON")
+    eval_run_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to evaluate")
+    eval_run_parser.add_argument("--output", type=Path, default=Path("eval-report.json"), help="Path to write evaluation report JSON")
+    eval_run_parser.add_argument("--top-k", type=int, default=10, help="Maximum results to score per query")
+    eval_run_parser.add_argument("--batch-size", type=int, default=64, help="Number of queries to embed per batch")
+    eval_run_parser.add_argument("--records", type=Path, default=None, help="Records JSON used for optional LLM judge comparisons")
+    eval_run_parser.add_argument("--llm-judge", action="store_true", help="Run an LLM pairwise judge on top-1 mismatches")
+    eval_run_parser.set_defaults(func=eval_run)
 
     return parser
 

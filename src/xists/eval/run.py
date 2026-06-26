@@ -92,6 +92,7 @@ def evaluate_dataset(
     top1_miss_count = 0
     top1_miss_acceptable_count = 0
     top1_miss_serious_count = 0
+    top1_miss_insufficient_evidence_count = 0
     judge_summary = {
         "enabled": judge_enabled,
         "model": llm_judge_config.model if llm_judge_config else None,
@@ -141,35 +142,42 @@ def evaluate_dataset(
             top_1_missing_count += 1
 
         judge_result = None
-        top1_status = "exact" if exact_match else "serious_mismatch"
+        top1_status = "exact"
         if not exact_match:
             top1_miss_count += 1
-        if judge_enabled and top_result_repo_id and top_result_repo_id != expected_repo_id:
-            expected_record = records_by_repo_id.get(expected_repo_id)
-            if expected_record is None:
-                raise ValueError(f"Expected repo not found in records file: {expected_repo_id}")
-            top1_record = records_by_repo_id.get(top_result_repo_id)
-            if top1_record is None:
-                raise ValueError(f"Top result repo not found in records file: {top_result_repo_id}")
-            judge_result = judge_top1_vs_expected(
-                case["query"],
-                expected_record=expected_record,
-                top1_record=top1_record,
-                config=llm_judge_config,
-                caller=judge_caller,
-            )
-            judge_summary["prompt_version"] = judge_result["prompt_version"]
-            judge_summary["total_ran"] += 1
-            judge_summary[f"{judge_result['verdict']}_count"] += 1
-            judge_summary[f"{judge_result['difference_size']}_difference_count"] += 1
-            if judge_result["verdict"] == "acceptable_substitute":
+            if acceptable_match:
                 top1_status = "acceptable"
                 top1_miss_acceptable_count += 1
-            elif judge_result["verdict"] == "serious_mismatch":
+            elif judge_enabled and top_result_repo_id:
+                expected_record = records_by_repo_id.get(expected_repo_id)
+                if expected_record is None:
+                    raise ValueError(f"Expected repo not found in records file: {expected_repo_id}")
+                top1_record = records_by_repo_id.get(top_result_repo_id)
+                if top1_record is None:
+                    raise ValueError(f"Top result repo not found in records file: {top_result_repo_id}")
+                judge_result = judge_top1_vs_expected(
+                    case["query"],
+                    expected_record=expected_record,
+                    top1_record=top1_record,
+                    config=llm_judge_config,
+                    caller=judge_caller,
+                )
+                judge_summary["prompt_version"] = judge_result["prompt_version"]
+                judge_summary["total_ran"] += 1
+                judge_summary[f"{judge_result['verdict']}_count"] += 1
+                judge_summary[f"{judge_result['difference_size']}_difference_count"] += 1
+                if judge_result["verdict"] == "acceptable_substitute":
+                    top1_status = "acceptable"
+                    top1_miss_acceptable_count += 1
+                elif judge_result["verdict"] == "insufficient_evidence":
+                    top1_status = "insufficient_evidence"
+                    top1_miss_insufficient_evidence_count += 1
+                else:
+                    top1_status = "serious_mismatch"
+                    top1_miss_serious_count += 1
+            else:
                 top1_status = "serious_mismatch"
                 top1_miss_serious_count += 1
-        elif not exact_match:
-            top1_miss_serious_count += 1
 
         per_case.append(
             {
@@ -217,6 +225,9 @@ def evaluate_dataset(
         "exact_top1_rate": _round_metric(_safe_divide(exact_hit_at_1, case_count)),
         "acceptable_top1_rate": _round_metric(_safe_divide(top1_miss_acceptable_count, case_count)),
         "serious_top1_error_rate": _round_metric(_safe_divide(top1_miss_serious_count, case_count)),
+        "insufficient_evidence_top1_rate": _round_metric(
+            _safe_divide(top1_miss_insufficient_evidence_count, case_count)
+        ),
         "effective_top1_rate": _round_metric(
             _safe_divide(exact_hit_at_1 + top1_miss_acceptable_count, case_count)
         ),
@@ -245,8 +256,12 @@ def evaluate_dataset(
             "top1_miss_count": top1_miss_count,
             "top1_miss_acceptable_count": top1_miss_acceptable_count,
             "top1_miss_serious_count": top1_miss_serious_count,
+            "top1_miss_insufficient_evidence_count": top1_miss_insufficient_evidence_count,
             "top1_miss_acceptable_rate": _round_metric(_safe_divide(top1_miss_acceptable_count, top1_miss_count)),
             "top1_miss_serious_rate": _round_metric(_safe_divide(top1_miss_serious_count, top1_miss_count)),
+            "top1_miss_insufficient_evidence_rate": _round_metric(
+                _safe_divide(top1_miss_insufficient_evidence_count, top1_miss_count)
+            ),
         },
         "judge_summary": judge_summary,
         "results": per_case,

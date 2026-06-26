@@ -232,11 +232,14 @@ Core retrieval metrics:
 Top-1 outcome metrics:
 
 - `exact_top1_rate`: the fraction of cases where the top result exactly matches `expected_repo_id`
-- `acceptable_top1_rate`: the fraction of cases where top-1 is not exact, but the optional LLM judge marks it as a close enough substitute
-- `serious_top1_error_rate`: the fraction of cases where top-1 misses a material query constraint
+- `acceptable_top1_rate`: the fraction of cases where top-1 is not exact, but is still acceptable either because the dataset marks it as an acceptable alternative or because the optional LLM judge marks it as a close enough substitute
+- `serious_top1_error_rate`: the fraction of cases where top-1 is not exact and still misses a material query constraint after applying the dataset acceptable set and optional judge analysis
+- `insufficient_evidence_top1_rate`: the fraction of cases where top-1 is not exact and the optional LLM judge reports that the available evidence is too thin to classify it as either acceptable or a serious mismatch
 - `effective_top1_rate`: `exact_top1_rate + acceptable_top1_rate`, useful when you care about whether top-1 is good enough for the user even if it is not the dataset's exact reference answer
 
-The hard metrics remain the source of truth for exact retrieval quality. The top-1 metrics help you separate serious failures from broad-query near-misses.
+The hard metrics remain the source of truth for exact retrieval quality. The top-1 metrics are a final outcome classification layer: dataset-declared acceptable alternatives count as acceptable immediately, and the optional judge is only used to classify remaining non-exact mismatches. Without the judge enabled, non-exact results outside the dataset acceptable set default to serious mismatches.
+
+This is a semantic expansion from older reports, where `acceptable_top1_rate` only counted judge-approved substitutes. As a result, datasets that already declare acceptable alternatives may now show a higher `acceptable_top1_rate` and a lower `serious_top1_error_rate`.
 
 #### Options
 

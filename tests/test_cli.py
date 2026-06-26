@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from xists.cli import build_parser, index_build, ingest_github, load_env_file, load_repo_ids
+from xists.cli import build_parser, eval_run, index_build, ingest_github, load_env_file, load_repo_ids
 from xists.search.embed import EmbeddingError
 
 
@@ -97,6 +97,77 @@ def test_ingest_github_parser_accepts_custom_paths():
     assert args.repos == Path("data/repos.txt")
     assert args.output == Path("data/records.json")
     assert args.report == Path("data/report.json")
+
+
+def test_eval_run_parser_uses_default_paths():
+    args = build_parser().parse_args(["eval", "run"])
+
+    assert args.cases == Path("eval-cases.json")
+    assert args.index == Path("index.json")
+    assert args.output == Path("eval-report.json")
+    assert args.top_k == 10
+    assert args.batch_size == 64
+
+
+def test_eval_run_writes_report(tmp_path, monkeypatch):
+    cases_file = tmp_path / "eval-cases.json"
+    cases_file.write_text("{}", encoding="utf-8")
+    index_file = tmp_path / "index.json"
+    index_file.write_text("{}", encoding="utf-8")
+    output_file = tmp_path / "eval-report.json"
+
+    monkeypatch.setenv("EMBEDDING_API_KEY", "k")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "bge-m3")
+
+    args = build_parser().parse_args(
+        [
+            "eval",
+            "run",
+            "--cases",
+            str(cases_file),
+            "--index",
+            str(index_file),
+            "--output",
+            str(output_file),
+            "--top-k",
+            "5",
+            "--batch-size",
+            "8",
+        ]
+    )
+
+    def fake_evaluate_dataset(cases, index, config, *, top_k=10, batch_size=64, llm_judge_config=None, records_path=None, judge_caller=None):
+        assert cases == cases_file
+        assert index == index_file
+        assert config.model == "bge-m3"
+        assert top_k == 5
+        assert batch_size == 8
+        assert llm_judge_config is None
+        assert records_path is None
+        return {
+            "dataset_name": "smoke",
+            "case_count": 1,
+            "metrics": {"exact_hit_at_1": 1.0},
+            "confidence": {"top_1_high_confidence_count": 1},
+            "judge_summary": {"enabled": False, "total_ran": 0},
+            "results": [],
+        }
+
+    with patch("xists.cli.evaluate_dataset", side_effect=fake_evaluate_dataset):
+        code = eval_run(args)
+
+    assert code == 0
+    report = json.loads(output_file.read_text(encoding="utf-8"))
+    assert report["dataset_name"] == "smoke"
+    assert report["metrics"]["exact_hit_at_1"] == 1.0
+
+
+def test_eval_run_parser_supports_judge_flags():
+    args = build_parser().parse_args(["eval", "run", "--llm-judge", "--records", "records.json"])
+
+    assert args.llm_judge is True
+    assert args.records == Path("records.json")
 
 
 def _make_record(repo_id: str) -> dict:

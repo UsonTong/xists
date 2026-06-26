@@ -186,6 +186,72 @@ Returns ranked results with confidence tiers:
 | `--index` | `index.json` | Index file to search |
 | `--top-k` | `10` | Maximum results to return |
 
+### Step 4: Evaluate retrieval quality
+
+```bash
+xists eval run --cases eval-cases.json --index index.json --output eval-report.json
+```
+
+This runs a fixed evaluation dataset against the current index and writes an evaluation report you can compare across prompt, embedding, and ranking iterations.
+
+#### Evaluation dataset shape
+
+```json
+{
+  "schema_version": 1,
+  "dataset_name": "frontend-retrieval-smoke",
+  "families": {
+    "react-family": ["react/react", "facebook/react", "preactjs/preact"]
+  },
+  "cases": [
+    {
+      "id": "react-ui-1",
+      "query": "frontend ui library",
+      "expected_repo_id": "react/react",
+      "acceptable_repo_ids": ["facebook/react"],
+      "acceptable_families": ["react-family"],
+      "tags": ["frontend", "ui"],
+      "notes": "forks and sibling repos are acceptable"
+    }
+  ]
+}
+```
+
+`expected_repo_id` is the exact target for strict scoring. `acceptable_repo_ids` and `acceptable_families` let you count highly similar repos, forks, or same-family alternatives without weakening the exact metric.
+
+#### Metrics
+
+Core retrieval metrics:
+
+- `exact_hit_at_1` / `exact_hit_at_k`: the expected repo is ranked first or appears anywhere in the top K
+- `mrr_exact`: how early the expected repo appears on average
+- `acceptable_hit_at_1` / `acceptable_hit_at_k`: the expected repo or an acceptable same-family alternative appears in the top results
+- `mrr_acceptable`: how early the first acceptable result appears on average
+- `abstain_rate`: the fraction of queries where search returns no result above the exploratory threshold
+
+Top-1 outcome metrics:
+
+- `exact_top1_rate`: the fraction of cases where the top result exactly matches `expected_repo_id`
+- `acceptable_top1_rate`: the fraction of cases where top-1 is not exact, but the optional LLM judge marks it as a close enough substitute
+- `serious_top1_error_rate`: the fraction of cases where top-1 misses a material query constraint
+- `effective_top1_rate`: `exact_top1_rate + acceptable_top1_rate`, useful when you care about whether top-1 is good enough for the user even if it is not the dataset's exact reference answer
+
+The hard metrics remain the source of truth for exact retrieval quality. The top-1 metrics help you separate serious failures from broad-query near-misses.
+
+#### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--cases` | `eval-cases.json` | Evaluation dataset JSON |
+| `--index` | `index.json` | Index file to evaluate |
+| `--output` | `eval-report.json` | Output evaluation report |
+| `--top-k` | `10` | Maximum results to score per query |
+| `--batch-size` | `64` | Number of queries to embed per batch |
+| `--records` | (none) | Records JSON used for optional LLM top1-vs-expected judge |
+| `--llm-judge` | off | Run an LLM pairwise judge only on top-1 mismatches |
+
+When `--llm-judge` is enabled, you must also provide `--records`. The judge compares only `top1` vs `expected_repo_id`; it does not change exact/acceptable metrics. It adds a separate `judge_summary` section and per-case judge fields so you can distinguish “wrong” from “close but acceptable substitute”.
+
 ## Output files
 
 ### `records.json`

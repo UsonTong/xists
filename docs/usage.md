@@ -164,20 +164,41 @@ Returns ranked results with confidence tiers:
   "query": "frontend UI library",
   "abstained": false,
   "results": [
-    {"repo_id": "react/react", "score": 0.68, "confidence": "high_confidence"},
-    {"repo_id": "vuejs/core", "score": 0.61, "confidence": "high_confidence"}
+    {
+      "repo_id": "react/react",
+      "score": 0.68,
+      "semantic_score": 0.62,
+      "metadata_score": 0.06,
+      "confidence": "high_confidence"
+    },
+    {
+      "repo_id": "vuejs/core",
+      "score": 0.61,
+      "semantic_score": 0.58,
+      "metadata_score": 0.03,
+      "confidence": "high_confidence"
+    }
   ],
   "considered": 8
 }
 ```
 
+`score` is the final ranking score. `semantic_score` is the cosine similarity
+from the embedding search, and `metadata_score` is the bounded reranking bonus
+from repository names, descriptions, topics, and generated profile phrases.
+Exact repository/name queries receive stronger metadata evidence than ordinary
+substring overlap.
+
 #### Confidence tiers
 
-| Tier | Cosine similarity | Meaning |
-|------|-------------------|---------|
+| Tier | Final score | Meaning |
+|------|-------------|---------|
 | `high_confidence` | ≥ 0.55 | Strong match, likely relevant |
 | `exploratory` | ≥ 0.35 | Worth investigating |
 | `abstain` | < 0.35 | Too weak, not shown |
+
+Weak semantic matches stay hidden unless metadata provides strong evidence,
+such as a repository/name match or a unique exact generated profile phrase.
 
 #### Options
 

@@ -261,6 +261,50 @@ def test_rank_reranks_from_expanded_candidate_pool():
     assert result["results"][0]["repo_id"] == "target/vue"
 
 
+def test_rank_reranks_beyond_legacy_top_50_candidate_pool():
+    vectors = [
+        {
+            "repo_id": f"generic/repo-{index}",
+            "vector": [1.0 - index * 0.0001, 0.0],
+            "metadata": {
+                "description": "Generic infrastructure automation.",
+                "topics": ["infrastructure", "automation"],
+                "summary": "General automation tooling.",
+                "search_phrases": ["infrastructure automation"],
+            },
+        }
+        for index in range(60)
+    ]
+    vectors.append(
+        {
+            "repo_id": "ansible/ansible",
+            "vector": [0.993, 0.0],
+            "metadata": {
+                "name": "ansible",
+                "description": "IT automation and configuration management.",
+                "topics": ["ansible", "automation"],
+                "language": "Python",
+                "summary": "Agentless configuration management over SSH.",
+                "search_phrases": ["agentless configuration management"],
+            },
+        }
+    )
+    index = {"embedding_model": "bge-m3", "dimension": 2, "vectors": vectors}
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank(
+        "agentless configuration management",
+        index,
+        CONFIG,
+        top_k=1,
+        embed=fake_embed,
+    )
+
+    assert result["results"][0]["repo_id"] == "ansible/ansible"
+
+
 def test_rank_does_not_reward_unmatched_specific_phrases():
     index = {
         "embedding_model": "bge-m3",
@@ -389,6 +433,201 @@ def test_rank_language_repository_does_not_win_from_language_token_only():
     )
 
     assert result["results"][0]["repo_id"] == "n8n-io/n8n"
+
+
+def test_rank_boosts_language_matched_exact_profile_phrase():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "BloopAI/bloop",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "bloop",
+                    "description": "A fast code search engine written in Rust.",
+                    "language": "Rust",
+                    "summary": "Code search and AI assistant tooling.",
+                    "search_phrases": ["code search engine with natural language"],
+                },
+            },
+            {
+                "repo_id": "meilisearch/meilisearch",
+                "vector": [0.98, 0.0],
+                "metadata": {
+                    "name": "meilisearch",
+                    "description": "Search engine API with typo tolerance.",
+                    "topics": ["search-engine"],
+                    "language": "Rust",
+                    "summary": "Rust-based search engine API.",
+                    "search_phrases": ["open source search engine"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("Rust open source search engine", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "meilisearch/meilisearch"
+
+
+def test_rank_boosts_exact_repo_identity_over_owner_sibling():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "browser-use/web-ui",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "web-ui",
+                    "description": "Web UI for browser-use.",
+                    "topics": ["browser-use", "ai-agent"],
+                    "language": "Python",
+                    "summary": "A web interface for browser-use.",
+                    "search_phrases": ["browser-use web interface"],
+                },
+            },
+            {
+                "repo_id": "browser-use/browser-use",
+                "vector": [0.98, 0.0],
+                "metadata": {
+                    "name": "browser-use",
+                    "description": "Browser automation for AI agents.",
+                    "topics": ["browser-use", "browser-automation"],
+                    "language": "Python",
+                    "summary": "A Python library for AI browser automation.",
+                    "search_phrases": ["browser-use for agents"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("browser-use", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "browser-use/browser-use"
+
+
+def test_rank_does_not_overboost_identity_substring_in_long_query():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "nginx/nginx",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "nginx",
+                    "description": "Official NGINX web server.",
+                    "topics": ["nginx", "web-server"],
+                    "language": "C",
+                    "summary": "Official NGINX open source repository.",
+                    "search_phrases": ["open source web server"],
+                },
+            },
+            {
+                "repo_id": "reader/nginx-analysis",
+                "vector": [0.99, 0.0],
+                "metadata": {
+                    "name": "nginx-analysis",
+                    "description": "Annotated nginx source code analysis.",
+                    "topics": ["nginx"],
+                    "language": "C",
+                    "summary": "Chinese source code analysis for nginx.",
+                    "search_phrases": ["nginx high concurrency design"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("nginx high concurrency design", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "reader/nginx-analysis"
+
+
+def test_rank_boosts_short_language_matched_exact_profile_phrase():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "quan-to/go-vsm",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "go-vsm",
+                    "description": "Vector Space Model implementation in Go.",
+                    "topics": ["go", "vector-space-model"],
+                    "language": "Go",
+                    "summary": "A Go information retrieval library.",
+                    "search_phrases": ["vector space model implementation in Go"],
+                },
+            },
+            {
+                "repo_id": "milvus-io/milvus",
+                "vector": [0.95, 0.0],
+                "metadata": {
+                    "name": "milvus",
+                    "description": "Cloud-native vector database.",
+                    "topics": ["vector-database", "golang"],
+                    "language": "Go",
+                    "summary": "Distributed vector database for ANN search.",
+                    "search_phrases": ["vector database"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("Go vector database", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "milvus-io/milvus"
+
+
+def test_rank_treats_short_language_tokens_as_language_evidence():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "generic/vector",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "description": "Vector search library.",
+                    "language": "Python",
+                    "summary": "Vector search tooling.",
+                    "search_phrases": ["vector database"],
+                },
+            },
+            {
+                "repo_id": "go/vector-db",
+                "vector": [0.97, 0.0],
+                "metadata": {
+                    "description": "Vector database in Go.",
+                    "language": "Go",
+                    "summary": "Vector database tooling.",
+                    "search_phrases": ["vector database"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("Go vector database", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "go/vector-db"
 
 
 def test_rank_caps_repeated_metadata_token_evidence():
@@ -640,6 +879,62 @@ def test_rank_abstains_when_all_weak():
     assert result["results"] == []
 
 
+def test_rank_abstains_when_weak_semantic_has_only_loose_metadata_overlap():
+    weak_vector = [0.34, math.sqrt(1.0 - 0.34**2)]
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "loose/overlap",
+                "vector": weak_vector,
+                "metadata": {
+                    "description": "Open source workflow automation platform.",
+                    "topics": ["workflow", "automation", "platform"],
+                    "summary": "Workflow automation for integrations.",
+                },
+            }
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("open source workflow automation platform", index, CONFIG, embed=fake_embed)
+
+    assert result["abstained"] is True
+    assert result["results"] == []
+
+
+def test_rank_allows_strong_metadata_evidence_to_rescue_weak_semantic_match():
+    weak_vector = [0.34, math.sqrt(1.0 - 0.34**2)]
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "meilisearch/meilisearch",
+                "vector": weak_vector,
+                "metadata": {
+                    "name": "meilisearch",
+                    "description": "Open source search engine.",
+                    "topics": ["search"],
+                    "summary": "Search engine.",
+                },
+            }
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("meilisearch", index, CONFIG, embed=fake_embed)
+
+    assert result["abstained"] is False
+    assert result["results"][0]["repo_id"] == "meilisearch/meilisearch"
+    assert result["results"][0]["confidence"] == "high_confidence"
+
+
 def test_rank_rejects_model_mismatch():
     index = {"embedding_model": "other-model", "dimension": 2, "vectors": []}
 
@@ -789,6 +1084,38 @@ def test_rank_many_abstains_when_all_weak():
         return [[1.0, 0.0] for _ in queries]
 
     result = rank_many(["frontend"], index, CONFIG, embed_many=fake_embed_many)[0]
+
+    assert result["abstained"] is True
+    assert result["results"] == []
+
+
+def test_rank_many_abstains_when_weak_semantic_has_only_loose_metadata_overlap():
+    weak_vector = [0.34, math.sqrt(1.0 - 0.34**2)]
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "loose/overlap",
+                "vector": weak_vector,
+                "metadata": {
+                    "description": "Open source workflow automation platform.",
+                    "topics": ["workflow", "automation", "platform"],
+                    "summary": "Workflow automation for integrations.",
+                },
+            }
+        ],
+    }
+
+    def fake_embed_many(config, queries):
+        return [[1.0, 0.0] for _ in queries]
+
+    result = rank_many(
+        ["open source workflow automation platform"],
+        index,
+        CONFIG,
+        embed_many=fake_embed_many,
+    )[0]
 
     assert result["abstained"] is True
     assert result["results"] == []

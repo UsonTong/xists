@@ -26,6 +26,8 @@ GENERIC_TERMS = {
     "api",
     "application",
     "applications",
+    "alternative",
+    "alternatives",
     "automation",
     "backend",
     "build",
@@ -52,6 +54,9 @@ GENERIC_TERMS = {
     "modern",
     "open",
     "platform",
+    "replace",
+    "replacement",
+    "replacing",
     "search",
     "service",
     "software",
@@ -66,6 +71,8 @@ GENERIC_TERMS = {
     "written",
 }
 LANGUAGE_TERMS = {"javascript", "typescript", "python", "rust", "go", "java", "php", "ruby", "c++", "c#", "scala"}
+ALTERNATIVE_TERMS = {"alternative", "alternatives", "replace", "replacement", "replacing"}
+QUERY_JOINERS = {"a", "an", "and", "for", "or", "the", "to", "with"}
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*")
 RERANK_CANDIDATE_MULTIPLIER = 5
 MIN_RERANK_CANDIDATES = 50
@@ -114,6 +121,65 @@ def _content_keyword_tokens(query: str) -> set[str]:
     return _keyword_tokens(query) - LANGUAGE_TERMS
 
 
+def _dedupe_adjacent(tokens: list[str]) -> list[str]:
+    deduped: list[str] = []
+    for token in tokens:
+        if not deduped or deduped[-1] != token:
+            deduped.append(token)
+    return deduped
+
+
+def _query_text_variants(query: str) -> set[str]:
+    tokens = _tokenize(query)
+    variants: set[str] = set()
+
+    def add(values: list[str]) -> None:
+        if values:
+            variants.add(" ".join(values))
+
+    add(tokens)
+    add(_dedupe_adjacent(tokens))
+
+    start = 0
+    while start < len(tokens) and tokens[start] in LANGUAGE_TERMS:
+        start += 1
+    if start:
+        without_language_prefix = tokens[start:]
+        add(without_language_prefix)
+        add(_dedupe_adjacent(without_language_prefix))
+
+    return variants
+
+
+def _alternative_targets(query_tokens: list[str]) -> set[str]:
+    targets: set[str] = set()
+    for index, token in enumerate(query_tokens):
+        if token not in ALTERNATIVE_TERMS:
+            continue
+        for candidate in reversed(query_tokens[:index]):
+            if candidate in QUERY_JOINERS or candidate in LANGUAGE_TERMS or candidate in GENERIC_TERMS:
+                continue
+            targets.add(candidate)
+            break
+        if index + 2 < len(query_tokens) and query_tokens[index + 1] in {"for", "to"}:
+            candidate = query_tokens[index + 2]
+            if candidate not in QUERY_JOINERS and candidate not in LANGUAGE_TERMS and candidate not in GENERIC_TERMS:
+                targets.add(candidate)
+    return targets
+
+
+def _variant_in_text(variants: set[str], text: str) -> bool:
+    return any(variant and variant in text for variant in variants)
+
+
+def _has_specific_variant(variants: set[str]) -> bool:
+    return any(
+        token not in GENERIC_TERMS and token not in LANGUAGE_TERMS and len(token) > 2 and not token.isdigit()
+        for variant in variants
+        for token in _tokenize(variant)
+    )
+
+
 def _all_metadata_text(metadata: dict[str, Any]) -> str:
     parts: list[str] = []
     for key in ("name", "description", "summary", "language"):
@@ -137,6 +203,39 @@ def _phrase_specificity(phrase: str) -> float:
     return min(0.08, 0.02 * specific)
 
 
+def _profile_phrase_match(query: str, metadata: dict[str, Any]) -> dict[str, Any]:
+    variants = _query_text_variants(query)
+    keyword_tokens = _content_keyword_tokens(query)
+    exact_phrases_seen: set[str] = set()
+    best_subset_specificity = 0.0
+    exact_specificity = 0.0
+    exact_token_count = 0
+    exact_match = False
+
+    for key in ("use_cases", "capabilities", "search_phrases"):
+        for phrase in metadata.get(key) or []:
+            phrase_tokens = _tokenize(str(phrase))
+            if not phrase_tokens:
+                continue
+            phrase_text = " ".join(phrase_tokens)
+            specificity = _phrase_specificity(str(phrase))
+            if phrase_text in variants:
+                if phrase_text not in exact_phrases_seen:
+                    exact_phrases_seen.add(phrase_text)
+                    exact_match = True
+                    exact_specificity = max(exact_specificity, specificity)
+                    exact_token_count = max(exact_token_count, len(phrase_tokens))
+            elif keyword_tokens and keyword_tokens.issubset(set(phrase_tokens)):
+                best_subset_specificity = max(best_subset_specificity, specificity)
+
+    return {
+        "exact": exact_match,
+        "exact_specificity": exact_specificity,
+        "exact_token_count": exact_token_count,
+        "subset_specificity": best_subset_specificity,
+    }
+
+
 def _query_specificity(query: str) -> float:
     tokens = _tokenize(query)
     if not tokens:
@@ -155,8 +254,22 @@ def _query_specificity(query: str) -> float:
     return 0.0
 
 
-def _metadata_multiplier(query: str) -> float:
+def _metadata_multiplier(
+    query: str,
+    *,
+    exact_phrase_match: bool = False,
+    unique_exact_phrase_match: bool = False,
+    exact_phrase_specificity: float = 0.0,
+    exact_phrase_token_count: int = 0,
+) -> float:
     specificity = _query_specificity(query)
+    if unique_exact_phrase_match:
+        if exact_phrase_specificity >= 0.06 or exact_phrase_token_count >= 5:
+            return max(0.9, specificity)
+        if exact_phrase_specificity >= 0.02 or exact_phrase_token_count >= 3:
+            return max(0.65, specificity)
+    elif exact_phrase_match and (exact_phrase_specificity >= 0.02 or exact_phrase_token_count >= 4):
+        return max(0.35, specificity)
     if specificity >= 0.8:
         return 1.0
     if specificity >= 0.65:
@@ -181,16 +294,30 @@ def _metadata_cap(query: str) -> float:
     return 0.04
 
 
-def _metadata_bonus_cap(query: str, *, strong_phrase_match: bool, identity_match: bool) -> float:
+def _metadata_bonus_cap(
+    query: str,
+    *,
+    strong_phrase_match: bool,
+    identity_match: bool,
+    exact_phrase_match: bool = False,
+    unique_exact_phrase_match: bool = False,
+    exact_phrase_specificity: float = 0.0,
+    exact_phrase_token_count: int = 0,
+) -> float:
     cap = _metadata_cap(query)
+    if unique_exact_phrase_match:
+        if exact_phrase_specificity >= 0.06 or exact_phrase_token_count >= 5:
+            cap = max(cap, 0.3)
+        elif exact_phrase_specificity >= 0.02 or exact_phrase_token_count >= 3:
+            cap = max(cap, 0.14)
     if strong_phrase_match:
         cap += 0.04
     if identity_match:
         cap += 0.025
-    return min(cap, 0.22)
+    return min(cap, 0.32)
 
 
-def _metadata_score(query: str, entry: dict[str, Any]) -> float:
+def _metadata_score(query: str, entry: dict[str, Any], *, exact_phrase_match_count: int = 0) -> float:
     metadata = entry.get("metadata")
     if not isinstance(metadata, dict):
         return 0.0
@@ -199,7 +326,8 @@ def _metadata_score(query: str, entry: dict[str, Any]) -> float:
     query_tokens = _tokenize(query)
     keyword_tokens = _content_keyword_tokens(query)
     language_tokens = _keyword_tokens(query) & LANGUAGE_TERMS
-    query_text = " ".join(query_tokens)
+    query_variants = _query_text_variants(query)
+    has_specific_variant = _has_specific_variant(query_variants)
 
     repo_id = str(entry.get("repo_id") or "").lower()
     name = str(metadata.get("name") or "").lower()
@@ -215,15 +343,22 @@ def _metadata_score(query: str, entry: dict[str, Any]) -> float:
     metadata_tokens = set(_tokenize(metadata_text)) - LANGUAGE_TERMS
     repo_tokens = set(_tokenize(repo_id.replace("/", " ")))
     name_tokens = set(_tokenize(name))
-    identity_match = bool(query_text and (query_text in repo_id or query_text in name))
+    identity_match = _variant_in_text(query_variants, repo_id) or _variant_in_text(query_variants, name)
+    alternative_targets = _alternative_targets(query_tokens)
+    alternative_identity_match = bool(alternative_targets & (repo_tokens | name_tokens))
+    phrase_match = _profile_phrase_match(query, metadata)
+    exact_phrase_match = bool(phrase_match["exact"])
+    unique_exact_phrase_match = exact_phrase_match and exact_phrase_match_count == 1
+    exact_phrase_specificity = float(phrase_match["exact_specificity"])
+    exact_phrase_token_count = int(phrase_match["exact_token_count"])
 
-    if query_text and query_text in repo_id:
+    if _variant_in_text(query_variants, repo_id):
         score += 0.2
-    if query_text and query_text in name:
+    if _variant_in_text(query_variants, name):
         score += 0.12
-    if query_text and query_text in description:
+    if has_specific_variant and _variant_in_text(query_variants, description):
         score += 0.06
-    if query_text and query_text in summary:
+    if has_specific_variant and _variant_in_text(query_variants, summary):
         score += 0.04
 
     if keyword_tokens:
@@ -248,53 +383,71 @@ def _metadata_score(query: str, entry: dict[str, Any]) -> float:
             score -= 0.04
 
     best_phrase_score = 0.0
-    strong_phrase_match = False
-    for key in ("use_cases", "capabilities", "search_phrases"):
-        for phrase in metadata.get(key) or []:
-            phrase_text = str(phrase).lower()
-            if not phrase_text:
-                continue
-            specificity = _phrase_specificity(phrase_text)
-            if query_text and query_text == phrase_text:
-                best_phrase_score = max(best_phrase_score, 0.03 + max(0.0, specificity))
-                strong_phrase_match = specificity >= 0.02
-            elif keyword_tokens and keyword_tokens.issubset(set(_tokenize(phrase_text))):
-                best_phrase_score = max(best_phrase_score, 0.015 + max(0.0, specificity))
+    strong_phrase_match = exact_phrase_match and exact_phrase_specificity >= 0.02
+    if exact_phrase_match:
+        exact_base = 0.16 if unique_exact_phrase_match else 0.03
+        best_phrase_score = max(best_phrase_score, exact_base + max(0.0, exact_phrase_specificity))
+    subset_specificity = float(phrase_match["subset_specificity"])
+    if subset_specificity:
+        best_phrase_score = max(best_phrase_score, 0.015 + max(0.0, subset_specificity))
 
     score += best_phrase_score
+    if alternative_identity_match:
+        score -= 0.2
     return min(
-        score * _metadata_multiplier(query),
-        _metadata_bonus_cap(query, strong_phrase_match=strong_phrase_match, identity_match=identity_match),
+        score
+        * _metadata_multiplier(
+            query,
+            exact_phrase_match=exact_phrase_match,
+            unique_exact_phrase_match=unique_exact_phrase_match,
+            exact_phrase_specificity=exact_phrase_specificity,
+            exact_phrase_token_count=exact_phrase_token_count,
+        ),
+        _metadata_bonus_cap(
+            query,
+            strong_phrase_match=strong_phrase_match,
+            identity_match=identity_match,
+            exact_phrase_match=exact_phrase_match,
+            unique_exact_phrase_match=unique_exact_phrase_match,
+            exact_phrase_specificity=exact_phrase_specificity,
+            exact_phrase_token_count=exact_phrase_token_count,
+        ),
     )
 
 
-def _has_strong_metadata_match(query: str, item: dict[str, Any]) -> bool:
+def _metadata_match_strength(query: str, item: dict[str, Any]) -> int:
     metadata = item.get("metadata")
     if not isinstance(metadata, dict):
-        return False
+        return 0
 
-    query_tokens = _tokenize(query)
-    query_text = " ".join(query_tokens)
-    if not query_text:
-        return False
+    query_variants = _query_text_variants(query)
+    if not query_variants:
+        return 0
 
     repo_id = str(item.get("repo_id") or "").lower()
     name = str(metadata.get("name") or "").lower()
-    if query_text in repo_id or query_text in name:
-        return True
+    if _variant_in_text(query_variants, repo_id) or _variant_in_text(query_variants, name):
+        return 2
 
-    for key in ("use_cases", "capabilities", "search_phrases"):
-        for phrase in metadata.get(key) or []:
-            if query_text == " ".join(_tokenize(str(phrase))):
-                return _phrase_specificity(str(phrase)) >= 0.02
-    return False
+    phrase_match = _profile_phrase_match(query, metadata)
+    if phrase_match["exact"]:
+        if float(phrase_match["exact_specificity"]) >= 0.02 or int(phrase_match["exact_token_count"]) >= 3:
+            return 2
+        return 1
+    return 0
 
 
 def _rerank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     reranked: list[dict[str, Any]] = []
+    phrase_match_count = sum(
+        1
+        for item in results
+        if isinstance(item.get("metadata"), dict)
+        and _profile_phrase_match(query, item["metadata"])["exact"]
+    )
     for item in results:
         semantic_score = float(item["score"])
-        metadata_score = _metadata_score(query, item)
+        metadata_score = _metadata_score(query, item, exact_phrase_match_count=phrase_match_count)
         final_score = semantic_score + metadata_score
         reranked.append(
             {
@@ -311,7 +464,14 @@ def _rerank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str,
         rerank_winner = reranked[0]
         semantic_gap = semantic_winner["semantic_score"] - rerank_winner["semantic_score"]
         metadata_advantage = rerank_winner["metadata_score"] - semantic_winner["metadata_score"]
-        required_advantage = 0.015 if _has_strong_metadata_match(query, rerank_winner) else 0.04 + max(0.0, semantic_gap)
+        winner_strength = _metadata_match_strength(query, rerank_winner)
+        semantic_strength = _metadata_match_strength(query, semantic_winner)
+        if winner_strength >= 2 and semantic_strength < 2:
+            required_advantage = 0.005
+        elif winner_strength >= 2:
+            required_advantage = 0.015
+        else:
+            required_advantage = 0.04 + max(0.0, semantic_gap)
         if semantic_winner is not rerank_winner and semantic_gap > 0.0 and metadata_advantage < required_advantage:
             reranked.remove(semantic_winner)
             reranked.insert(0, semantic_winner)

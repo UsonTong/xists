@@ -469,6 +469,162 @@ def test_rank_allows_exact_profile_phrase_to_overtake_small_semantic_gap():
     assert result["results"][0]["repo_id"] == "ansible/ansible"
 
 
+def test_rank_ignores_language_prefix_for_unique_exact_profile_phrase():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "semantic/near-match",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "description": "Generic infrastructure automation.",
+                    "topics": ["python", "infrastructure", "automation"],
+                    "language": "Python",
+                    "summary": "Infrastructure automation framework.",
+                    "search_phrases": ["infrastructure automation tool"],
+                },
+            },
+            {
+                "repo_id": "ansible/ansible",
+                "vector": [0.96, 0.0],
+                "metadata": {
+                    "name": "ansible",
+                    "description": "IT automation and configuration management.",
+                    "topics": ["python", "ansible"],
+                    "language": "Python",
+                    "summary": "Agentless configuration management over SSH.",
+                    "search_phrases": ["infrastructure as code tool"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("Python infrastructure as code tool", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "ansible/ansible"
+    assert result["results"][0]["metadata_score"] > result["results"][1]["metadata_score"]
+
+
+def test_rank_keeps_semantic_winner_when_exact_phrase_is_not_unique():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "semantic/winner",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "description": "A Python web framework.",
+                    "topics": ["python", "web", "framework"],
+                    "language": "Python",
+                    "search_phrases": ["python web framework"],
+                },
+            },
+            {
+                "repo_id": "semantic/runner-up",
+                "vector": [0.99, 0.0],
+                "metadata": {
+                    "description": "Another Python web framework.",
+                    "topics": ["python", "web", "framework"],
+                    "language": "Python",
+                    "use_cases": ["python web framework"],
+                    "search_phrases": ["python web framework"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("Python web framework", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "semantic/winner"
+
+
+def test_rank_penalizes_alternative_target_identity_match():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "supabase/supabase",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "supabase",
+                    "description": "Supabase is an open-source Firebase alternative.",
+                    "topics": ["supabase", "firebase", "alternative"],
+                    "language": "TypeScript",
+                    "summary": "Hosted Postgres backend platform.",
+                    "search_phrases": ["supabase vs firebase"],
+                },
+            },
+            {
+                "repo_id": "appwrite/appwrite",
+                "vector": [0.94, 0.0],
+                "metadata": {
+                    "name": "appwrite",
+                    "description": "Backend-as-a-service platform.",
+                    "topics": ["firebase", "supabase", "self-hosted"],
+                    "language": "TypeScript",
+                    "summary": "Self-hosted Firebase or Supabase alternative.",
+                    "use_cases": ["Self-hosting a Firebase or Supabase alternative"],
+                    "search_phrases": ["self-hosted backend as a service"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("Self-hosting a Firebase or Supabase alternative", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "appwrite/appwrite"
+
+
+def test_rank_ignores_language_prefix_for_description_phrase():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "kubernetes/kubernetes",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "kubernetes",
+                    "description": "Production-grade container orchestration.",
+                    "topics": ["go", "kubernetes"],
+                    "language": "Go",
+                    "summary": "Kubernetes is a container orchestration platform.",
+                },
+            },
+            {
+                "repo_id": "helm/helm",
+                "vector": [0.99, 0.0],
+                "metadata": {
+                    "name": "helm",
+                    "description": "The Kubernetes Package Manager",
+                    "topics": ["go", "kubernetes", "package-manager"],
+                    "language": "Go",
+                    "summary": "Helm manages Kubernetes charts.",
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("Go The Kubernetes Package Manager", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "helm/helm"
+
+
 def test_rank_abstains_when_all_weak():
     index = {
         "embedding_model": "bge-m3",

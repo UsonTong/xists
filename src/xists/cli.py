@@ -42,7 +42,7 @@ from xists.search.embed import (
     embedding_input_fingerprint,
     embedding_text_from_record,
 )
-from xists.search.index import INDEX_VERSION, load_index
+from xists.search.index import INDEX_VERSION, entry_metadata, load_index
 from xists.search.query import IndexMismatchError, rank
 
 
@@ -312,15 +312,17 @@ def index_build(args: argparse.Namespace) -> int:
             skipped.append(repo_id or "<unknown>")
             continue
         fingerprint = embedding_input_fingerprint(record)
+        metadata = entry_metadata(record)
         existing = reusable_vectors.get(repo_id)
         if existing and existing.get("embedding_input_fingerprint") == fingerprint:
             vector = existing.get("vector") or []
             if dimension is None:
                 dimension = len(vector)
             if len(vector) == dimension:
+                existing = {**existing, "metadata": metadata}
                 vectors.append(existing)
                 continue
-        embeddable.append({"repo_id": repo_id, "text": text, "fingerprint": fingerprint})
+        embeddable.append({"repo_id": repo_id, "text": text, "fingerprint": fingerprint, "metadata": metadata})
 
     new_count = 0
     for start in range(0, len(embeddable), batch_size):
@@ -349,6 +351,7 @@ def index_build(args: argparse.Namespace) -> int:
                 {
                     "repo_id": item["repo_id"],
                     "embedding_input_fingerprint": item["fingerprint"],
+                    "metadata": item["metadata"],
                     "vector": vector,
                 }
             )

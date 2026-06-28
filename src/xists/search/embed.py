@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 USER_AGENT = "xists-embedding"
-EMBEDDING_INPUT_VERSION = 1
+EMBEDDING_INPUT_VERSION = 2
 
 
 class EmbeddingError(RuntimeError):
@@ -98,13 +98,14 @@ def embedding_text_from_record(record: dict[str, Any]) -> str:
     topics = github.get("topics") or []
     if topics:
         content.append(", ".join(str(t) for t in topics))
+    if github.get("language"):
+        content.append(str(github["language"]))
     if profile.get("summary"):
         content.append(str(profile["summary"]))
     for key in ("use_cases", "capabilities", "search_phrases"):
         values = profile.get(key) or []
         if values:
             content.append(", ".join(str(v) for v in values))
-
     if not content:
         return ""
 

@@ -25,6 +25,27 @@ from xists.search.embed import (
 INDEX_VERSION = 1
 
 
+def _string_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(value) for value in values if isinstance(value, str) and value.strip()]
+
+
+def entry_metadata(record: dict[str, Any]) -> dict[str, Any]:
+    github = record.get("github") or {}
+    profile = record.get("llm_profile") or {}
+    return {
+        "name": record.get("name"),
+        "description": github.get("description"),
+        "topics": _string_list(github.get("topics")),
+        "language": github.get("language"),
+        "summary": profile.get("summary"),
+        "use_cases": _string_list(profile.get("use_cases")),
+        "capabilities": _string_list(profile.get("capabilities")),
+        "search_phrases": _string_list(profile.get("search_phrases")),
+    }
+
+
 def build_index(
     records: list[dict[str, Any]],
     config: EmbeddingConfig,
@@ -45,7 +66,14 @@ def build_index(
         if not text:
             skipped.append(repo_id or "<unknown>")
             continue
-        embeddable.append({"repo_id": repo_id, "text": text, "fingerprint": embedding_input_fingerprint(record)})
+        embeddable.append(
+            {
+                "repo_id": repo_id,
+                "text": text,
+                "fingerprint": embedding_input_fingerprint(record),
+                "metadata": entry_metadata(record),
+            }
+        )
 
     vectors: list[dict[str, Any]] = []
     dimension: int | None = None
@@ -67,6 +95,7 @@ def build_index(
                 {
                     "repo_id": item["repo_id"],
                     "embedding_input_fingerprint": item["fingerprint"],
+                    "metadata": item["metadata"],
                     "vector": vector,
                 }
             )

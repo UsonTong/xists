@@ -385,6 +385,70 @@ def test_index_build_rebuilds_legacy_vectors_without_fingerprints(tmp_path, monk
     assert index["vectors"][1]["embedding_input_fingerprint"]
 
 
+def test_index_build_refreshes_metadata_when_reusing_vector(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "local")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+
+    record = {
+        "repo_id": "vuejs/core",
+        "name": "core",
+        "github": {
+            "description": "Progressive JavaScript framework.",
+            "topics": ["frontend", "vue"],
+            "language": "JavaScript",
+        },
+        "llm_profile": {
+            "summary": "Vue builds modern web interfaces.",
+            "use_cases": ["building web interfaces"],
+            "capabilities": ["reactive components"],
+            "search_phrases": ["progressive framework for building modern web interfaces"],
+        },
+    }
+    from xists.search.embed import embedding_input_fingerprint
+
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps([record]), encoding="utf-8")
+
+    output_file = tmp_path / "index.json"
+    output_file.write_text(json.dumps({
+        "index_version": 1,
+        "embedding_model": "BAAI/bge-m3",
+        "embedding_base_url": "http://localhost:6597/v1",
+        "dimension": 2,
+        "built_at": "2026-01-01T00:00:00+00:00",
+        "record_count": 1,
+        "skipped": [],
+        "vectors": [
+            {
+                "repo_id": "vuejs/core",
+                "embedding_input_fingerprint": embedding_input_fingerprint(record),
+                "vector": [1.0, 0.0],
+            }
+        ],
+    }), encoding="utf-8")
+
+    def fake_call_embeddings(config, inputs, *, timeout=60):
+        raise AssertionError("unchanged vectors should be reused without embedding calls")
+
+    args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file)]
+    )
+
+    with patch("xists.cli.call_embeddings", side_effect=fake_call_embeddings):
+        code = index_build(args)
+
+    assert code == 0
+    index = json.loads(output_file.read_text())
+    assert index["record_count"] == 1
+    assert index["vectors"][0]["vector"] == [1.0, 0.0]
+    assert index["vectors"][0]["metadata"]["language"] == "JavaScript"
+    assert index["vectors"][0]["metadata"]["topics"] == ["frontend", "vue"]
+    assert index["vectors"][0]["metadata"]["search_phrases"] == [
+        "progressive framework for building modern web interfaces"
+    ]
+
+
 def test_index_build_rejects_model_mismatch(tmp_path, monkeypatch):
     monkeypatch.setenv("EMBEDDING_API_KEY", "local")
     monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")

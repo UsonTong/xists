@@ -12,6 +12,39 @@ from typing import Any
 
 
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*", re.IGNORECASE)
+NOISE_TOKENS = {
+    "a",
+    "an",
+    "and",
+    "app",
+    "application",
+    "applications",
+    "build",
+    "building",
+    "built",
+    "for",
+    "from",
+    "has",
+    "helps",
+    "into",
+    "open",
+    "opensource",
+    "project",
+    "projects",
+    "provide",
+    "provides",
+    "source",
+    "support",
+    "supports",
+    "system",
+    "that",
+    "the",
+    "this",
+    "tool",
+    "tools",
+    "using",
+    "with",
+}
 STAR_TIERS = [
     ("star-lt100", 0, 99),
     ("star-100-999", 100, 999),
@@ -20,6 +53,7 @@ STAR_TIERS = [
     ("star-50k-plus", 50_000, 10**12),
 ]
 QUERY_TYPES = ("simple", "complex", "confusable")
+TEMPLATE_STYLES = ("baseline", "alternative")
 
 
 def _text(value: Any) -> str | None:
@@ -40,13 +74,22 @@ def _slug(text: str) -> str:
     return value[:80] or "case"
 
 
+def _normalize_query(text: str) -> str:
+    return " ".join(text.split()).strip().lower()
+
+
+def _query_signature(text: str) -> str:
+    tokens = sorted(set(TOKEN_RE.findall(_normalize_query(text))))
+    return " ".join(tokens)
+
+
 def _dedupe(values: list[str | None]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
     for value in values:
         if not value:
             continue
-        normalized = " ".join(value.split()).lower()
+        normalized = _normalize_query(value)
         if normalized in seen:
             continue
         seen.add(normalized)
@@ -94,10 +137,24 @@ def _keyword_phrase(text: str, *, limit: int = 6) -> str | None:
     for token in TOKEN_RE.findall(text.lower()):
         if len(token) <= 2 or token.isdigit():
             continue
-        if token in {"and", "for", "the", "with", "from", "that", "this", "into", "using"}:
+        if token in NOISE_TOKENS:
             continue
         tokens.append(token)
     return " ".join(_dedupe(tokens)[:limit]) or None
+
+
+def _keywords_from_values(values: list[str | None], *, limit: int = 6) -> str | None:
+    merged: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        merged.extend((_keyword_phrase(value, limit=limit * 2) or "").split())
+    return " ".join(_dedupe(merged)[:limit]) or None
+
+
+def _join_parts(parts: list[str | None]) -> str | None:
+    values = [part.strip() for part in parts if part and part.strip()]
+    return " ".join(values) if values else None
 
 
 def _case(
@@ -127,8 +184,7 @@ def _case(
     }
 
 
-def build_cases_for_record(record: dict[str, Any], *, star_tier: str) -> list[dict[str, Any]]:
-    language = record.get("language")
+def _baseline_queries(record: dict[str, Any], *, language: str | None) -> dict[str, list[str]]:
     simple_queries = _dedupe(
         [
             *record["search_phrases"][:3],
@@ -155,11 +211,80 @@ def build_cases_for_record(record: dict[str, Any], *, star_tier: str) -> list[di
         confusable_queries.append(f"{language} {_topic_phrase(record['topics'], 5)}")
     confusable_queries = _dedupe(confusable_queries)
 
+    return {
+        "simple": simple_queries,
+        "complex": complex_queries,
+        "confusable": confusable_queries,
+    }
+
+
+def _alternative_queries(record: dict[str, Any], *, language: str | None) -> dict[str, list[str]]:
+    topic_phrase = _topic_phrase(record["topics"], 4)
+    topic_short = _topic_phrase(record["topics"], 3)
+    description_keywords = _keyword_phrase(record["description"] or "", limit=5)
+    summary_keywords = _keyword_phrase(record["summary"] or "", limit=5)
+    search_keywords = _keywords_from_values(record["search_phrases"][:3], limit=5)
+    use_case_keywords = _keywords_from_values(record["use_cases"][:3], limit=5)
+    capability_keywords = _keywords_from_values(record["capabilities"][:3], limit=5)
+
+    simple_queries = _dedupe(
+        [
+            _join_parts([language, description_keywords]),
+            _join_parts([language, search_keywords]),
+            _join_parts([topic_short, capability_keywords]),
+            _join_parts([summary_keywords, topic_short]),
+            _join_parts([use_case_keywords, capability_keywords]),
+            _join_parts([language, topic_short, use_case_keywords]),
+        ]
+    )
+
+    complex_queries = _dedupe(
+        [
+            _join_parts(["open source", language, "for", use_case_keywords, "with", capability_keywords]),
+            _join_parts([language, "project focused on", description_keywords, "and", capability_keywords]),
+            _join_parts(["developer tool for", use_case_keywords, "using", topic_phrase]),
+            _join_parts(["repo for", summary_keywords, "with", topic_short]),
+            _join_parts([language, "library for", use_case_keywords, "plus", description_keywords]),
+            _join_parts(["practical", topic_short, "workflow for", use_case_keywords]),
+        ]
+    )
+
+    confusable_queries = _dedupe(
+        [
+            _join_parts([language, topic_short, description_keywords]),
+            _join_parts([language, use_case_keywords, capability_keywords]),
+            _join_parts(["open source", language, topic_short, search_keywords]),
+            _join_parts([language, "library", topic_short, summary_keywords]),
+            _join_parts([language, topic_short, "for", use_case_keywords]),
+            _join_parts([topic_short, capability_keywords, description_keywords]),
+        ]
+    )
+
+    return {
+        "simple": simple_queries,
+        "complex": complex_queries,
+        "confusable": confusable_queries,
+    }
+
+
+def build_cases_for_record(
+    record: dict[str, Any],
+    *,
+    star_tier: str,
+    template_style: str,
+) -> list[dict[str, Any]]:
+    language = record.get("language")
+    query_groups = (
+        _alternative_queries(record, language=language)
+        if template_style == "alternative"
+        else _baseline_queries(record, language=language)
+    )
+
     cases: list[dict[str, Any]] = []
     for query_type, queries in (
-        ("simple", simple_queries),
-        ("complex", complex_queries),
-        ("confusable", confusable_queries),
+        ("simple", query_groups["simple"]),
+        ("complex", query_groups["complex"]),
+        ("confusable", query_groups["confusable"]),
     ):
         for index, query in enumerate(queries, start=1):
             if not query:
@@ -177,24 +302,59 @@ def build_cases_for_record(record: dict[str, Any], *, star_tier: str) -> list[di
     return cases
 
 
-def generate_dataset(records: list[dict[str, Any]], *, limit: int, seed: int) -> dict[str, Any]:
+def _load_excluded_queries(paths: list[Path]) -> tuple[set[str], set[str]]:
+    excluded_normalized: set[str] = set()
+    excluded_signatures: set[str] = set()
+    for path in paths:
+        if not path.exists():
+            continue
+        dataset = json.loads(path.read_text(encoding="utf-8"))
+        for case in dataset.get("cases", []):
+            query = _text(case.get("query"))
+            if not query:
+                continue
+            excluded_normalized.add(_normalize_query(query))
+            excluded_signatures.add(_query_signature(query))
+    return excluded_normalized, excluded_signatures
+
+
+def generate_dataset(
+    records: list[dict[str, Any]],
+    *,
+    limit: int,
+    seed: int,
+    template_style: str,
+    excluded_paths: list[Path],
+) -> dict[str, Any]:
     rng = random.Random(seed)
+    excluded_normalized, excluded_signatures = _load_excluded_queries(excluded_paths)
     buckets: dict[tuple[str, str], list[dict[str, Any]]] = {
         (star_tier, query_type): []
         for star_tier, _, _ in STAR_TIERS
         for query_type in QUERY_TYPES
     }
     seen_ids: set[str] = set()
+    seen_queries: set[str] = set(excluded_normalized)
+    seen_signatures: set[str] = set(excluded_signatures)
     for raw in records:
         record = _repo_record(raw)
         if record is None:
             continue
         star_tier = _star_tier(record["stars"])
-        for case in build_cases_for_record(record, star_tier=star_tier):
+        for case in build_cases_for_record(record, star_tier=star_tier, template_style=template_style):
             key = (star_tier, next(tag for tag in case["tags"] if tag in QUERY_TYPES))
-            if key not in buckets or case["id"] in seen_ids:
+            normalized_query = _normalize_query(case["query"])
+            query_signature = _query_signature(case["query"])
+            if (
+                key not in buckets
+                or case["id"] in seen_ids
+                or normalized_query in seen_queries
+                or query_signature in seen_signatures
+            ):
                 continue
             seen_ids.add(case["id"])
+            seen_queries.add(normalized_query)
+            seen_signatures.add(query_signature)
             buckets[key].append(case)
 
     for cases in buckets.values():
@@ -219,7 +379,7 @@ def generate_dataset(records: list[dict[str, Any]], *, limit: int, seed: int) ->
 
     return {
         "schema_version": 1,
-        "dataset_name": "xists-full-stratified-2000",
+        "dataset_name": f"xists-full-stratified-2000-{template_style}",
         "families": {},
         "cases": selected,
     }
@@ -241,10 +401,18 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--limit", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=20260629)
+    parser.add_argument("--template-style", choices=TEMPLATE_STYLES, default="baseline")
+    parser.add_argument("--exclude-dataset", type=Path, action="append", default=[])
     args = parser.parse_args()
 
     records = json.loads(args.records.read_text(encoding="utf-8"))
-    dataset = generate_dataset(records, limit=args.limit, seed=args.seed)
+    dataset = generate_dataset(
+        records,
+        limit=args.limit,
+        seed=args.seed,
+        template_style=args.template_style,
+        excluded_paths=args.exclude_dataset,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(dataset, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"output": str(args.output), **summarize(dataset)}, ensure_ascii=False, indent=2))

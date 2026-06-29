@@ -23,6 +23,7 @@ HIGH_CONFIDENCE_THRESHOLD = 0.55
 EXPLORATORY_THRESHOLD = 0.35
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*")
 GENERIC_TERMS = {
+    "about",
     "and",
     "api",
     "application",
@@ -31,41 +32,81 @@ GENERIC_TERMS = {
     "alternatives",
     "automation",
     "backend",
+    "better",
     "build",
+    "built",
     "cli",
     "cloud",
+    "collection",
+    "collections",
     "compatible",
     "component",
     "components",
     "configuration",
+    "create",
+    "creating",
     "data",
     "database",
+    "demo",
+    "demos",
     "deployment",
+    "developer",
     "distributed",
     "engine",
+    "example",
+    "examples",
     "framework",
     "frontend",
     "full",
+    "guide",
+    "guides",
+    "help",
+    "helps",
     "integration",
     "integrations",
     "interface",
     "interfaces",
+    "learn",
+    "learning",
     "library",
+    "list",
+    "lists",
     "management",
+    "managing",
     "modern",
+    "multiple",
     "open",
     "platform",
+    "plugin",
+    "plugins",
+    "portfolio",
+    "practical",
+    "productivity",
+    "project",
+    "projects",
+    "provide",
+    "providing",
+    "purpose",
     "replace",
     "replacement",
     "replacing",
+    "resource",
+    "resources",
+    "running",
     "search",
     "service",
     "software",
     "source",
+    "study",
+    "studying",
     "system",
     "tool",
     "tools",
+    "tutorial",
+    "tutorials",
     "ui",
+    "use",
+    "using",
     "web",
     "workflow",
     "with",
@@ -389,6 +430,9 @@ def _profile_phrase_match(query: str, metadata: dict[str, Any]) -> dict[str, Any
     keyword_tokens = _content_keyword_tokens(query)
     exact_phrases_seen: set[str] = set()
     best_subset_specificity = 0.0
+    best_partial_specificity = 0.0
+    best_partial_overlap = 0
+    best_partial_ratio = 0.0
     exact_specificity = 0.0
     exact_token_count = 0
     exact_match = False
@@ -398,6 +442,7 @@ def _profile_phrase_match(query: str, metadata: dict[str, Any]) -> dict[str, Any
             phrase_tokens = _tokenize(str(phrase))
             if not phrase_tokens:
                 continue
+            phrase_token_set = set(phrase_tokens)
             phrase_text = " ".join(phrase_tokens)
             specificity = _phrase_specificity(str(phrase))
             if phrase_text in variants:
@@ -406,14 +451,26 @@ def _profile_phrase_match(query: str, metadata: dict[str, Any]) -> dict[str, Any
                     exact_match = True
                     exact_specificity = max(exact_specificity, specificity)
                     exact_token_count = max(exact_token_count, len(phrase_tokens))
-            elif keyword_tokens and keyword_tokens.issubset(set(phrase_tokens)):
+            elif keyword_tokens and keyword_tokens.issubset(phrase_token_set):
                 best_subset_specificity = max(best_subset_specificity, specificity)
+            if keyword_tokens:
+                overlap = len(keyword_tokens & phrase_token_set)
+                if overlap < 2:
+                    continue
+                ratio = overlap / len(keyword_tokens)
+                if ratio > best_partial_ratio or (math.isclose(ratio, best_partial_ratio) and overlap > best_partial_overlap):
+                    best_partial_ratio = ratio
+                    best_partial_overlap = overlap
+                    best_partial_specificity = specificity
 
     return {
         "exact": exact_match,
         "exact_specificity": exact_specificity,
         "exact_token_count": exact_token_count,
         "subset_specificity": best_subset_specificity,
+        "partial_specificity": best_partial_specificity,
+        "partial_overlap": best_partial_overlap,
+        "partial_ratio": best_partial_ratio,
     }
 
 
@@ -591,6 +648,14 @@ def _metadata_score(query: str, entry: dict[str, Any], *, exact_phrase_match_cou
     subset_specificity = float(phrase_match["subset_specificity"])
     if subset_specificity:
         best_phrase_score = max(best_phrase_score, 0.015 + max(0.0, subset_specificity))
+    partial_overlap = int(phrase_match.get("partial_overlap", 0))
+    partial_ratio = float(phrase_match.get("partial_ratio", 0.0))
+    partial_specificity = float(phrase_match.get("partial_specificity", 0.0))
+    if partial_overlap >= 3 and partial_ratio >= 0.6 and partial_specificity >= 0.02:
+        best_phrase_score = max(
+            best_phrase_score,
+            min(0.08, 0.015 + partial_specificity + 0.01 * max(0, partial_overlap - 2)),
+        )
 
     score += best_phrase_score
     if alternative_identity_match:
@@ -638,6 +703,12 @@ def _metadata_match_strength(query: str, item: dict[str, Any]) -> int:
     if phrase_match["exact"]:
         if float(phrase_match["exact_specificity"]) >= 0.02 or int(phrase_match["exact_token_count"]) >= 3:
             return 2
+        return 1
+    if (
+        int(phrase_match.get("partial_overlap", 0)) >= 3
+        and float(phrase_match.get("partial_ratio", 0.0)) >= 0.6
+        and float(phrase_match.get("partial_specificity", 0.0)) >= 0.02
+    ):
         return 1
     return 0
 

@@ -1318,3 +1318,92 @@ def test_rank_many_abstains_when_weak_semantic_has_only_loose_metadata_overlap()
 
     assert result["abstained"] is True
     assert result["results"] == []
+
+
+def test_rank_boosts_high_overlap_profile_phrase_without_exact_match():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "zsh-users/zsh",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "zsh",
+                    "description": "A powerful shell with scripting and interactive features.",
+                    "topics": ["shell", "terminal"],
+                    "language": "Shell",
+                    "summary": "The Z shell.",
+                    "capabilities": ["interactive shell"],
+                    "search_phrases": ["shell"],
+                },
+            },
+            {
+                "repo_id": "romkatv/powerlevel10k",
+                "vector": [0.98, 0.02],
+                "metadata": {
+                    "name": "powerlevel10k",
+                    "description": "A theme for Zsh with rich prompt customization.",
+                    "topics": ["zsh", "prompt", "theme"],
+                    "language": "Shell",
+                    "summary": "Fast Zsh prompt theme.",
+                    "capabilities": ["customizing zsh prompt"],
+                    "search_phrases": ["customizing zsh prompt for better productivity"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("developer tool for customizing zsh prompt better productivity using zsh", index, CONFIG, top_k=1, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "romkatv/powerlevel10k"
+    assert result["results"][0]["metadata_score"] > result["results"][0]["semantic_score"] - 0.98
+
+
+def test_rank_partial_phrase_boost_stays_below_exact_phrase_boost():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "generic/automation",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "automation",
+                    "description": "Automation platform for teams.",
+                    "topics": ["workflow", "automation", "platform"],
+                    "language": "Python",
+                    "summary": "Workflow automation platform.",
+                    "capabilities": ["workflow automation"],
+                    "search_phrases": ["workflow automation platform"],
+                },
+            },
+            {
+                "repo_id": "specific/runner",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "runner",
+                    "description": "Run scheduled jobs.",
+                    "topics": ["scheduler"],
+                    "language": "Python",
+                    "summary": "Scheduled jobs runner.",
+                    "capabilities": ["scheduled job runner"],
+                    "search_phrases": ["scheduled job runner"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    partial = rank("developer tool for workflow automation platform teams", index, CONFIG, top_k=2, embed=fake_embed)
+    exact = rank("workflow automation platform", index, CONFIG, top_k=2, embed=fake_embed)
+
+    partial_score = next(item for item in partial["results"] if item["repo_id"] == "generic/automation")["metadata_score"]
+    exact_score = next(item for item in exact["results"] if item["repo_id"] == "generic/automation")["metadata_score"]
+
+    assert partial_score < exact_score

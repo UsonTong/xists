@@ -1407,3 +1407,99 @@ def test_rank_partial_phrase_boost_stays_below_exact_phrase_boost():
     exact_score = next(item for item in exact["results"] if item["repo_id"] == "generic/automation")["metadata_score"]
 
     assert partial_score < exact_score
+
+
+def test_rank_combines_multiple_profile_phrases_for_complex_query():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "rustdesk/rustdesk-server",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "rustdesk-server",
+                    "description": "Self-hosted RustDesk server.",
+                    "topics": ["remote-desktop", "remote-access"],
+                    "language": "Rust",
+                    "summary": "Self-hosted relay and rendezvous server for RustDesk.",
+                    "use_cases": [
+                        "Self-hosting a remote desktop server for RustDesk clients",
+                        "Managing remote access connections without relying on third-party services",
+                    ],
+                    "search_phrases": ["self-hosted remote desktop server"],
+                },
+            },
+            {
+                "repo_id": "rustdesk/rustdesk",
+                "vector": [0.98, 0.02],
+                "metadata": {
+                    "name": "rustdesk",
+                    "description": "Open-source remote desktop application designed for self-hosting.",
+                    "topics": ["remote-control", "remote-desktop", "rust"],
+                    "language": "Rust",
+                    "summary": "Cross-platform remote desktop client for self-hosted support sessions.",
+                    "use_cases": [
+                        "Providing remote technical support to other users",
+                        "Self-hosting a remote desktop service without relying on third-party cloud services",
+                    ],
+                    "search_phrases": ["open source remote desktop software"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank(
+        "Rust open source remote desktop for technical support and self-hosting",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=fake_embed,
+    )
+
+    assert result["results"][0]["repo_id"] == "rustdesk/rustdesk"
+    assert result["results"][0]["metadata_score"] > result["results"][1]["metadata_score"]
+
+
+def test_rank_prefers_language_matched_candidate_when_metadata_signal_is_otherwise_close():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "noise/font-serif",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "font-serif",
+                    "description": "Open source CJK serif font with variable font support.",
+                    "topics": ["font", "cjk", "variable-fonts"],
+                    "language": "Shell",
+                    "summary": "Pan-CJK serif typeface.",
+                    "search_phrases": ["Pan-CJK variable font"],
+                },
+            },
+            {
+                "repo_id": "target/font-sans",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "font-sans",
+                    "description": "Open source CJK font with variable font support.",
+                    "topics": ["font", "cjk", "variable-fonts"],
+                    "language": "Python",
+                    "summary": "Pan-CJK sans typeface.",
+                    "search_phrases": ["Pan-CJK font", "variable font for Chinese Japanese Korean"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("Python pan-cjk font variable chinese", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "target/font-sans"
+    assert result["results"][0]["metadata_score"] > result["results"][1]["metadata_score"]

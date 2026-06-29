@@ -11,6 +11,7 @@ from __future__ import annotations
 import heapq
 import math
 import re
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -50,6 +51,7 @@ GENERIC_TERMS = {
     "demo",
     "demos",
     "deployment",
+    "designed",
     "developer",
     "distributed",
     "engine",
@@ -76,14 +78,20 @@ GENERIC_TERMS = {
     "modern",
     "multiple",
     "open",
+    "other",
     "platform",
     "plugin",
     "plugins",
+    "plus",
     "portfolio",
     "practical",
     "productivity",
     "project",
     "projects",
+    "repo",
+    "repos",
+    "repository",
+    "repositories",
     "provide",
     "providing",
     "purpose",
@@ -105,6 +113,8 @@ GENERIC_TERMS = {
     "tutorial",
     "tutorials",
     "ui",
+    "user",
+    "users",
     "use",
     "using",
     "web",
@@ -189,8 +199,9 @@ def confidence_bucket(score: float) -> str:
     return "abstain"
 
 
-def _tokenize(text: str) -> list[str]:
-    return TOKEN_RE.findall(text.lower())
+@lru_cache(maxsize=65536)
+def _tokenize(text: str) -> tuple[str, ...]:
+    return tuple(TOKEN_RE.findall(text.lower()))
 
 
 def _language_aliases_from_tokens(tokens: list[str]) -> set[str]:
@@ -239,6 +250,7 @@ def _negated_language_aliases(tokens: list[str]) -> set[str]:
     return aliases
 
 
+@lru_cache(maxsize=8192)
 def _query_primary_language_alias(query: str) -> str | None:
     tokens = _tokenize(query)
     prefix_length = _language_prefix_length(tokens)
@@ -251,7 +263,8 @@ def _query_primary_language_alias(query: str) -> str | None:
     return None
 
 
-def _query_language_terms(query: str) -> set[str]:
+@lru_cache(maxsize=8192)
+def _query_language_terms(query: str) -> frozenset[str]:
     tokens = _tokenize(query)
     terms = {
         token
@@ -263,7 +276,7 @@ def _query_language_terms(query: str) -> set[str]:
     prefix_length = _language_prefix_length(tokens)
     if prefix_length:
         terms.update(tokens[:prefix_length])
-    return terms
+    return frozenset(terms)
 
 
 def _language_prefix_length(tokens: list[str]) -> int:
@@ -302,15 +315,20 @@ def _token_set_without_query_languages(text: str, query: str) -> set[str]:
     return set(_tokenize(text)) - _query_language_terms(query)
 
 
-def _keyword_tokens(query: str) -> set[str]:
-    return {
+@lru_cache(maxsize=8192)
+def _keyword_tokens(query: str) -> frozenset[str]:
+    return frozenset(
         token
         for token in _tokenize(query)
-        if len(token) > 2 and token not in GENERIC_TERMS and not token.isdigit()
-    }
+        if len(token) > 2
+        and token not in GENERIC_TERMS
+        and token not in QUERY_JOINERS
+        and not token.isdigit()
+    )
 
 
-def _content_keyword_tokens(query: str) -> set[str]:
+@lru_cache(maxsize=8192)
+def _content_keyword_tokens(query: str) -> frozenset[str]:
     return _keyword_tokens(query) - _query_language_terms(query)
 
 
@@ -322,7 +340,8 @@ def _dedupe_adjacent(tokens: list[str]) -> list[str]:
     return deduped
 
 
-def _query_text_variants(query: str) -> set[str]:
+@lru_cache(maxsize=8192)
+def _query_text_variants(query: str) -> frozenset[str]:
     tokens = _tokenize(query)
     variants: set[str] = set()
 
@@ -339,7 +358,7 @@ def _query_text_variants(query: str) -> set[str]:
         add(without_language_prefix)
         add(_dedupe_adjacent(without_language_prefix))
 
-    return variants
+    return frozenset(variants)
 
 
 def _repo_identity_variants(repo_id: str, name: str) -> set[str]:
@@ -415,6 +434,7 @@ def _all_metadata_text(metadata: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+@lru_cache(maxsize=65536)
 def _phrase_specificity(phrase: str) -> float:
     tokens = _tokenize(phrase)
     if not tokens:
@@ -425,14 +445,22 @@ def _phrase_specificity(phrase: str) -> float:
     return min(0.08, 0.02 * specific)
 
 
-def _profile_phrase_match(query: str, metadata: dict[str, Any]) -> dict[str, Any]:
-    variants = _query_text_variants(query)
-    keyword_tokens = _content_keyword_tokens(query)
+def _profile_phrase_match(
+    query: str,
+    metadata: dict[str, Any],
+    *,
+    query_variants: frozenset[str] | None = None,
+    keyword_tokens: frozenset[str] | None = None,
+) -> dict[str, Any]:
+    variants = query_variants if query_variants is not None else _query_text_variants(query)
+    keyword_tokens = keyword_tokens if keyword_tokens is not None else _content_keyword_tokens(query)
     exact_phrases_seen: set[str] = set()
     best_subset_specificity = 0.0
     best_partial_specificity = 0.0
     best_partial_overlap = 0
     best_partial_ratio = 0.0
+    coverage_tokens: set[str] = set()
+    coverage_phrase_hits = 0
     exact_specificity = 0.0
     exact_token_count = 0
     exact_match = False
@@ -455,6 +483,10 @@ def _profile_phrase_match(query: str, metadata: dict[str, Any]) -> dict[str, Any
                 best_subset_specificity = max(best_subset_specificity, specificity)
             if keyword_tokens:
                 overlap = len(keyword_tokens & phrase_token_set)
+                overlap_tokens = keyword_tokens & phrase_token_set
+                if len(overlap_tokens) >= 2:
+                    coverage_tokens.update(overlap_tokens)
+                    coverage_phrase_hits += 1
                 if overlap < 2:
                     continue
                 ratio = overlap / len(keyword_tokens)
@@ -471,9 +503,13 @@ def _profile_phrase_match(query: str, metadata: dict[str, Any]) -> dict[str, Any
         "partial_specificity": best_partial_specificity,
         "partial_overlap": best_partial_overlap,
         "partial_ratio": best_partial_ratio,
+        "coverage_overlap": len(coverage_tokens),
+        "coverage_ratio": (len(coverage_tokens) / len(keyword_tokens)) if keyword_tokens else 0.0,
+        "coverage_phrase_hits": coverage_phrase_hits,
     }
 
 
+@lru_cache(maxsize=8192)
 def _query_specificity(query: str) -> float:
     tokens = _tokenize(query)
     if not tokens:
@@ -549,6 +585,9 @@ def _metadata_bonus_cap(
     unique_exact_phrase_match: bool = False,
     exact_phrase_specificity: float = 0.0,
     exact_phrase_token_count: int = 0,
+    coverage_overlap: int = 0,
+    coverage_ratio: float = 0.0,
+    coverage_phrase_hits: int = 0,
 ) -> float:
     cap = _metadata_cap(query)
     if exact_identity_match:
@@ -560,6 +599,8 @@ def _metadata_bonus_cap(
             cap = max(cap, 0.14)
     elif exact_phrase_language_match and exact_phrase_token_count >= 2:
         cap = max(cap, 0.16)
+    if coverage_overlap >= 4 and coverage_ratio >= 0.75 and coverage_phrase_hits >= 2:
+        cap = max(cap, 0.21)
     if strong_phrase_match:
         cap += 0.04
     if exact_phrase_language_match:
@@ -569,16 +610,28 @@ def _metadata_bonus_cap(
     return min(cap, 0.32)
 
 
-def _metadata_score(query: str, entry: dict[str, Any], *, exact_phrase_match_count: int = 0) -> float:
+def _metadata_score(
+    query: str,
+    entry: dict[str, Any],
+    *,
+    exact_phrase_match_count: int = 0,
+    query_tokens: tuple[str, ...] | None = None,
+    keyword_tokens: frozenset[str] | None = None,
+    primary_language_alias: str | None = None,
+    query_variants: frozenset[str] | None = None,
+    query_specificity: float | None = None,
+    phrase_match: dict[str, Any] | None = None,
+) -> float:
     metadata = entry.get("metadata")
     if not isinstance(metadata, dict):
         return 0.0
 
     score = 0.0
-    query_tokens = _tokenize(query)
-    keyword_tokens = _content_keyword_tokens(query)
-    primary_language_alias = _query_primary_language_alias(query)
-    query_variants = _query_text_variants(query)
+    query_tokens = query_tokens if query_tokens is not None else _tokenize(query)
+    keyword_tokens = keyword_tokens if keyword_tokens is not None else _content_keyword_tokens(query)
+    primary_language_alias = primary_language_alias if primary_language_alias is not None else _query_primary_language_alias(query)
+    query_variants = query_variants if query_variants is not None else _query_text_variants(query)
+    query_specificity = query_specificity if query_specificity is not None else _query_specificity(query)
     has_specific_variant = _has_specific_variant(query_variants)
 
     repo_id = str(entry.get("repo_id") or "").lower()
@@ -587,6 +640,7 @@ def _metadata_score(query: str, entry: dict[str, Any], *, exact_phrase_match_cou
     summary = str(metadata.get("summary") or "").lower()
     language = str(metadata.get("language") or "").lower()
     language_match = _language_matches_query(language, primary_alias=primary_language_alias)
+    language_mismatch = _language_mismatch(language, primary_alias=primary_language_alias)
     topics = {
         token
         for topic in metadata.get("topics") or []
@@ -600,7 +654,12 @@ def _metadata_score(query: str, entry: dict[str, Any], *, exact_phrase_match_cou
     exact_identity_match = _exact_identity_match(query, query_variants, repo_id, name)
     alternative_targets = _alternative_targets(query_tokens)
     alternative_identity_match = bool(alternative_targets & (repo_tokens | name_tokens))
-    phrase_match = _profile_phrase_match(query, metadata)
+    phrase_match = phrase_match if phrase_match is not None else _profile_phrase_match(
+        query,
+        metadata,
+        query_variants=query_variants,
+        keyword_tokens=keyword_tokens,
+    )
     exact_phrase_match = bool(phrase_match["exact"])
     unique_exact_phrase_match = exact_phrase_match and exact_phrase_match_count == 1
     exact_phrase_specificity = float(phrase_match["exact_specificity"])
@@ -632,7 +691,7 @@ def _metadata_score(query: str, entry: dict[str, Any], *, exact_phrase_match_cou
         if topic_overlap:
             score += min(0.06, 0.025 * topic_overlap)
 
-    if _language_mismatch(language, primary_alias=primary_language_alias):
+    if language_mismatch:
         score -= 0.04
 
     best_phrase_score = 0.0
@@ -651,16 +710,24 @@ def _metadata_score(query: str, entry: dict[str, Any], *, exact_phrase_match_cou
     partial_overlap = int(phrase_match.get("partial_overlap", 0))
     partial_ratio = float(phrase_match.get("partial_ratio", 0.0))
     partial_specificity = float(phrase_match.get("partial_specificity", 0.0))
+    coverage_overlap = int(phrase_match.get("coverage_overlap", 0))
+    coverage_ratio = float(phrase_match.get("coverage_ratio", 0.0))
+    coverage_phrase_hits = int(phrase_match.get("coverage_phrase_hits", 0))
     if partial_overlap >= 3 and partial_ratio >= 0.6 and partial_specificity >= 0.02:
         best_phrase_score = max(
             best_phrase_score,
             min(0.08, 0.015 + partial_specificity + 0.01 * max(0, partial_overlap - 2)),
         )
+    if coverage_overlap >= 4 and coverage_ratio >= 0.75 and coverage_phrase_hits >= 2:
+        best_phrase_score = max(
+            best_phrase_score,
+            min(0.1, 0.02 + 0.01 * max(0, coverage_overlap - 3) + 0.01 * max(0, coverage_phrase_hits - 2)),
+        )
 
     score += best_phrase_score
     if alternative_identity_match:
         score -= 0.2
-    return min(
+    capped = min(
         score
         * _metadata_multiplier(
             query,
@@ -681,16 +748,37 @@ def _metadata_score(query: str, entry: dict[str, Any], *, exact_phrase_match_cou
             unique_exact_phrase_match=unique_exact_phrase_match,
             exact_phrase_specificity=exact_phrase_specificity,
             exact_phrase_token_count=exact_phrase_token_count,
+            coverage_overlap=coverage_overlap,
+            coverage_ratio=coverage_ratio,
+            coverage_phrase_hits=coverage_phrase_hits,
         ),
     )
+    tie_break = 0.0
+    if primary_language_alias:
+        if language_match:
+            tie_break += 0.012
+        elif language_mismatch:
+            tie_break -= 0.012
+    if coverage_overlap >= 4 and coverage_ratio >= 0.75 and coverage_phrase_hits >= 2:
+        tie_break += min(0.02, 0.006 + 0.004 * max(0, coverage_overlap - 4))
+    if query_specificity >= 0.8 and coverage_overlap >= 4 and coverage_ratio >= 0.75 and coverage_phrase_hits >= 2:
+        tie_break += 0.004
+    return max(-0.04, min(capped + tie_break, 0.35))
 
 
-def _metadata_match_strength(query: str, item: dict[str, Any]) -> int:
+def _metadata_match_strength(
+    query: str,
+    item: dict[str, Any],
+    *,
+    query_variants: frozenset[str] | None = None,
+    keyword_tokens: frozenset[str] | None = None,
+    phrase_match: dict[str, Any] | None = None,
+) -> int:
     metadata = item.get("metadata")
     if not isinstance(metadata, dict):
         return 0
 
-    query_variants = _query_text_variants(query)
+    query_variants = query_variants if query_variants is not None else _query_text_variants(query)
     if not query_variants:
         return 0
 
@@ -699,7 +787,12 @@ def _metadata_match_strength(query: str, item: dict[str, Any]) -> int:
     if _variant_in_text(query_variants, repo_id) or _variant_in_text(query_variants, name):
         return 2
 
-    phrase_match = _profile_phrase_match(query, metadata)
+    phrase_match = phrase_match if phrase_match is not None else _profile_phrase_match(
+        query,
+        metadata,
+        query_variants=query_variants,
+        keyword_tokens=keyword_tokens,
+    )
     if phrase_match["exact"]:
         if float(phrase_match["exact_specificity"]) >= 0.02 or int(phrase_match["exact_token_count"]) >= 3:
             return 2
@@ -710,21 +803,40 @@ def _metadata_match_strength(query: str, item: dict[str, Any]) -> int:
         and float(phrase_match.get("partial_specificity", 0.0)) >= 0.02
     ):
         return 1
+    if (
+        int(phrase_match.get("coverage_overlap", 0)) >= 4
+        and float(phrase_match.get("coverage_ratio", 0.0)) >= 0.75
+        and int(phrase_match.get("coverage_phrase_hits", 0)) >= 2
+    ):
+        return 1
     return 0
 
 
-def _has_metadata_rescue_evidence(query: str, item: dict[str, Any], *, exact_phrase_match_count: int) -> bool:
+def _has_metadata_rescue_evidence(
+    query: str,
+    item: dict[str, Any],
+    *,
+    exact_phrase_match_count: int,
+    query_variants: frozenset[str] | None = None,
+    keyword_tokens: frozenset[str] | None = None,
+    phrase_match: dict[str, Any] | None = None,
+) -> bool:
     metadata = item.get("metadata")
     if not isinstance(metadata, dict):
         return False
 
-    query_variants = _query_text_variants(query)
+    query_variants = query_variants if query_variants is not None else _query_text_variants(query)
     repo_id = str(item.get("repo_id") or "").lower()
     name = str(metadata.get("name") or "").lower()
     if _variant_in_text(query_variants, repo_id) or _variant_in_text(query_variants, name):
         return True
 
-    phrase_match = _profile_phrase_match(query, metadata)
+    phrase_match = phrase_match if phrase_match is not None else _profile_phrase_match(
+        query,
+        metadata,
+        query_variants=query_variants,
+        keyword_tokens=keyword_tokens,
+    )
     if not phrase_match["exact"] or exact_phrase_match_count != 1:
         return False
     return float(phrase_match["exact_specificity"]) >= 0.02 or int(phrase_match["exact_token_count"]) >= 3
@@ -737,26 +849,59 @@ def _result_confidence(
     semantic_score: float,
     final_score: float,
     exact_phrase_match_count: int,
+    query_variants: frozenset[str] | None = None,
+    keyword_tokens: frozenset[str] | None = None,
+    phrase_match: dict[str, Any] | None = None,
 ) -> str:
     confidence = confidence_bucket(final_score)
     if confidence == "abstain" or semantic_score >= EXPLORATORY_THRESHOLD:
         return confidence
-    if _has_metadata_rescue_evidence(query, item, exact_phrase_match_count=exact_phrase_match_count):
+    if _has_metadata_rescue_evidence(
+        query,
+        item,
+        exact_phrase_match_count=exact_phrase_match_count,
+        query_variants=query_variants,
+        keyword_tokens=keyword_tokens,
+        phrase_match=phrase_match,
+    ):
         return confidence
     return "abstain"
 
 
 def _rerank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     reranked: list[dict[str, Any]] = []
-    phrase_match_count = sum(
-        1
-        for item in results
-        if isinstance(item.get("metadata"), dict)
-        and _profile_phrase_match(query, item["metadata"])["exact"]
-    )
+    query_tokens = _tokenize(query)
+    keyword_tokens = _content_keyword_tokens(query)
+    primary_language_alias = _query_primary_language_alias(query)
+    query_variants = _query_text_variants(query)
+    query_specificity = _query_specificity(query)
+    phrase_matches: dict[str, dict[str, Any]] = {}
+    for item in results:
+        metadata = item.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        phrase_matches[str(item.get("repo_id") or "")] = _profile_phrase_match(
+            query,
+            metadata,
+            query_variants=query_variants,
+            keyword_tokens=keyword_tokens,
+        )
+    phrase_match_count = sum(1 for match in phrase_matches.values() if match["exact"])
     for item in results:
         semantic_score = float(item["score"])
-        metadata_score = _metadata_score(query, item, exact_phrase_match_count=phrase_match_count)
+        repo_id = str(item.get("repo_id") or "")
+        phrase_match = phrase_matches.get(repo_id)
+        metadata_score = _metadata_score(
+            query,
+            item,
+            exact_phrase_match_count=phrase_match_count,
+            query_tokens=query_tokens,
+            keyword_tokens=keyword_tokens,
+            primary_language_alias=primary_language_alias,
+            query_variants=query_variants,
+            query_specificity=query_specificity,
+            phrase_match=phrase_match,
+        )
         final_score = semantic_score + metadata_score
         reranked.append(
             {
@@ -770,17 +915,32 @@ def _rerank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str,
                     semantic_score=semantic_score,
                     final_score=final_score,
                     exact_phrase_match_count=phrase_match_count,
+                    query_variants=query_variants,
+                    keyword_tokens=keyword_tokens,
+                    phrase_match=phrase_match,
                 ),
             }
         )
     reranked.sort(key=lambda candidate: candidate["score"], reverse=True)
-    if len(reranked) > 1 and _query_specificity(query) <= 0.45:
+    if len(reranked) > 1 and query_specificity <= 0.45:
         semantic_winner = max(reranked, key=lambda candidate: candidate["semantic_score"])
         rerank_winner = reranked[0]
         semantic_gap = semantic_winner["semantic_score"] - rerank_winner["semantic_score"]
         metadata_advantage = rerank_winner["metadata_score"] - semantic_winner["metadata_score"]
-        winner_strength = _metadata_match_strength(query, rerank_winner)
-        semantic_strength = _metadata_match_strength(query, semantic_winner)
+        winner_strength = _metadata_match_strength(
+            query,
+            rerank_winner,
+            query_variants=query_variants,
+            keyword_tokens=keyword_tokens,
+            phrase_match=phrase_matches.get(str(rerank_winner.get("repo_id") or "")),
+        )
+        semantic_strength = _metadata_match_strength(
+            query,
+            semantic_winner,
+            query_variants=query_variants,
+            keyword_tokens=keyword_tokens,
+            phrase_match=phrase_matches.get(str(semantic_winner.get("repo_id") or "")),
+        )
         if winner_strength >= 2 and semantic_strength < 2:
             required_advantage = 0.005
         elif winner_strength >= 2:

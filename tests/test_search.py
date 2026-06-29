@@ -1503,3 +1503,191 @@ def test_rank_prefers_language_matched_candidate_when_metadata_signal_is_otherwi
 
     assert result["results"][0]["repo_id"] == "target/font-sans"
     assert result["results"][0]["metadata_score"] > result["results"][1]["metadata_score"]
+
+
+def test_rank_description_signal_can_raise_metadata_score_without_overriding_semantics():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "adobe/react-spectrum",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "react-spectrum",
+                    "description": "A collection of libraries and tools that help you build adaptive, accessible, and robust user experiences.",
+                    "topics": ["react", "accessibility", "design-systems", "ui-components"],
+                    "language": "TypeScript",
+                    "summary": "React libraries for accessible design systems.",
+                    "search_phrases": ["react accessible component library"],
+                },
+            },
+            {
+                "repo_id": "radix-ui/primitives",
+                "vector": [0.98, 0.02],
+                "metadata": {
+                    "name": "primitives",
+                    "description": "Unstyled UI primitives for React.",
+                    "topics": ["react", "accessibility", "design-systems", "ui-components"],
+                    "language": "TypeScript",
+                    "summary": "Accessible low-level React components.",
+                    "search_phrases": ["unstyled UI primitives", "accessible React component library"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank(
+        "TypeScript ui ui-components ui-kit for accessible react-based design systems creating",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=fake_embed,
+    )
+
+    adobe = next(item for item in result["results"] if item["repo_id"] == "adobe/react-spectrum")
+    radix = next(item for item in result["results"] if item["repo_id"] == "radix-ui/primitives")
+    assert adobe["metadata_score"] >= 0.15
+    assert radix["metadata_score"] >= 0.12
+    assert adobe["semantic_score"] > radix["semantic_score"]
+
+
+def test_rank_keeps_profile_phrase_more_authoritative_than_description_only_match():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "amplication/amplication",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "amplication",
+                    "description": "Platform engineering tool that generates backend service code from customizable templates.",
+                    "topics": ["typescript", "code-generation", "graphql"],
+                    "language": "TypeScript",
+                    "summary": "Backend code generator and service template platform.",
+                    "search_phrases": ["backend code generator", "service template platform"],
+                },
+            },
+            {
+                "repo_id": "noise/site-template",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "site-template",
+                    "description": "Template repository for generating websites with AI.",
+                    "topics": ["template", "typescript", "ai"],
+                    "language": "TypeScript",
+                    "summary": "Website cloning template.",
+                    "search_phrases": ["AI website cloner"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("TypeScript backend code generator service template", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "amplication/amplication"
+
+
+def test_rank_prefers_framework_over_flexbox_demo_when_query_mentions_framework():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "wcywin/flexbox",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "flexbox",
+                    "description": "Responsive landing page made with Flexbox and media queries.",
+                    "topics": ["flexbox", "landing-page", "css-framework"],
+                    "language": "CSS",
+                    "summary": "A static HTML/CSS flexbox demo.",
+                    "use_cases": [
+                        "Learning or referencing how to build a responsive landing page with Flexbox",
+                        "Using as a template for a simple responsive landing page",
+                    ],
+                    "search_phrases": ["responsive landing page with flexbox"],
+                },
+            },
+            {
+                "repo_id": "jgthms/bulma",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "bulma",
+                    "description": "Modern CSS framework based on Flexbox",
+                    "topics": ["css", "flexbox", "css-framework"],
+                    "language": "CSS",
+                    "summary": "CSS-only framework for responsive interfaces.",
+                    "use_cases": [
+                        "Building responsive website layouts",
+                        "Creating web interfaces without writing custom CSS",
+                    ],
+                    "capabilities": [
+                        "Flexbox-based grid and column system",
+                        "Responsive design utilities",
+                    ],
+                    "search_phrases": ["flexbox css framework", "responsive css framework"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank(
+        "CSS library for responsive website layouts creating web modern css framework based flexbox",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=fake_embed,
+    )
+
+    assert result["results"][0]["repo_id"] == "jgthms/bulma"
+
+
+def test_rank_penalizes_template_repo_when_query_is_for_backend_generator():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "noise/site-template",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "site-template",
+                    "description": "Template repository for generating websites with AI.",
+                    "topics": ["template", "typescript", "ai"],
+                    "language": "TypeScript",
+                    "summary": "Website cloning template.",
+                    "search_phrases": ["AI website cloner"],
+                },
+            },
+            {
+                "repo_id": "amplication/amplication",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "amplication",
+                    "description": "Platform engineering tool that generates backend service code from customizable templates.",
+                    "topics": ["typescript", "code-generation", "graphql"],
+                    "language": "TypeScript",
+                    "summary": "Backend code generator and service template platform.",
+                    "search_phrases": ["backend code generator", "service template platform"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("TypeScript backend code generator service template", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "amplication/amplication"

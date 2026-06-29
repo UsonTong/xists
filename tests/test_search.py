@@ -630,6 +630,205 @@ def test_rank_treats_short_language_tokens_as_language_evidence():
     assert result["results"][0]["repo_id"] == "go/vector-db"
 
 
+def test_rank_treats_vue_language_prefix_as_language_evidence():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "generic/page-builder",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "description": "Visual drag-and-drop page builder.",
+                    "topics": ["page-builder"],
+                    "language": "JavaScript",
+                    "summary": "A generic visual page builder.",
+                    "search_phrases": ["visual drag-and-drop interface"],
+                },
+            },
+            {
+                "repo_id": "target/vue-builder",
+                "vector": [0.97, 0.0],
+                "metadata": {
+                    "description": "Visual drag-and-drop interface for building pages.",
+                    "topics": ["vue", "page-builder"],
+                    "language": "Vue",
+                    "summary": "Vue page builder.",
+                    "search_phrases": ["visual drag-and-drop interface"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("Vue visual drag-and-drop interface", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "target/vue-builder"
+
+
+def test_rank_treats_multiword_language_prefix_as_language_evidence():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "generic/notebooks",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "description": "Interactive notebook examples.",
+                    "topics": ["notebook"],
+                    "language": "Python",
+                    "summary": "Executable examples.",
+                    "search_phrases": ["interactive notebooks with executable code examples"],
+                },
+            },
+            {
+                "repo_id": "target/jupyter-examples",
+                "vector": [0.97, 0.0],
+                "metadata": {
+                    "description": "Interactive Jupyter notebooks with executable code examples.",
+                    "topics": ["jupyter", "notebook"],
+                    "language": "Jupyter Notebook",
+                    "summary": "Executable notebook examples.",
+                    "search_phrases": ["interactive notebooks with executable code examples"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank(
+        "Jupyter Notebook interactive notebooks with executable code examples",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=fake_embed,
+    )
+
+    assert result["results"][0]["repo_id"] == "target/jupyter-examples"
+
+
+def test_rank_treats_shell_alias_as_language_evidence():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "generic/dockerfiles",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "description": "Docker image build and publish workflow.",
+                    "topics": ["docker"],
+                    "language": "Dockerfile",
+                    "summary": "Container build workflow.",
+                    "search_phrases": ["docker image build and publish workflow"],
+                },
+            },
+            {
+                "repo_id": "target/shell-release",
+                "vector": [0.97, 0.0],
+                "metadata": {
+                    "description": "Docker image build and publish workflow.",
+                    "topics": ["shell", "docker"],
+                    "language": "Shell",
+                    "summary": "Shell release automation.",
+                    "search_phrases": ["docker image build and publish workflow"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("bash docker image build and publish workflow", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "target/shell-release"
+
+
+def test_rank_uses_language_prefix_as_primary_language_constraint():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "target/java-db",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "description": "Android NoSQL database for Java and Kotlin apps.",
+                    "topics": ["android", "nosql", "database", "java", "kotlin"],
+                    "language": "Java",
+                    "summary": "Java database for Android.",
+                    "search_phrases": ["android nosql database java kotlin"],
+                },
+            },
+            {
+                "repo_id": "noise/kotlin-app",
+                "vector": [0.99, 0.0],
+                "metadata": {
+                    "description": "Android app written in Kotlin.",
+                    "topics": ["android", "java", "kotlin"],
+                    "language": "Kotlin",
+                    "summary": "Kotlin Android client.",
+                    "search_phrases": ["android java kotlin"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("Java android nosql database java kotlin", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "target/java-db"
+    assert result["results"][0]["metadata_score"] > result["results"][1]["metadata_score"]
+
+
+def test_rank_does_not_treat_negated_language_as_positive_language_evidence():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "semantic/css-patterns",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "description": "CSS-only background pattern library.",
+                    "topics": ["css", "patterns"],
+                    "language": "HTML",
+                    "summary": "Pure CSS patterns without JavaScript.",
+                    "capabilities": ["Pure CSS implementation with no JavaScript dependency"],
+                    "search_phrases": ["pure CSS pattern library"],
+                },
+            },
+            {
+                "repo_id": "noise/javascript-free-ui",
+                "vector": [0.96, 0.0],
+                "metadata": {
+                    "description": "CSS-only design system with no JavaScript dependency.",
+                    "topics": ["css", "design-system"],
+                    "language": "CSS",
+                    "summary": "Retro UI components.",
+                    "capabilities": ["Pure CSS implementation with no JavaScript dependency"],
+                    "search_phrases": ["retro CSS design system"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("Pure CSS implementation with no JavaScript dependency", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "semantic/css-patterns"
+
+
 def test_rank_caps_repeated_metadata_token_evidence():
     index = {
         "embedding_model": "bge-m3",

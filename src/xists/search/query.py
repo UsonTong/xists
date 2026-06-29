@@ -21,6 +21,7 @@ from xists.search.embed import EmbeddingConfig, EmbeddingError, call_embeddings,
 # abstain unless semantic similarity or strong metadata evidence supports them.
 HIGH_CONFIDENCE_THRESHOLD = 0.55
 EXPLORATORY_THRESHOLD = 0.35
+TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*")
 GENERIC_TERMS = {
     "and",
     "api",
@@ -70,10 +71,52 @@ GENERIC_TERMS = {
     "with",
     "written",
 }
-LANGUAGE_TERMS = {"javascript", "typescript", "python", "rust", "go", "java", "php", "ruby", "c++", "c#", "scala"}
+LANGUAGE_ALIAS_GROUPS = (
+    ("python", ("python", "py")),
+    ("javascript", ("javascript", "js")),
+    ("typescript", ("typescript", "ts")),
+    ("rust", ("rust",)),
+    ("go", ("go", "golang")),
+    ("java", ("java",)),
+    ("php", ("php",)),
+    ("ruby", ("ruby",)),
+    ("c", ("c",)),
+    ("c++", ("c++", "cpp", "cplusplus")),
+    ("c#", ("c#", "csharp")),
+    ("scala", ("scala",)),
+    ("swift", ("swift",)),
+    ("kotlin", ("kotlin",)),
+    ("dart", ("dart",)),
+    ("vue", ("vue",)),
+    ("html", ("html",)),
+    ("css", ("css",)),
+    ("shell", ("shell", "bash", "sh", "zsh")),
+    ("r", ("r", "rstats")),
+    ("jupyter notebook", ("jupyter notebook", "jupyter-notebook", "jupyter", "ipynb")),
+)
+LANGUAGE_ALIASES = {
+    canonical: {alias for alias in aliases}
+    for canonical, aliases in LANGUAGE_ALIAS_GROUPS
+}
+LANGUAGE_TERMS = {
+    alias_tokens[0]
+    for aliases in LANGUAGE_ALIASES.values()
+    for alias in aliases
+    if len(alias_tokens := TOKEN_RE.findall(alias)) == 1
+}
+LANGUAGE_PREFIXES = sorted(
+    {
+        tuple(TOKEN_RE.findall(alias))
+        for aliases in LANGUAGE_ALIASES.values()
+        for alias in aliases
+        if TOKEN_RE.findall(alias)
+    },
+    key=len,
+    reverse=True,
+)
 ALTERNATIVE_TERMS = {"alternative", "alternatives", "replace", "replacement", "replacing"}
+LANGUAGE_NEGATION_TERMS = {"no", "non", "not", "without"}
 QUERY_JOINERS = {"a", "an", "and", "for", "or", "the", "to", "with"}
-TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*")
 RERANK_CANDIDATE_MULTIPLIER = 5
 MIN_RERANK_CANDIDATES = 300
 
@@ -109,6 +152,115 @@ def _tokenize(text: str) -> list[str]:
     return TOKEN_RE.findall(text.lower())
 
 
+def _language_aliases_from_tokens(tokens: list[str]) -> set[str]:
+    token_text = " ".join(tokens)
+    hyphen_text = "-".join(tokens)
+    compact_text = "".join(tokens)
+    aliases: set[str] = set()
+    for canonical, values in LANGUAGE_ALIASES.items():
+        for alias in values:
+            alias_tokens = _tokenize(alias)
+            if not alias_tokens:
+                continue
+            if len(alias_tokens) == 1 and alias_tokens[0] in tokens:
+                aliases.add(canonical)
+                break
+            alias_text = " ".join(alias_tokens)
+            if alias_text in {token_text, hyphen_text, compact_text}:
+                aliases.add(canonical)
+                break
+            if re.search(rf"(^|\s){re.escape(alias_text)}($|\s)", token_text):
+                aliases.add(canonical)
+                break
+    return aliases
+
+
+def _language_alias_is_negated(tokens: list[str], alias_tokens: list[str]) -> bool:
+    if not alias_tokens or len(alias_tokens) > len(tokens):
+        return False
+    for index in range(len(tokens) - len(alias_tokens) + 1):
+        if tokens[index : index + len(alias_tokens)] != alias_tokens:
+            continue
+        before = tokens[max(0, index - 2) : index]
+        if any(token in LANGUAGE_NEGATION_TERMS for token in before):
+            return True
+    return False
+
+
+def _negated_language_aliases(tokens: list[str]) -> set[str]:
+    aliases: set[str] = set()
+    for canonical, values in LANGUAGE_ALIASES.items():
+        for alias in values:
+            alias_tokens = _tokenize(alias)
+            if _language_alias_is_negated(tokens, alias_tokens):
+                aliases.add(canonical)
+                break
+    return aliases
+
+
+def _query_primary_language_alias(query: str) -> str | None:
+    tokens = _tokenize(query)
+    prefix_length = _language_prefix_length(tokens)
+    if prefix_length == 0:
+        return None
+    prefix_aliases = _language_aliases_from_tokens(tokens[:prefix_length])
+    for canonical, _ in LANGUAGE_ALIAS_GROUPS:
+        if canonical in prefix_aliases:
+            return canonical
+    return None
+
+
+def _query_language_terms(query: str) -> set[str]:
+    tokens = _tokenize(query)
+    terms = {
+        token
+        for canonical in _negated_language_aliases(tokens)
+        for alias in LANGUAGE_ALIASES[canonical]
+        for token in _tokenize(alias)
+        if token in tokens
+    }
+    prefix_length = _language_prefix_length(tokens)
+    if prefix_length:
+        terms.update(tokens[:prefix_length])
+    return terms
+
+
+def _language_prefix_length(tokens: list[str]) -> int:
+    for prefix in LANGUAGE_PREFIXES:
+        if tuple(tokens[: len(prefix)]) == prefix:
+            return len(prefix)
+    return 0
+
+
+def _metadata_language_alias(language: str) -> str | None:
+    tokens = _tokenize(language)
+    if not tokens:
+        return None
+    aliases = _language_aliases_from_tokens(tokens)
+    for canonical, _ in LANGUAGE_ALIAS_GROUPS:
+        if canonical in aliases:
+            return canonical
+    return None
+
+
+def _language_matches_query(language: str, *, primary_alias: str | None = None) -> bool:
+    language_alias = _metadata_language_alias(language)
+    if primary_alias:
+        return language_alias == primary_alias
+    return False
+
+
+def _language_mismatch(language: str, *, primary_alias: str | None = None) -> bool:
+    language_alias = _metadata_language_alias(language)
+    if primary_alias:
+        return bool(language_alias and language_alias != primary_alias)
+    return False
+
+
+def _token_set_without_query_languages(text: str, query: str) -> set[str]:
+    return set(_tokenize(text)) - _query_language_terms(query)
+
+
 def _keyword_tokens(query: str) -> set[str]:
     return {
         token
@@ -118,7 +270,7 @@ def _keyword_tokens(query: str) -> set[str]:
 
 
 def _content_keyword_tokens(query: str) -> set[str]:
-    return _keyword_tokens(query) - LANGUAGE_TERMS
+    return _keyword_tokens(query) - _query_language_terms(query)
 
 
 def _dedupe_adjacent(tokens: list[str]) -> list[str]:
@@ -140,9 +292,7 @@ def _query_text_variants(query: str) -> set[str]:
     add(tokens)
     add(_dedupe_adjacent(tokens))
 
-    start = 0
-    while start < len(tokens) and tokens[start] in LANGUAGE_TERMS:
-        start += 1
+    start = _language_prefix_length(tokens)
     if start:
         without_language_prefix = tokens[start:]
         add(without_language_prefix)
@@ -355,6 +505,8 @@ def _metadata_bonus_cap(
         cap = max(cap, 0.16)
     if strong_phrase_match:
         cap += 0.04
+    if exact_phrase_language_match:
+        cap += 0.03
     if identity_match:
         cap += 0.025
     return min(cap, 0.32)
@@ -368,7 +520,7 @@ def _metadata_score(query: str, entry: dict[str, Any], *, exact_phrase_match_cou
     score = 0.0
     query_tokens = _tokenize(query)
     keyword_tokens = _content_keyword_tokens(query)
-    language_tokens = set(query_tokens) & LANGUAGE_TERMS
+    primary_language_alias = _query_primary_language_alias(query)
     query_variants = _query_text_variants(query)
     has_specific_variant = _has_specific_variant(query_variants)
 
@@ -377,14 +529,14 @@ def _metadata_score(query: str, entry: dict[str, Any], *, exact_phrase_match_cou
     description = str(metadata.get("description") or "").lower()
     summary = str(metadata.get("summary") or "").lower()
     language = str(metadata.get("language") or "").lower()
-    language_match = bool(language_tokens and language in language_tokens)
+    language_match = _language_matches_query(language, primary_alias=primary_language_alias)
     topics = {
         token
         for topic in metadata.get("topics") or []
         for token in _tokenize(str(topic))
     }
     metadata_text = _all_metadata_text(metadata).lower()
-    metadata_tokens = set(_tokenize(metadata_text)) - LANGUAGE_TERMS
+    metadata_tokens = _token_set_without_query_languages(metadata_text, query)
     repo_tokens = set(_tokenize(repo_id.replace("/", " ")))
     name_tokens = set(_tokenize(name))
     identity_match = _identity_in_text(query_variants, repo_id, name)
@@ -423,7 +575,7 @@ def _metadata_score(query: str, entry: dict[str, Any], *, exact_phrase_match_cou
         if topic_overlap:
             score += min(0.06, 0.025 * topic_overlap)
 
-    if language_tokens and language and not language_match:
+    if _language_mismatch(language, primary_alias=primary_language_alias):
         score -= 0.04
 
     best_phrase_score = 0.0

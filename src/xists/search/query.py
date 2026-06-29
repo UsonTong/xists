@@ -170,6 +170,105 @@ LANGUAGE_NEGATION_TERMS = {"no", "non", "not", "without"}
 QUERY_JOINERS = {"a", "an", "and", "for", "or", "the", "to", "with"}
 RERANK_CANDIDATE_MULTIPLIER = 5
 MIN_RERANK_CANDIDATES = 300
+PHRASE_SOURCE_WEIGHTS = {
+    "description": 0.9,
+    "summary": 0.95,
+    "use_cases": 1.0,
+    "capabilities": 1.0,
+    "search_phrases": 1.0,
+}
+TYPE_CUE_TERMS = {
+    "admin",
+    "api",
+    "app",
+    "application",
+    "backend",
+    "boilerplate",
+    "cli",
+    "client",
+    "code-generation",
+    "collection",
+    "collections",
+    "component",
+    "components",
+    "compiler",
+    "crm",
+    "dashboard",
+    "database",
+    "demo",
+    "demos",
+    "design-system",
+    "design-systems",
+    "desktop",
+    "example",
+    "examples",
+    "framework",
+    "frontend",
+    "generator",
+    "guide",
+    "guides",
+    "kanban",
+    "kit",
+    "library",
+    "list",
+    "lists",
+    "mobile",
+    "notebook",
+    "notebooks",
+    "platform",
+    "playbook",
+    "playbooks",
+    "plugin",
+    "plugins",
+    "runtime",
+    "sample",
+    "samples",
+    "sdk",
+    "server",
+    "service",
+    "starter",
+    "template",
+    "testing",
+    "theme",
+    "themes",
+    "tool",
+    "tools",
+    "tutorial",
+    "tutorials",
+    "ui",
+    "ui-components",
+    "ui-kit",
+    "wiki",
+    "workshop",
+    "workshops",
+}
+ARTIFACT_LIKE_TYPE_CUES = {
+    "boilerplate",
+    "collection",
+    "collections",
+    "demo",
+    "demos",
+    "example",
+    "examples",
+    "guide",
+    "guides",
+    "list",
+    "lists",
+    "notebook",
+    "notebooks",
+    "playbook",
+    "playbooks",
+    "sample",
+    "samples",
+    "starter",
+    "template",
+    "theme",
+    "themes",
+    "tutorial",
+    "tutorials",
+    "workshop",
+    "workshops",
+}
 
 
 class IndexMismatchError(RuntimeError):
@@ -434,6 +533,24 @@ def _all_metadata_text(metadata: dict[str, Any]) -> str:
     return "\n".join(parts)
 
 
+@lru_cache(maxsize=8192)
+def _type_cue_tokens(text: str) -> frozenset[str]:
+    return frozenset(token for token in _tokenize(text) if token in TYPE_CUE_TERMS)
+
+
+def _profile_phrases(metadata: dict[str, Any]) -> list[tuple[str, str]]:
+    phrases: list[tuple[str, str]] = []
+    for key in ("description", "summary"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            phrases.append((key, value))
+    for key in ("use_cases", "capabilities", "search_phrases"):
+        values = metadata.get(key)
+        if isinstance(values, list):
+            phrases.extend((key, str(value)) for value in values if isinstance(value, str) and value.strip())
+    return phrases
+
+
 @lru_cache(maxsize=65536)
 def _phrase_specificity(phrase: str) -> float:
     tokens = _tokenize(phrase)
@@ -459,50 +576,61 @@ def _profile_phrase_match(
     best_partial_specificity = 0.0
     best_partial_overlap = 0
     best_partial_ratio = 0.0
+    best_partial_source = ""
     coverage_tokens: set[str] = set()
     coverage_phrase_hits = 0
     exact_specificity = 0.0
     exact_token_count = 0
+    exact_source = ""
     exact_match = False
 
-    for key in ("use_cases", "capabilities", "search_phrases"):
-        for phrase in metadata.get(key) or []:
-            phrase_tokens = _tokenize(str(phrase))
-            if not phrase_tokens:
+    for source, phrase in _profile_phrases(metadata):
+        phrase_tokens = _tokenize(str(phrase))
+        if not phrase_tokens:
+            continue
+        phrase_token_set = set(phrase_tokens)
+        phrase_text = " ".join(phrase_tokens)
+        specificity = _phrase_specificity(str(phrase)) * PHRASE_SOURCE_WEIGHTS.get(source, 1.0)
+        if phrase_text in variants:
+            if phrase_text not in exact_phrases_seen:
+                exact_phrases_seen.add(phrase_text)
+                exact_match = True
+                if specificity > exact_specificity or (
+                    math.isclose(specificity, exact_specificity) and len(phrase_tokens) > exact_token_count
+                ):
+                    exact_specificity = specificity
+                    exact_token_count = len(phrase_tokens)
+                    exact_source = source
+        elif keyword_tokens and keyword_tokens.issubset(phrase_token_set):
+            best_subset_specificity = max(best_subset_specificity, specificity)
+        if keyword_tokens:
+            overlap = len(keyword_tokens & phrase_token_set)
+            overlap_tokens = keyword_tokens & phrase_token_set
+            if len(overlap_tokens) >= 2:
+                coverage_tokens.update(overlap_tokens)
+                coverage_phrase_hits += 1
+            if overlap < 2:
                 continue
-            phrase_token_set = set(phrase_tokens)
-            phrase_text = " ".join(phrase_tokens)
-            specificity = _phrase_specificity(str(phrase))
-            if phrase_text in variants:
-                if phrase_text not in exact_phrases_seen:
-                    exact_phrases_seen.add(phrase_text)
-                    exact_match = True
-                    exact_specificity = max(exact_specificity, specificity)
-                    exact_token_count = max(exact_token_count, len(phrase_tokens))
-            elif keyword_tokens and keyword_tokens.issubset(phrase_token_set):
-                best_subset_specificity = max(best_subset_specificity, specificity)
-            if keyword_tokens:
-                overlap = len(keyword_tokens & phrase_token_set)
-                overlap_tokens = keyword_tokens & phrase_token_set
-                if len(overlap_tokens) >= 2:
-                    coverage_tokens.update(overlap_tokens)
-                    coverage_phrase_hits += 1
-                if overlap < 2:
-                    continue
-                ratio = overlap / len(keyword_tokens)
-                if ratio > best_partial_ratio or (math.isclose(ratio, best_partial_ratio) and overlap > best_partial_overlap):
-                    best_partial_ratio = ratio
-                    best_partial_overlap = overlap
-                    best_partial_specificity = specificity
+            ratio = overlap / len(keyword_tokens)
+            if ratio > best_partial_ratio or (
+                math.isclose(ratio, best_partial_ratio)
+                and (overlap > best_partial_overlap or (overlap == best_partial_overlap and specificity > best_partial_specificity))
+            ):
+                best_partial_ratio = ratio
+                best_partial_overlap = overlap
+                best_partial_specificity = specificity
+                best_partial_source = source
 
     return {
         "exact": exact_match,
         "exact_specificity": exact_specificity,
         "exact_token_count": exact_token_count,
+        "exact_source": exact_source,
         "subset_specificity": best_subset_specificity,
         "partial_specificity": best_partial_specificity,
         "partial_overlap": best_partial_overlap,
         "partial_ratio": best_partial_ratio,
+        "partial_source": best_partial_source,
         "coverage_overlap": len(coverage_tokens),
         "coverage_ratio": (len(coverage_tokens) / len(keyword_tokens)) if keyword_tokens else 0.0,
         "coverage_phrase_hits": coverage_phrase_hits,
@@ -648,6 +776,8 @@ def _metadata_score(
     }
     metadata_text = _all_metadata_text(metadata).lower()
     metadata_tokens = _token_set_without_query_languages(metadata_text, query)
+    query_type_cues = _type_cue_tokens(query)
+    metadata_type_cues = _type_cue_tokens("\n".join(filter(None, [repo_id, name, metadata_text])))
     repo_tokens = set(_tokenize(repo_id.replace("/", " ")))
     name_tokens = set(_tokenize(name))
     identity_match = _identity_in_text(query_variants, repo_id, name)
@@ -664,6 +794,7 @@ def _metadata_score(
     unique_exact_phrase_match = exact_phrase_match and exact_phrase_match_count == 1
     exact_phrase_specificity = float(phrase_match["exact_specificity"])
     exact_phrase_token_count = int(phrase_match["exact_token_count"])
+    exact_phrase_source = str(phrase_match.get("exact_source") or "")
     exact_phrase_language_match = exact_phrase_match and language_match
 
     if _variant_in_text(query_variants, repo_id):
@@ -690,6 +821,12 @@ def _metadata_score(
         topic_overlap = len(keyword_tokens & topics)
         if topic_overlap:
             score += min(0.06, 0.025 * topic_overlap)
+    type_overlap = len(query_type_cues & metadata_type_cues)
+    if type_overlap:
+        score += min(0.08, 0.018 * type_overlap)
+    off_target_type_cues = (metadata_type_cues & ARTIFACT_LIKE_TYPE_CUES) - query_type_cues
+    if query_type_cues and off_target_type_cues and type_overlap == 0:
+        score -= min(0.04, 0.012 * len(off_target_type_cues))
 
     if language_mismatch:
         score -= 0.04
@@ -697,10 +834,13 @@ def _metadata_score(
     best_phrase_score = 0.0
     strong_phrase_match = exact_phrase_match and exact_phrase_specificity >= 0.02
     if exact_phrase_match:
-        if unique_exact_phrase_match:
+        exact_from_profile = exact_phrase_source in {"use_cases", "capabilities", "search_phrases"}
+        if unique_exact_phrase_match and exact_from_profile:
             exact_base = 0.16
         elif exact_phrase_language_match:
             exact_base = 0.05
+        elif exact_phrase_source in {"description", "summary"}:
+            exact_base = 0.025
         else:
             exact_base = 0.03
         best_phrase_score = max(best_phrase_score, exact_base + max(0.0, exact_phrase_specificity))

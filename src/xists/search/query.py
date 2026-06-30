@@ -169,7 +169,7 @@ ALTERNATIVE_TERMS = {"alternative", "alternatives", "replace", "replacement", "r
 LANGUAGE_NEGATION_TERMS = {"no", "non", "not", "without"}
 QUERY_JOINERS = {"a", "an", "and", "for", "or", "the", "to", "with"}
 RERANK_CANDIDATE_MULTIPLIER = 5
-MIN_RERANK_CANDIDATES = 300
+MIN_RERANK_CANDIDATES = 500
 PHRASE_SOURCE_WEIGHTS = {
     "description": 0.9,
     "summary": 0.95,
@@ -269,6 +269,40 @@ ARTIFACT_LIKE_TYPE_CUES = {
     "workshop",
     "workshops",
 }
+REPO_QUALIFIER_TERMS = {
+    "android",
+    "archive",
+    "archived",
+    "awesome",
+    "backend",
+    "boilerplate",
+    "cli",
+    "client",
+    "core",
+    "demo",
+    "desktop",
+    "example",
+    "frontend",
+    "guide",
+    "ios",
+    "linux",
+    "macos",
+    "mobile",
+    "notebook",
+    "plugin",
+    "plugins",
+    "sample",
+    "sdk",
+    "server",
+    "starter",
+    "template",
+    "tool",
+    "tools",
+    "tutorial",
+    "web",
+    "windows",
+    "workshop",
+}
 
 
 class IndexMismatchError(RuntimeError):
@@ -301,6 +335,17 @@ def confidence_bucket(score: float) -> str:
 @lru_cache(maxsize=65536)
 def _tokenize(text: str) -> tuple[str, ...]:
     return tuple(TOKEN_RE.findall(text.lower()))
+
+
+@lru_cache(maxsize=65536)
+def _compound_token_parts(text: str) -> frozenset[str]:
+    parts: set[str] = set()
+    for token in _tokenize(text):
+        parts.add(token)
+        for part in re.split(r"[-._#]+", token):
+            if part:
+                parts.add(part)
+    return frozenset(parts)
 
 
 def _language_aliases_from_tokens(tokens: list[str]) -> set[str]:
@@ -538,6 +583,18 @@ def _type_cue_tokens(text: str) -> frozenset[str]:
     return frozenset(token for token in _tokenize(text) if token in TYPE_CUE_TERMS)
 
 
+@lru_cache(maxsize=8192)
+def _repo_descriptor_tokens(text: str) -> frozenset[str]:
+    return frozenset(
+        token
+        for token in _compound_token_parts(text)
+        if len(token) > 2
+        and token not in GENERIC_TERMS
+        and token not in LANGUAGE_TERMS
+        and not token.isdigit()
+    )
+
+
 def _profile_phrases(metadata: dict[str, Any]) -> list[tuple[str, str]]:
     phrases: list[tuple[str, str]] = []
     for key in ("description", "summary"):
@@ -549,6 +606,16 @@ def _profile_phrases(metadata: dict[str, Any]) -> list[tuple[str, str]]:
         if isinstance(values, list):
             phrases.extend((key, str(value)) for value in values if isinstance(value, str) and value.strip())
     return phrases
+
+
+def _candidate_type_cues(item: dict[str, Any]) -> frozenset[str]:
+    metadata = item.get("metadata")
+    if not isinstance(metadata, dict):
+        return frozenset()
+    repo_id = str(item.get("repo_id") or "")
+    name = str(metadata.get("name") or "")
+    metadata_text = _all_metadata_text(metadata)
+    return _type_cue_tokens("\n".join(filter(None, [repo_id, name, metadata_text])))
 
 
 @lru_cache(maxsize=65536)
@@ -595,11 +662,14 @@ def _profile_phrase_match(
             if phrase_text not in exact_phrases_seen:
                 exact_phrases_seen.add(phrase_text)
                 exact_match = True
-                if specificity > exact_specificity or (
-                    math.isclose(specificity, exact_specificity) and len(phrase_tokens) > exact_token_count
+                phrase_token_count = len(phrase_tokens)
+                if (
+                    specificity > exact_specificity
+                    or exact_token_count == 0
+                    or (math.isclose(specificity, exact_specificity) and phrase_token_count > exact_token_count)
                 ):
-                    exact_specificity = specificity
-                    exact_token_count = len(phrase_tokens)
+                    exact_specificity = max(exact_specificity, specificity)
+                    exact_token_count = phrase_token_count
                     exact_source = source
         elif keyword_tokens and keyword_tokens.issubset(phrase_token_set):
             best_subset_specificity = max(best_subset_specificity, specificity)
@@ -713,6 +783,9 @@ def _metadata_bonus_cap(
     unique_exact_phrase_match: bool = False,
     exact_phrase_specificity: float = 0.0,
     exact_phrase_token_count: int = 0,
+    partial_overlap: int = 0,
+    partial_ratio: float = 0.0,
+    partial_specificity: float = 0.0,
     coverage_overlap: int = 0,
     coverage_ratio: float = 0.0,
     coverage_phrase_hits: int = 0,
@@ -727,6 +800,8 @@ def _metadata_bonus_cap(
             cap = max(cap, 0.14)
     elif exact_phrase_language_match and exact_phrase_token_count >= 2:
         cap = max(cap, 0.16)
+    if partial_overlap >= 4 and partial_ratio >= 0.6 and partial_specificity >= 0.06:
+        cap = max(cap, 0.21)
     if coverage_overlap >= 4 and coverage_ratio >= 0.75 and coverage_phrase_hits >= 2:
         cap = max(cap, 0.21)
     if strong_phrase_match:
@@ -780,6 +855,9 @@ def _metadata_score(
     metadata_type_cues = _type_cue_tokens("\n".join(filter(None, [repo_id, name, metadata_text])))
     repo_tokens = set(_tokenize(repo_id.replace("/", " ")))
     name_tokens = set(_tokenize(name))
+    repo_part_tokens = set(_compound_token_parts(repo_id.replace("/", " ")))
+    name_part_tokens = set(_compound_token_parts(name))
+    repo_descriptor_tokens = _repo_descriptor_tokens(" ".join(repo_part_tokens | name_part_tokens))
     identity_match = _identity_in_text(query_variants, repo_id, name)
     exact_identity_match = _exact_identity_match(query, query_variants, repo_id, name)
     alternative_targets = _alternative_targets(query_tokens)
@@ -821,9 +899,25 @@ def _metadata_score(
         topic_overlap = len(keyword_tokens & topics)
         if topic_overlap:
             score += min(0.06, 0.025 * topic_overlap)
+    repo_descriptor_overlap = repo_descriptor_tokens & keyword_tokens
+    extra_repo_descriptors = repo_descriptor_tokens - keyword_tokens
+    repo_qualifier_tokens = (repo_part_tokens | name_part_tokens) & REPO_QUALIFIER_TERMS
+    off_target_repo_qualifiers = repo_qualifier_tokens - keyword_tokens
+    if (
+        repo_descriptor_overlap
+        and extra_repo_descriptors
+        and query_specificity >= 0.65
+        and not exact_identity_match
+    ):
+        score -= min(0.02, 0.006 * len(extra_repo_descriptors))
+    if off_target_repo_qualifiers and query_specificity >= 0.45 and not exact_identity_match:
+        score -= min(0.05, 0.018 * len(off_target_repo_qualifiers))
     type_overlap = len(query_type_cues & metadata_type_cues)
     if type_overlap:
         score += min(0.08, 0.018 * type_overlap)
+    if query_type_cues and query_type_cues.issubset(metadata_type_cues):
+        score += min(0.025, 0.012 * len(query_type_cues))
+    full_type_cue_match = bool(query_type_cues) and query_type_cues.issubset(metadata_type_cues)
     off_target_type_cues = (metadata_type_cues & ARTIFACT_LIKE_TYPE_CUES) - query_type_cues
     if query_type_cues and off_target_type_cues and type_overlap == 0:
         score -= min(0.04, 0.012 * len(off_target_type_cues))
@@ -844,6 +938,8 @@ def _metadata_score(
         else:
             exact_base = 0.03
         best_phrase_score = max(best_phrase_score, exact_base + max(0.0, exact_phrase_specificity))
+        if unique_exact_phrase_match and exact_from_profile and exact_phrase_token_count >= 3:
+            best_phrase_score += 0.02
     subset_specificity = float(phrase_match["subset_specificity"])
     if subset_specificity:
         best_phrase_score = max(best_phrase_score, 0.015 + max(0.0, subset_specificity))
@@ -858,10 +954,20 @@ def _metadata_score(
             best_phrase_score,
             min(0.08, 0.015 + partial_specificity + 0.01 * max(0, partial_overlap - 2)),
         )
+    if partial_overlap >= 4 and partial_ratio >= 0.6 and partial_specificity >= 0.06:
+        best_phrase_score = max(
+            best_phrase_score,
+            min(0.11, 0.025 + partial_specificity + 0.012 * max(0, partial_overlap - 3)),
+        )
     if coverage_overlap >= 4 and coverage_ratio >= 0.75 and coverage_phrase_hits >= 2:
         best_phrase_score = max(
             best_phrase_score,
             min(0.1, 0.02 + 0.01 * max(0, coverage_overlap - 3) + 0.01 * max(0, coverage_phrase_hits - 2)),
+        )
+    if coverage_overlap >= 5 and coverage_ratio >= 0.7 and coverage_phrase_hits >= 3:
+        best_phrase_score = max(
+            best_phrase_score,
+            min(0.11, 0.025 + 0.01 * max(0, coverage_overlap - 4) + 0.008 * max(0, coverage_phrase_hits - 3)),
         )
 
     score += best_phrase_score
@@ -888,6 +994,9 @@ def _metadata_score(
             unique_exact_phrase_match=unique_exact_phrase_match,
             exact_phrase_specificity=exact_phrase_specificity,
             exact_phrase_token_count=exact_phrase_token_count,
+            partial_overlap=partial_overlap,
+            partial_ratio=partial_ratio,
+            partial_specificity=partial_specificity,
             coverage_overlap=coverage_overlap,
             coverage_ratio=coverage_ratio,
             coverage_phrase_hits=coverage_phrase_hits,
@@ -899,8 +1008,12 @@ def _metadata_score(
             tie_break += 0.012
         elif language_mismatch:
             tie_break -= 0.012
+    if full_type_cue_match:
+        tie_break += min(0.012, 0.006 * len(query_type_cues))
     if coverage_overlap >= 4 and coverage_ratio >= 0.75 and coverage_phrase_hits >= 2:
         tie_break += min(0.02, 0.006 + 0.004 * max(0, coverage_overlap - 4))
+    if coverage_overlap >= 5 and coverage_ratio >= 0.7 and coverage_phrase_hits >= 3:
+        tie_break += min(0.018, 0.006 + 0.003 * max(0, coverage_overlap - 5))
     if query_specificity >= 0.8 and coverage_overlap >= 4 and coverage_ratio >= 0.75 and coverage_phrase_hits >= 2:
         tie_break += 0.004
     return max(-0.04, min(capped + tie_break, 0.35))
@@ -924,8 +1037,25 @@ def _metadata_match_strength(
 
     repo_id = str(item.get("repo_id") or "").lower()
     name = str(metadata.get("name") or "").lower()
+    strength = 0
     if _variant_in_text(query_variants, repo_id) or _variant_in_text(query_variants, name):
-        return 2
+        strength = 2
+
+    query_type_cues = _type_cue_tokens(query)
+    metadata_type_cues = _type_cue_tokens(
+        "\n".join(
+            filter(
+                None,
+                [
+                    repo_id,
+                    name,
+                    _all_metadata_text(metadata).lower(),
+                ],
+            )
+        )
+    )
+    if query_type_cues and query_type_cues.issubset(metadata_type_cues):
+        strength = max(strength, 1)
 
     phrase_match = phrase_match if phrase_match is not None else _profile_phrase_match(
         query,
@@ -935,21 +1065,22 @@ def _metadata_match_strength(
     )
     if phrase_match["exact"]:
         if float(phrase_match["exact_specificity"]) >= 0.02 or int(phrase_match["exact_token_count"]) >= 3:
-            return 2
-        return 1
+            strength = max(strength, 2)
+        else:
+            strength = max(strength, 1)
     if (
         int(phrase_match.get("partial_overlap", 0)) >= 3
         and float(phrase_match.get("partial_ratio", 0.0)) >= 0.6
         and float(phrase_match.get("partial_specificity", 0.0)) >= 0.02
     ):
-        return 1
+        strength = max(strength, 1)
     if (
         int(phrase_match.get("coverage_overlap", 0)) >= 4
         and float(phrase_match.get("coverage_ratio", 0.0)) >= 0.75
         and int(phrase_match.get("coverage_phrase_hits", 0)) >= 2
     ):
-        return 1
-    return 0
+        strength = max(strength, 1)
+    return strength
 
 
 def _has_metadata_rescue_evidence(
@@ -1015,6 +1146,7 @@ def _rerank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str,
     primary_language_alias = _query_primary_language_alias(query)
     query_variants = _query_text_variants(query)
     query_specificity = _query_specificity(query)
+    query_type_cues = _type_cue_tokens(query)
     phrase_matches: dict[str, dict[str, Any]] = {}
     for item in results:
         metadata = item.get("metadata")
@@ -1085,11 +1217,89 @@ def _rerank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str,
             required_advantage = 0.005
         elif winner_strength >= 2:
             required_advantage = 0.015
+        elif winner_strength >= 1 and semantic_strength == 0:
+            required_advantage = 0.001 + max(0.0, semantic_gap)
         else:
             required_advantage = 0.04 + max(0.0, semantic_gap)
         if semantic_winner is not rerank_winner and semantic_gap > 0.0 and metadata_advantage < required_advantage:
             reranked.remove(semantic_winner)
             reranked.insert(0, semantic_winner)
+        current_top = reranked[0]
+        current_phrase = phrase_matches.get(str(current_top.get("repo_id") or ""), {})
+        current_strength = _metadata_match_strength(
+            query,
+            current_top,
+            query_variants=query_variants,
+            keyword_tokens=keyword_tokens,
+            phrase_match=current_phrase,
+        )
+        if current_strength < 2:
+            for challenger in reranked[1:5]:
+                challenger_phrase = phrase_matches.get(str(challenger.get("repo_id") or ""), {})
+                challenger_strength = _metadata_match_strength(
+                    query,
+                    challenger,
+                    query_variants=query_variants,
+                    keyword_tokens=keyword_tokens,
+                    phrase_match=challenger_phrase,
+                )
+                if challenger_strength < 2 or challenger_strength <= current_strength:
+                    continue
+                if challenger["score"] >= current_top["score"] - 0.02:
+                    reranked.remove(challenger)
+                    reranked.insert(0, challenger)
+                    break
+    elif len(reranked) > 1 and query_specificity >= 0.65:
+        semantic_winner = max(reranked, key=lambda candidate: candidate["semantic_score"])
+        if semantic_winner is reranked[0]:
+            semantic_phrase = phrase_matches.get(str(semantic_winner.get("repo_id") or ""), {})
+            semantic_strength = _metadata_match_strength(
+                query,
+                semantic_winner,
+                query_variants=query_variants,
+                keyword_tokens=keyword_tokens,
+                phrase_match=semantic_phrase,
+            )
+            semantic_type_cues = _candidate_type_cues(semantic_winner)
+            semantic_full_type_match = bool(query_type_cues) and query_type_cues.issubset(semantic_type_cues)
+            semantic_coverage_overlap = int(semantic_phrase.get("coverage_overlap", 0))
+            semantic_coverage_ratio = float(semantic_phrase.get("coverage_ratio", 0.0))
+            for challenger in reranked[1:4]:
+                semantic_gap = semantic_winner["semantic_score"] - challenger["semantic_score"]
+                score_gap = semantic_winner["score"] - challenger["score"]
+                metadata_advantage = challenger["metadata_score"] - semantic_winner["metadata_score"]
+                if semantic_gap <= 0.0 or score_gap <= 0.0:
+                    continue
+                challenger_phrase = phrase_matches.get(str(challenger.get("repo_id") or ""), {})
+                challenger_strength = _metadata_match_strength(
+                    query,
+                    challenger,
+                    query_variants=query_variants,
+                    keyword_tokens=keyword_tokens,
+                    phrase_match=challenger_phrase,
+                )
+                challenger_type_cues = _candidate_type_cues(challenger)
+                challenger_full_type_match = bool(query_type_cues) and query_type_cues.issubset(challenger_type_cues)
+                challenger_coverage_overlap = int(challenger_phrase.get("coverage_overlap", 0))
+                challenger_coverage_ratio = float(challenger_phrase.get("coverage_ratio", 0.0))
+                strong_coverage_advantage = (
+                    challenger_coverage_overlap >= semantic_coverage_overlap + 1
+                    and challenger_coverage_ratio >= semantic_coverage_ratio + 0.15
+                )
+                stronger_structured_evidence = (
+                    challenger_strength > semantic_strength
+                    or (challenger_full_type_match and not semantic_full_type_match)
+                    or strong_coverage_advantage
+                )
+                if (
+                    stronger_structured_evidence
+                    and semantic_gap <= 0.07
+                    and score_gap <= 0.015
+                    and metadata_advantage >= 0.01
+                ):
+                    reranked.remove(challenger)
+                    reranked.insert(0, challenger)
+                    break
     return reranked
 
 
@@ -1127,11 +1337,42 @@ def _top_indices(scores: np.ndarray, top_k: int) -> np.ndarray:
     return np.take_along_axis(unsorted, order, axis=1)
 
 
-def _candidate_count(top_k: int, total: int) -> int:
+def _candidate_count(
+    top_k: int,
+    total: int,
+    *,
+    query_specificity: float | None = None,
+    keyword_count: int | None = None,
+    semantic_score: float | None = None,
+    semantic_gap: float | None = None,
+) -> int:
     requested = max(top_k, 0)
-    if requested == 0:
+    if requested == 0 or total == 0:
         return 0
-    return min(total, max(requested, MIN_RERANK_CANDIDATES, requested * RERANK_CANDIDATE_MULTIPLIER))
+
+    candidate_count = max(requested, MIN_RERANK_CANDIDATES, requested * RERANK_CANDIDATE_MULTIPLIER)
+
+    if semantic_score is not None and semantic_gap is not None:
+        specificity = query_specificity if query_specificity is not None else 1.0
+        keywords = keyword_count if keyword_count is not None else 0
+        if specificity <= 0.25 and keywords <= 2:
+            candidate_count = max(candidate_count, 6000)
+        elif specificity <= 0.45 and keywords <= 2:
+            candidate_count = max(candidate_count, 3000)
+        elif specificity <= 0.25 and keywords <= 1 and semantic_gap <= 0.05:
+            candidate_count = max(candidate_count, 3000)
+        elif specificity <= 0.25 and keywords <= 2 and semantic_gap <= 0.05:
+            candidate_count = max(candidate_count, 1800)
+        elif specificity <= 0.45 and keywords <= 1 and semantic_score >= 0.56 and semantic_gap <= 0.08:
+            candidate_count = max(candidate_count, 1800)
+        elif specificity <= 0.45 and keywords <= 2 and semantic_score >= 0.58 and semantic_gap <= 0.08:
+            candidate_count = max(candidate_count, 1200)
+        elif specificity <= 0.65 and semantic_score >= 0.56 and semantic_gap <= 0.06:
+            candidate_count = max(candidate_count, 900)
+        elif semantic_score >= 0.54 and semantic_gap <= 0.04:
+            candidate_count = max(candidate_count, 800)
+
+    return min(total, candidate_count)
 
 
 def rank_many(
@@ -1176,36 +1417,62 @@ def rank_many(
     index_matrix = _normalized_matrix(vectors)
     query_matrix = _normalized_matrix(query_vectors)
     scores = query_matrix @ index_matrix.T
-    candidate_count = _candidate_count(top_k, len(entries))
-    top = _top_indices(scores, candidate_count)
+    preview_count = min(50, len(entries))
+    preview = _top_indices(scores, preview_count)
+    query_specificities = [_query_specificity(query) for query in queries]
+    query_keyword_counts = [len(_content_keyword_tokens(query)) for query in queries]
+    candidate_counts: list[int] = []
+    for row, query_specificity in enumerate(query_specificities):
+        preview_indices = preview[row]
+        preview_scores = scores[row, preview_indices]
+        semantic_score = float(preview_scores[0]) if preview_scores.size else 0.0
+        semantic_gap = semantic_score - float(preview_scores[min(49, preview_scores.size - 1)]) if preview_scores.size > 1 else semantic_score
+        candidate_counts.append(
+            _candidate_count(
+                top_k,
+                len(entries),
+                query_specificity=query_specificity,
+                keyword_count=query_keyword_counts[row],
+                semantic_score=semantic_score,
+                semantic_gap=semantic_gap,
+            )
+        )
 
-    ranked: list[dict[str, Any]] = []
-    for row, query in enumerate(queries):
-        results: list[dict[str, Any]] = []
-        for column in top[row]:
-            score = float(scores[row, column])
-            results.append(
+    ranked: list[dict[str, Any] | None] = [None] * len(queries)
+    grouped_rows: dict[int, list[int]] = {}
+    for row, candidate_count in enumerate(candidate_counts):
+        grouped_rows.setdefault(candidate_count, []).append(row)
+
+    for candidate_count, rows in grouped_rows.items():
+        top = _top_indices(scores[rows], candidate_count)
+        for offset, row in enumerate(rows):
+            query = queries[row]
+            results: list[dict[str, Any]] = []
+            for column in top[offset]:
+                score = float(scores[row, column])
+                results.append(
+                    {
+                        "repo_id": repo_ids[int(column)],
+                        "score": score,
+                        "confidence": confidence_bucket(score),
+                        "metadata": entries[int(column)].get("metadata"),
+                    }
+                )
+            results = _rerank_results(query, results)
+            results = [item for item in results if item["confidence"] != "abstain"]
+            results = results[: max(top_k, 0)]
+            for item in results:
+                item.pop("metadata", None)
+            ranked[row] = (
                 {
-                    "repo_id": repo_ids[int(column)],
-                    "score": score,
-                    "confidence": confidence_bucket(score),
-                    "metadata": entries[int(column)].get("metadata"),
+                    "query": query,
+                    "abstained": len(results) == 0,
+                    "results": results,
+                    "considered": len(entries),
                 }
             )
-        results = _rerank_results(query, results)
-        results = [item for item in results if item["confidence"] != "abstain"]
-        results = results[: max(top_k, 0)]
-        for item in results:
-            item.pop("metadata", None)
-        ranked.append(
-            {
-                "query": query,
-                "abstained": len(results) == 0,
-                "results": results,
-                "considered": len(entries),
-            }
-        )
-    return ranked
+
+    return [item if item is not None else {"query": queries[index], "abstained": True, "results": [], "considered": len(entries)} for index, item in enumerate(ranked)]
 
 
 def rank(
@@ -1233,7 +1500,8 @@ def rank(
         )
 
     top_count = max(top_k, 0)
-    candidate_count = _candidate_count(top_k, len(index.get("vectors", [])))
+    query_specificity = _query_specificity(query)
+    keyword_count = len(_content_keyword_tokens(query))
     scored: list[dict[str, Any]] = []
     for entry in index.get("vectors", []):
         score = cosine_similarity(query_vector, entry["vector"])
@@ -1247,6 +1515,22 @@ def rank(
         )
 
     if top_count:
+        preview_count = min(50, len(scored))
+        preview = heapq.nlargest(preview_count, scored, key=lambda item: item["score"])
+        preview_semantic_score = float(preview[0]["score"]) if preview else 0.0
+        preview_semantic_gap = (
+            preview_semantic_score - float(preview[-1]["score"])
+            if len(preview) > 1
+            else preview_semantic_score
+        )
+        candidate_count = _candidate_count(
+            top_k,
+            len(index.get("vectors", [])),
+            query_specificity=query_specificity,
+            keyword_count=keyword_count,
+            semantic_score=preview_semantic_score,
+            semantic_gap=preview_semantic_gap,
+        )
         candidates = heapq.nlargest(candidate_count, scored, key=lambda item: item["score"])
         presented = _rerank_results(query, candidates)
         presented = [item for item in presented if item["confidence"] != "abstain"]

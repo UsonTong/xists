@@ -305,6 +305,156 @@ def test_rank_reranks_beyond_legacy_top_50_candidate_pool():
     assert result["results"][0]["repo_id"] == "ansible/ansible"
 
 
+def test_rank_rewards_exact_generic_phrase_matches():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "SuperManito/Arcadia",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "Arcadia",
+                    "language": "TypeScript",
+                    "summary": "A one-stop code automation and operations platform built with TypeScript.",
+                    "topics": ["typescript", "automation", "workflow"],
+                    "search_phrases": ["workflow automation platform"],
+                },
+            },
+            {
+                "repo_id": "n8n-io/n8n",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "n8n",
+                    "language": "TypeScript",
+                    "summary": "A fair-code workflow automation platform.",
+                    "topics": ["typescript", "automation", "workflow"],
+                    "search_phrases": ["workflow automation platform"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("TypeScript workflow automation platform", index, CONFIG, top_k=2, embed=fake_embed)
+
+    scores = {item["repo_id"]: item["metadata_score"] for item in result["results"]}
+    assert scores["n8n-io/n8n"] == pytest.approx(0.098)
+    assert scores["SuperManito/Arcadia"] == pytest.approx(0.098)
+
+
+def test_rank_many_expands_candidates_for_short_queries(monkeypatch):
+    from xists.search import query as query_module
+
+    captured = []
+
+    def fake_candidate_count(top_k, total, *, query_specificity=None, keyword_count=None, semantic_score=None, semantic_gap=None):
+        captured.append(
+            {
+                "top_k": top_k,
+                "total": total,
+                "query_specificity": query_specificity,
+                "keyword_count": keyword_count,
+                "semantic_score": semantic_score,
+                "semantic_gap": semantic_gap,
+            }
+        )
+        return 750
+
+    monkeypatch.setattr(query_module, "_candidate_count", fake_candidate_count)
+
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {"repo_id": f"repo-{index}", "vector": [1.0 - index * 0.0001, 0.0]}
+            for index in range(1200)
+        ],
+    }
+
+    def fake_embed_many(config, queries):
+        return [[1.0, 0.0] for _ in queries]
+
+    result = rank_many(["figaro", "android api"], index, CONFIG, top_k=10, batch_size=2, embed_many=fake_embed_many)
+
+    assert len(captured) == 2
+    assert all(call["semantic_score"] == pytest.approx(1.0) for call in captured)
+    assert all(call["query_specificity"] <= 0.45 for call in captured)
+    assert captured[0]["keyword_count"] == 1
+    assert captured[1]["keyword_count"] == 1
+    assert result[0]["considered"] == 1200
+
+
+def test_rank_many_groups_queries_by_candidate_count(monkeypatch):
+    from xists.search import query as query_module
+
+    calls = []
+
+    def fake_candidate_count(top_k, total, *, query_specificity=None, keyword_count=None, semantic_score=None, semantic_gap=None):
+        calls.append(query_specificity)
+        if query_specificity <= 0.25:
+            return 2
+        return 3
+
+    monkeypatch.setattr(query_module, "_candidate_count", fake_candidate_count)
+
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {"repo_id": "a/short", "vector": [1.0, 0.0]},
+            {"repo_id": "b/short", "vector": [0.9, 0.1]},
+            {"repo_id": "c/short", "vector": [0.8, 0.2]},
+            {"repo_id": "d/long", "vector": [0.2, 0.8]},
+        ],
+    }
+
+    def fake_embed_many(config, queries):
+        return [[1.0, 0.0] for _ in queries]
+
+    results = rank_many(["figaro", "open source workflow automation platform"], index, CONFIG, top_k=1, batch_size=2, embed_many=fake_embed_many)
+
+    assert calls == [0.25, 0.0]
+    assert results[0]["results"][0]["repo_id"] == "a/short"
+    assert results[1]["results"][0]["repo_id"] == "a/short"
+
+
+def test_rank_uses_more_candidates_for_short_queries(monkeypatch):
+    from xists.search import query as query_module
+
+    captured = {}
+
+    def fake_candidate_count(top_k, total, *, query_specificity=None, keyword_count=None, semantic_score=None, semantic_gap=None):
+        captured["args"] = {
+            "top_k": top_k,
+            "total": total,
+            "query_specificity": query_specificity,
+            "keyword_count": keyword_count,
+            "semantic_score": semantic_score,
+            "semantic_gap": semantic_gap,
+        }
+        return 600
+
+    monkeypatch.setattr(query_module, "_candidate_count", fake_candidate_count)
+
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [{"repo_id": f"repo-{index}", "vector": [1.0 - index * 0.001, 0.0]} for index in range(900)],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    rank("figaro", index, CONFIG, top_k=10, embed=fake_embed)
+
+    assert captured["args"]["query_specificity"] <= 0.25
+    assert captured["args"]["keyword_count"] == 1
+    assert captured["args"]["total"] == 900
+
+
 def test_rank_does_not_reward_unmatched_specific_phrases():
     index = {
         "embedding_model": "bge-m3",
@@ -1320,6 +1470,40 @@ def test_rank_many_abstains_when_weak_semantic_has_only_loose_metadata_overlap()
     assert result["results"] == []
 
 
+def test_rank_expands_candidates_for_short_name_queries(monkeypatch):
+    from xists.search import query as query_module
+
+    captured = {}
+
+    def fake_candidate_count(top_k, total, *, query_specificity=None, keyword_count=None, semantic_score=None, semantic_gap=None):
+        captured["args"] = {
+            "top_k": top_k,
+            "total": total,
+            "query_specificity": query_specificity,
+            "keyword_count": keyword_count,
+            "semantic_score": semantic_score,
+            "semantic_gap": semantic_gap,
+        }
+        return 6000
+
+    monkeypatch.setattr(query_module, "_candidate_count", fake_candidate_count)
+
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [{"repo_id": f"repo-{index}", "vector": [1.0 - index * 0.0001, 0.0]} for index in range(900)],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    rank("figaro", index, CONFIG, top_k=10, embed=fake_embed)
+
+    assert captured["args"]["query_specificity"] <= 0.25
+    assert captured["args"]["keyword_count"] == 1
+    assert captured["args"]["total"] == 900
+
+
 def test_rank_boosts_high_overlap_profile_phrase_without_exact_match():
     index = {
         "embedding_model": "bge-m3",
@@ -1691,3 +1875,250 @@ def test_rank_penalizes_template_repo_when_query_is_for_backend_generator():
     result = rank("TypeScript backend code generator service template", index, CONFIG, top_k=2, embed=fake_embed)
 
     assert result["results"][0]["repo_id"] == "amplication/amplication"
+
+
+def test_rank_prefers_base_repo_over_server_variant_when_query_does_not_mention_server():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "rustdesk/rustdesk-server",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "rustdesk-server",
+                    "language": "Rust",
+                    "summary": "Open-source self-hosted server for remote desktop connections.",
+                    "topics": ["remote-desktop", "remote-access", "server"],
+                    "search_phrases": ["self-hosted remote desktop server", "rustdesk server"],
+                },
+            },
+            {
+                "repo_id": "rustdesk/rustdesk",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "rustdesk",
+                    "language": "Rust",
+                    "summary": "Open-source remote desktop application and TeamViewer alternative for self-hosting.",
+                    "topics": ["remote-desktop", "remote-access", "teamviewer", "p2p"],
+                    "search_phrases": ["open source remote desktop software", "self-hosted TeamViewer alternative"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank(
+        "Rust open source remote desktop designed self-hosting",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=fake_embed,
+    )
+
+    assert result["results"][0]["repo_id"] == "rustdesk/rustdesk"
+
+
+def test_rank_prefers_base_react_native_over_windows_variant_without_windows_cue():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "microsoft/react-native-windows",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "react-native-windows",
+                    "language": "C++",
+                    "summary": "Extension of React Native for Windows apps.",
+                    "topics": ["react-native", "react", "windows", "desktop"],
+                    "search_phrases": ["react native windows", "build windows apps with react native"],
+                },
+            },
+            {
+                "repo_id": "react/react-native",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "react-native",
+                    "language": "C++",
+                    "summary": "Framework for building native mobile apps with React.",
+                    "topics": ["react-native", "react", "ios", "android", "mobile"],
+                    "search_phrases": ["React for mobile apps", "cross-platform mobile framework"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("C++ framework native react", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "react/react-native"
+
+
+def test_rank_prefers_specific_flutter_plugin_over_archived_plugin_collection():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "flutter-team-archive/plugins",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "plugins",
+                    "language": "Dart",
+                    "summary": "Archived Flutter team plugin collection for Android and iOS APIs.",
+                    "topics": ["flutter", "dart", "plugin", "android", "ios", "flutter-plugin"],
+                    "search_phrases": ["flutter official plugins", "flutter android ios plugins"],
+                },
+            },
+            {
+                "repo_id": "Wayaer/fl_pip",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "fl_pip",
+                    "language": "Dart",
+                    "summary": "Flutter picture-in-picture plugin for iOS and Android.",
+                    "topics": ["android", "flutter-plugin", "ios", "picture-in-picture"],
+                    "search_phrases": ["flutter picture in picture plugin", "pip flutter android ios"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank(
+        "Dart android ios flutter picture plugin pip",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=fake_embed,
+    )
+
+    assert result["results"][0]["repo_id"] == "Wayaer/fl_pip"
+
+
+def test_rank_prefers_domain_specific_resource_collection_over_generic_awesome_list():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "vinta/awesome-python",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "awesome-python",
+                    "language": "Python",
+                    "summary": "Curated list of Python frameworks libraries and tools.",
+                    "topics": ["awesome", "python", "collections", "python-libraries"],
+                    "search_phrases": ["awesome python list", "curated python libraries and frameworks"],
+                },
+            },
+            {
+                "repo_id": "fighting41love/funNLP",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "funNLP",
+                    "language": "Python",
+                    "summary": "Curated collection of NLP resources datasets tools and models.",
+                    "topics": ["python", "nlp"],
+                    "search_phrases": ["Chinese NLP resource list", "Chinese word segmentation tools"],
+                    "use_cases": ["Discovering NLP datasets tools and resources for text processing and segmentation"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank(
+        "Python discovering libraries datasets resources text processing segmentation",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=fake_embed,
+    )
+
+    assert result["results"][0]["repo_id"] == "fighting41love/funNLP"
+
+
+def test_rank_promotes_stronger_exact_identity_evidence_for_low_specificity_query():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "generic/platform",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "platform",
+                    "language": "Python",
+                    "summary": "A platform for binary inspection and malware analysis.",
+                    "topics": ["platform", "analysis", "binary"],
+                    "search_phrases": ["malware analysis platform"],
+                },
+            },
+            {
+                "repo_id": "nsa/ghidra-like",
+                "vector": [0.995, 0.1],
+                "metadata": {
+                    "name": "ghidra-like",
+                    "language": "Java",
+                    "summary": "Reverse engineering tooling for compiled binaries.",
+                    "topics": ["reverse-engineering", "disassembler"],
+                    "search_phrases": ["binary analysis platform"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("binary analysis platform", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "nsa/ghidra-like"
+
+
+def test_rank_keeps_semantic_winner_when_no_candidate_has_stronger_structured_evidence():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "generic/platform",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "platform",
+                    "language": "Python",
+                    "summary": "A platform for binary inspection and malware analysis.",
+                    "topics": ["platform", "analysis", "binary"],
+                    "search_phrases": ["malware analysis platform"],
+                },
+            },
+            {
+                "repo_id": "other/platform",
+                "vector": [0.98, 0.2],
+                "metadata": {
+                    "name": "other-platform",
+                    "language": "Python",
+                    "summary": "Another binary inspection platform.",
+                    "topics": ["platform", "analysis", "binary"],
+                    "search_phrases": ["binary inspection platform"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("binary analysis platform", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "generic/platform"

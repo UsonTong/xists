@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
@@ -512,6 +513,145 @@ def search(args: argparse.Namespace) -> int:
     return 0
 
 
+def _check_payload(name: str, status: str, message: str, **extra: Any) -> dict[str, Any]:
+    return {"name": name, "status": status, "message": message, **extra}
+
+
+def doctor(args: argparse.Namespace) -> int:
+    checks: list[dict[str, Any]] = []
+
+    try:
+        config = embedding_config_from_env()
+        checks.append(_check_payload("embedding_config", "ok", "embedding endpoint is configured", model=config.model))
+    except EmbeddingNotConfiguredError as error:
+        checks.append(_check_payload("embedding_config", "error", str(error)))
+
+    try:
+        config = llm_config_from_env()
+        checks.append(_check_payload("llm_config", "ok", "LLM endpoint is configured", model=config.model))
+    except LLMNotConfiguredError as error:
+        checks.append(_check_payload("llm_config", "error", str(error)))
+
+    try:
+        tokens = github_token_from_file(args.token_file) if args.token_file else github_token_from_env()
+        if tokens:
+            checks.append(_check_payload("github_token", "ok", "GitHub token is configured", token_count=len(tokens)))
+        else:
+            checks.append(_check_payload("github_token", "warn", "GitHub token is not configured", token_count=0))
+    except Exception as error:
+        checks.append(_check_payload("github_token", "error", str(error)))
+
+    for name, path in (
+        ("records_file", args.records),
+        ("index_file", args.index),
+        ("eval_cases_file", args.cases),
+    ):
+        if path.exists():
+            checks.append(_check_payload(name, "ok", f"{path} exists", path=str(path)))
+        else:
+            checks.append(_check_payload(name, "warn", f"{path} does not exist yet", path=str(path)))
+
+    ok = all(check["status"] != "error" for check in checks)
+    print(json.dumps({"ok": ok, "checks": checks}, ensure_ascii=False, indent=2))
+    return 0 if ok else 1
+
+
+def index_stats(args: argparse.Namespace) -> int:
+    if not args.index.exists():
+        print(f"Index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
+        return 2
+
+    index = load_index(args.index)
+    vectors = index.get("vectors") or []
+    languages: Counter[str] = Counter()
+    topics: Counter[str] = Counter()
+    missing_metadata = 0
+    missing_fingerprints = 0
+    for entry in vectors:
+        if not isinstance(entry, dict):
+            continue
+        if not entry.get("embedding_input_fingerprint"):
+            missing_fingerprints += 1
+        metadata = entry.get("metadata")
+        if not isinstance(metadata, dict):
+            missing_metadata += 1
+            continue
+        language = metadata.get("language")
+        if isinstance(language, str) and language.strip():
+            languages[language] += 1
+        for topic in metadata.get("topics") or []:
+            if isinstance(topic, str) and topic.strip():
+                topics[topic] += 1
+
+    payload = {
+        "index": str(args.index),
+        "index_version": index.get("index_version"),
+        "embedding_model": index.get("embedding_model"),
+        "embedding_base_url": index.get("embedding_base_url"),
+        "embedding_input_version": index.get("embedding_input_version"),
+        "dimension": index.get("dimension"),
+        "built_at": index.get("built_at"),
+        "record_count": index.get("record_count"),
+        "vector_count": len(vectors),
+        "skipped_count": len(index.get("skipped") or []),
+        "missing_metadata_count": missing_metadata,
+        "missing_fingerprint_count": missing_fingerprints,
+        "top_languages": [{"language": key, "count": value} for key, value in languages.most_common(args.limit)],
+        "top_topics": [{"topic": key, "count": value} for key, value in topics.most_common(args.limit)],
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def records_inspect(args: argparse.Namespace) -> int:
+    if not args.records.exists():
+        print(f"Records file not found: {args.records}. Run 'xists ingest github' first.", file=sys.stderr)
+        return 2
+
+    records = json.loads(args.records.read_text(encoding="utf-8"))
+    if not isinstance(records, list):
+        print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
+        return 1
+
+    filtered = records
+    if args.repo:
+        needle = args.repo.lower()
+        filtered = [
+            record
+            for record in records
+            if needle in str(record.get("repo_id") or record.get("repo_id_requested") or "").lower()
+        ]
+
+    inspected: list[dict[str, Any]] = []
+    for record in filtered[: max(args.limit, 0)]:
+        github = record.get("github") or {}
+        profile = record.get("llm_profile") or {}
+        inspected.append(
+            {
+                "repo_id": record.get("repo_id") or record.get("repo_id_requested"),
+                "name": record.get("name"),
+                "url": record.get("url"),
+                "language": github.get("language"),
+                "topics": github.get("topics") or [],
+                "has_readme": bool(record.get("readme")),
+                "profile_confidence": profile.get("confidence"),
+                "profile_abstained": bool(profile.get("abstained")),
+                "summary": profile.get("summary"),
+            }
+        )
+
+    payload = {
+        "records": str(args.records),
+        "record_count": len(records),
+        "matching_count": len(filtered),
+        "inspected_count": len(inspected),
+        "filter": {"repo": args.repo, "limit": args.limit},
+        "items": inspected,
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
 def eval_run(args: argparse.Namespace) -> int:
     try:
         config = embedding_config_from_env()
@@ -574,6 +714,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="xists helps developers find what already exists.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    doctor_parser = subparsers.add_parser("doctor", help="Check local configuration and expected data files")
+    doctor_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to check")
+    doctor_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to check")
+    doctor_parser.add_argument("--cases", type=Path, default=Path("eval-cases.json"), help="Evaluation cases JSON to check")
+    doctor_parser.add_argument("--token-file", type=Path, default=None, help="Optional file containing GitHub tokens")
+    doctor_parser.set_defaults(func=doctor)
+
     ingest = subparsers.add_parser("ingest", help="Collect repository records")
     ingest_subparsers = ingest.add_subparsers(dest="source", required=True)
 
@@ -605,6 +752,18 @@ def build_parser() -> argparse.ArgumentParser:
     index_build_parser.add_argument("--output", type=Path, default=Path("index.json"), help="Path to write the embedding index")
     index_build_parser.add_argument("--force", action="store_true", help="Ignore existing index.json and rebuild from scratch")
     index_build_parser.set_defaults(func=index_build)
+    index_stats_parser = index_subparsers.add_parser("stats", help="Summarize an embedding index without printing vectors")
+    index_stats_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to inspect")
+    index_stats_parser.add_argument("--limit", type=int, default=10, help="Maximum languages/topics to print")
+    index_stats_parser.set_defaults(func=index_stats)
+
+    records = subparsers.add_parser("records", help="Inspect generated repository records")
+    records_subparsers = records.add_subparsers(dest="records_command", required=True)
+    records_inspect_parser = records_subparsers.add_parser("inspect", help="Print a compact summary of records")
+    records_inspect_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to inspect")
+    records_inspect_parser.add_argument("--repo", default=None, help="Only show records whose owner/repo contains this text")
+    records_inspect_parser.add_argument("--limit", type=int, default=20, help="Maximum records to print")
+    records_inspect_parser.set_defaults(func=records_inspect)
 
     search_parser = subparsers.add_parser("search", help="Search the embedding index")
     search_parser.add_argument("query", help="Natural-language query")

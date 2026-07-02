@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from xists.eval.inspect import inspect_report
 from xists.eval.judge import parse_judge_response
 from xists.eval.run import evaluate_dataset
 from xists.eval.schema import EvaluationDatasetError, normalize_dataset
@@ -190,12 +191,29 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
         "top1_miss_serious_rate": 0.5,
         "top1_miss_insufficient_evidence_rate": 0.0,
     }
+    assert report["summary"]["exact_top_1"] == {"count": 1, "rate": 0.333333}
+    assert report["summary"]["acceptable_top_1"] == {
+        "count": 2,
+        "rate": 0.666667,
+        "description": "top-1 was exact or an acceptable repo/family/judge substitute",
+    }
+    assert report["summary"]["acceptable_substitute_top_1"]["count"] == 1
+    assert report["summary"]["effective_top_1"]["count"] == 2
+    assert "exact top-1: 33.3% (1/3)" in report["summary_text"]
+    assert "acceptable top-1: 66.7% (2/3)" in report["summary_text"]
+    assert report["top_misses"][0]["id"] == "abstain"
+    assert report["top_misses"][0]["top1_status"] == "serious_mismatch"
     assert report["results"][0]["top1_status"] == "exact"
     assert report["results"][1]["top1_status"] == "acceptable"
     assert report["results"][1]["exact_match"] is False
     assert report["results"][1]["acceptable_match"] is True
     assert report["results"][1]["exact_rank"] == 2
     assert report["results"][1]["acceptable_rank"] == 1
+
+    inspection = inspect_report(report, status="serious_mismatch", limit=5)
+    assert inspection["summary"]["case_count"] == 3
+    assert inspection["matching_count"] == 1
+    assert inspection["cases"][0]["id"] == "abstain"
 
 
 def test_evaluate_dataset_with_llm_judge_keeps_hard_metrics_and_adds_analysis(tmp_path):

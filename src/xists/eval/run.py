@@ -10,6 +10,7 @@ from typing import Any
 
 from xists import __version__
 from xists.eval.judge import judge_top1_vs_expected
+from xists.eval.inspect import build_summary, build_summary_text, build_top_misses
 from xists.eval.schema import load_dataset
 from xists.profile.llm import LLMConfig
 from xists.search.embed import EmbeddingConfig
@@ -233,6 +234,25 @@ def evaluate_dataset(
         ),
     }
 
+    summary_seed = {
+        "case_count": case_count,
+        "metrics": metrics,
+        "confidence": {
+            "top_1_high_confidence_count": top_1_high_confidence_count,
+            "top_1_exploratory_count": top_1_exploratory_count,
+            "top_1_missing_count": top_1_missing_count,
+            "wrong_high_confidence_top_1_count": wrong_high_confidence_top_1_count,
+        },
+        "top1_summary": {
+            "top1_miss_count": top1_miss_count,
+            "top1_miss_acceptable_count": top1_miss_acceptable_count,
+            "top1_miss_serious_count": top1_miss_serious_count,
+            "top1_miss_insufficient_evidence_count": top1_miss_insufficient_evidence_count,
+        },
+        "results": per_case,
+    }
+    summary = build_summary(summary_seed)
+
     finished_at = datetime.now(timezone.utc)
     return {
         "started_at": started_at.isoformat(),
@@ -264,5 +284,8 @@ def evaluate_dataset(
             ),
         },
         "judge_summary": judge_summary,
+        "summary": summary,
+        "summary_text": build_summary_text(summary),
+        "top_misses": build_top_misses(per_case, limit=20),
         "results": per_case,
     }

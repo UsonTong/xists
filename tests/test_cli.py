@@ -2,7 +2,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from xists.cli import build_parser, eval_run, index_build, ingest_github, load_env_file, load_repo_ids
+from xists.cli import build_parser, eval_inspect, eval_run, index_build, ingest_github, load_env_file, load_repo_ids
+from xists.ingest.github import GitHubAPIError
 from xists.search.embed import EmbeddingError
 
 
@@ -170,6 +171,62 @@ def test_eval_run_parser_supports_judge_flags():
     assert args.records == Path("records.json")
 
 
+
+def test_eval_inspect_parser_uses_default_report_path():
+    args = build_parser().parse_args(["eval", "inspect"])
+
+    assert args.report == Path("eval-report.json")
+    assert args.status is None
+    assert args.limit == 20
+    assert args.include_exact is False
+
+
+def test_eval_inspect_prints_filtered_cases(tmp_path, capsys):
+    report_file = tmp_path / "eval-report.json"
+    report_file.write_text(
+        json.dumps(
+            {
+                "dataset_name": "smoke",
+                "case_count": 2,
+                "metrics": {"exact_top1_rate": 0.5, "serious_top1_error_rate": 0.5},
+                "confidence": {"wrong_high_confidence_top_1_count": 1},
+                "top1_summary": {
+                    "top1_miss_count": 1,
+                    "top1_miss_acceptable_count": 0,
+                    "top1_miss_serious_count": 1,
+                    "top1_miss_insufficient_evidence_count": 0,
+                },
+                "results": [
+                    {
+                        "id": "ok",
+                        "query": "react",
+                        "top1_status": "exact",
+                        "expected_repo_id": "react/react",
+                        "top_result_repo_id": "react/react",
+                    },
+                    {
+                        "id": "bad",
+                        "query": "api framework",
+                        "top1_status": "serious_mismatch",
+                        "expected_repo_id": "fastapi/fastapi",
+                        "top_result_repo_id": "react/react",
+                        "top_result_confidence": "high_confidence",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = build_parser().parse_args(["eval", "inspect", "--report", str(report_file), "--status", "serious_mismatch"])
+
+    code = eval_inspect(args)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["matching_count"] == 1
+    assert payload["cases"][0]["id"] == "bad"
+    assert "wrong high-confidence: 1 cases" in payload["summary_text"]
+
 def _make_record(repo_id: str) -> dict:
     return {
         "repo_id": repo_id,
@@ -237,6 +294,9 @@ def test_ingest_github_graphql_batch_reports_errors(tmp_path, monkeypatch):
     def fake_collect(repo_ids, *, token=None):
         raise Exception("GraphQL batch failed")
 
+    def fake_collect_one(repo_id, *, token=None):
+        raise GitHubAPIError("single repo failed", status=502)
+
     def fake_generate(record, config, *, caller=None):
         return record.get("llm_profile", {})
 
@@ -252,6 +312,8 @@ def test_ingest_github_graphql_batch_reports_errors(tmp_path, monkeypatch):
     )
 
     with patch("xists.cli.collect_records_graphql", side_effect=fake_collect), \
+         patch("xists.cli.collect_record_graphql", side_effect=fake_collect_one), \
+         patch("xists.cli.collect_record", side_effect=fake_collect_one), \
          patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
         code = ingest_github(args)
 
@@ -259,7 +321,88 @@ def test_ingest_github_graphql_batch_reports_errors(tmp_path, monkeypatch):
     report = json.loads((tmp_path / "report.json").read_text())
     assert report["failed_count"] == 2
     assert {e["repo_id"] for e in report["failed"]} == {"a/b", "c/d"}
-    assert all("GraphQL batch failed" in e["reason"] for e in report["failed"])
+    assert all("single repo failed" in e["reason"] for e in report["failed"])
+
+
+def test_ingest_github_graphql_batch_falls_back_to_single_repo(tmp_path, monkeypatch):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\nc/d\n", encoding="utf-8")
+
+    output_file = tmp_path / "records.json"
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    def fake_collect_batch(repo_ids, *, token=None):
+        raise GitHubAPIError("batch bad gateway", status=502)
+
+    def fake_collect_one(repo_id, *, token=None):
+        return _make_record(repo_id)
+
+    def fake_generate(record, config, *, caller=None):
+        return record.get("llm_profile", {})
+
+    args = build_parser().parse_args(
+        [
+            "ingest", "github",
+            "--repos", str(repos_file),
+            "--output", str(output_file),
+            "--report", str(tmp_path / "report.json"),
+            "--github-api", "graphql",
+            "--github-batch-size", "2",
+        ]
+    )
+
+    with patch("xists.cli.collect_records_graphql", side_effect=fake_collect_batch), \
+         patch("xists.cli.collect_record_graphql", side_effect=fake_collect_one), \
+         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+        code = ingest_github(args)
+
+    assert code == 0
+    saved = json.loads(output_file.read_text())
+    assert [record["repo_id"] for record in saved] == ["a/b", "c/d"]
+
+
+def test_ingest_github_rest_falls_back_to_graphql_for_single_repo(tmp_path, monkeypatch):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\n", encoding="utf-8")
+
+    output_file = tmp_path / "records.json"
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    def fake_collect_rest(repo_id, *, token=None):
+        raise GitHubAPIError("rest bad gateway", status=502)
+
+    def fake_collect_graphql(repo_id, *, token=None):
+        return _make_record(repo_id)
+
+    def fake_generate(record, config, *, caller=None):
+        return record.get("llm_profile", {})
+
+    args = build_parser().parse_args(
+        [
+            "ingest", "github",
+            "--repos", str(repos_file),
+            "--output", str(output_file),
+            "--report", str(tmp_path / "report.json"),
+            "--github-api", "rest",
+        ]
+    )
+
+    with patch("xists.cli.collect_record", side_effect=fake_collect_rest), \
+         patch("xists.cli.collect_record_graphql", side_effect=fake_collect_graphql), \
+         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+        code = ingest_github(args)
+
+    assert code == 0
+    saved = json.loads(output_file.read_text())
+    assert saved[0]["repo_id"] == "a/b"
 
 
 def test_ingest_github_skips_existing_records(tmp_path, monkeypatch):

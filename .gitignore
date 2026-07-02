@@ -6,3 +6,8 @@ index.json
 
 __pycache__/
 *.py[cod]
+demo-records.json
+demo-index.json
+demo-report.json
+demo-eval-report.json
+eval-report.json

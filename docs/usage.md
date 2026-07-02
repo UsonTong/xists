@@ -1,5 +1,21 @@
 # Usage
 
+## Demo First
+
+If you want the shortest path to a working run, start with the committed example inputs:
+
+```bash
+xists ingest github --repos repos.txt --output demo-records.json --report demo-report.json --github-api graphql --github-batch-size 10 --workers 4
+xists index build --records demo-records.json --output demo-index.json
+xists search "frontend ui library" --index demo-index.json
+xists eval run --cases examples/eval-cases.json --index demo-index.json --output demo-eval-report.json
+xists eval inspect --report demo-eval-report.json
+```
+
+`repos.txt` is the current 200-repository demo list and `examples/eval-cases.json` is the 100-case baseline dataset meant to keep ranking changes measurable.
+
+For the full walkthrough, see [docs/demo.md](/home/usontong/Repositories/xists/docs/demo.md).
+
 ## Installation
 
 Install xists in development mode:
@@ -214,6 +230,33 @@ xists eval run --cases eval-cases.json --index index.json --output eval-report.j
 ```
 
 This runs a fixed evaluation dataset against the current index and writes an evaluation report you can compare across prompt, embedding, and ranking iterations.
+
+
+### Inspect evaluation failures
+
+After `xists eval run`, inspect the report before changing ranking code:
+
+```bash
+xists eval inspect --report eval-report.json
+xists eval inspect --report eval-report.json --status serious_mismatch --limit 20
+```
+
+The inspect output includes the report metrics, the readable `summary_text`, and a sorted list of cases with:
+
+- query
+- expected repo
+- top-1 repo
+- top-1 status
+- confidence
+- exact and acceptable ranks
+
+This is the recommended tuning loop:
+
+```bash
+pytest
+xists eval run --cases examples/eval-cases.json --index demo-index.json --output demo-eval-report.json
+xists eval inspect --report demo-eval-report.json --status serious_mismatch
+```
 
 #### Evaluation dataset shape
 

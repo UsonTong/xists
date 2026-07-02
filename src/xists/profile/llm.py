@@ -22,6 +22,7 @@ from typing import Any
 USER_AGENT = "xists-llm-profile"
 CONFIDENCE_VALUES = {"high", "medium", "low"}
 PROFILE_PROMPT_VERSION = 1
+RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
 PROFILE_SYSTEM_PROMPT = (
     "You analyze a single open-source repository and produce a structured "
@@ -209,17 +210,28 @@ def call_llm(config: LLMConfig, messages: list[dict[str, str]], *, timeout: int 
     }
 
     request = urllib.request.Request(config.chat_completions_url, data=body, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
+    last_error: Exception | None = None
+    for attempt in range(3):
         try:
-            detail = error.read().decode("utf-8")
-        except Exception:
-            detail = str(error)
-        raise LLMError(f"LLM request failed (HTTP {error.code}): {detail}") from error
-    except urllib.error.URLError as error:
-        raise LLMError(f"LLM request failed: {error}") from error
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as error:
+            try:
+                detail = error.read().decode("utf-8")
+            except Exception:
+                detail = str(error)
+            last_error = LLMError(f"LLM request failed (HTTP {error.code}): {detail}")
+            if error.code not in RETRYABLE_HTTP_STATUSES or attempt == 2:
+                raise last_error from error
+            time.sleep(2**attempt)
+        except urllib.error.URLError as error:
+            last_error = LLMError(f"LLM request failed: {error}")
+            if attempt == 2:
+                raise last_error from error
+            time.sleep(2**attempt)
+    else:
+        raise last_error or LLMError("LLM request failed")
 
     try:
         return LLMResponse(

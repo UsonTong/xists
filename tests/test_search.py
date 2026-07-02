@@ -2253,3 +2253,79 @@ def test_repository_state_penalty_can_break_tie_against_archived_repo():
     assert result["results"][0]["repo_id"] == "new/tool"
     archived = next(item for item in result["results"] if item["repo_id"] == "old/tool")
     assert "archived repository penalty" in archived["why"]
+
+
+def test_type_cue_strength_promotes_web_framework_over_static_site_framework():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "gohugoio/hugo",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "hugo",
+                    "description": "The world fastest framework for building websites.",
+                    "topics": ["go", "static-site-generator"],
+                    "language": "Go",
+                    "search_phrases": ["go static site generator", "hugo framework for websites"],
+                },
+            },
+            {
+                "repo_id": "gin-gonic/gin",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "gin",
+                    "description": "High-performance HTTP web framework written in Go.",
+                    "topics": ["go", "framework", "server", "router"],
+                    "language": "Go",
+                    "search_phrases": ["high performance Go web framework", "Go REST API framework"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("go web framework", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "gin-gonic/gin"
+
+
+def test_type_cue_strength_promotes_rag_engine_over_document_tool_when_close():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "PaddlePaddle/PaddleOCR",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "PaddleOCR",
+                    "description": "OCR toolkit that converts documents into structured data for RAG applications.",
+                    "topics": ["ocr", "document-parsing", "rag"],
+                    "language": "Python",
+                    "search_phrases": ["RAG document extraction", "OCR for PDF"],
+                },
+            },
+            {
+                "repo_id": "infiniflow/ragflow",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "ragflow",
+                    "description": "Open-source Retrieval-Augmented Generation RAG engine for LLM applications.",
+                    "topics": ["rag", "retrieval-augmented-generation", "llm-apps"],
+                    "language": "Go",
+                    "search_phrases": ["open source RAG engine", "context layer for LLMs"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("rag engine for document question answering", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "infiniflow/ragflow"

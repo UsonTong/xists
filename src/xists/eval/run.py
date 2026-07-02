@@ -117,6 +117,7 @@ def evaluate_dataset(
         top_result = results[0] if results else None
         top_result_repo_id = top_result.get("repo_id") if top_result else None
         top_result_confidence = top_result.get("confidence") if top_result else None
+        top_result_why = top_result.get("why") if top_result else None
         exact_match = top_result_repo_id == expected_repo_id
         acceptable_match = top_result_repo_id in acceptable_set if top_result_repo_id else False
 
@@ -184,10 +185,12 @@ def evaluate_dataset(
             {
                 "id": case["id"],
                 "query": case["query"],
+                "query_intent": result.get("query_intent"),
                 "tags": case["tags"],
                 "abstained": bool(result.get("abstained")),
                 "expected_repo_id": expected_repo_id,
                 "top_result_repo_id": top_result_repo_id,
+                "top_result_why": top_result_why if isinstance(top_result_why, list) else [],
                 "exact_match": exact_match,
                 "acceptable_match": acceptable_match,
                 "exact_rank": exact_rank,

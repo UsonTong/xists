@@ -124,7 +124,8 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
             {
                 "query": queries[0],
                 "abstained": False,
-                "results": [{"repo_id": "react/react", "score": 0.8, "confidence": "high_confidence"}],
+                "query_intent": {"type": "functional"},
+                "results": [{"repo_id": "react/react", "score": 0.8, "confidence": "high_confidence", "why": ["matched topic: frontend"]}],
                 "considered": 3,
             },
             {
@@ -203,6 +204,8 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
     assert "acceptable top-1: 66.7% (2/3)" in report["summary_text"]
     assert report["top_misses"][0]["id"] == "abstain"
     assert report["top_misses"][0]["top1_status"] == "serious_mismatch"
+    assert report["results"][0]["query_intent"] == {"type": "functional"}
+    assert report["results"][0]["top_result_why"] == ["matched topic: frontend"]
     assert report["results"][0]["top1_status"] == "exact"
     assert report["results"][1]["top1_status"] == "acceptable"
     assert report["results"][1]["exact_match"] is False

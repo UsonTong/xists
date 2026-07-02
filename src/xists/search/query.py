@@ -304,6 +304,42 @@ REPO_QUALIFIER_TERMS = {
     "workshop",
 }
 
+EXACT_NAME_QUERY_MAX_TOKENS = 3
+ALTERNATIVE_QUERY_TERMS = ALTERNATIVE_TERMS | {"like", "similar"}
+DOMAIN_QUERY_CUES = {"for", "in", "with", "domain", "industry", "pipelines", "infrastructure", "observability"}
+
+
+def _query_intent(query: str) -> dict[str, Any]:
+    """Classify the query shape for reporting and downstream tuning.
+
+    This is intentionally heuristic and transparent. It does not call an LLM;
+    it only labels broad query classes that matter for retrieval behavior.
+    """
+
+    tokens = list(_tokenize(query))
+    keyword_tokens = sorted(_content_keyword_tokens(query))
+    specificity = _query_specificity(query)
+    raw_query = query.strip().lower()
+    if not tokens:
+        intent_type = "empty"
+    elif "/" in raw_query or (
+        len(tokens) <= EXACT_NAME_QUERY_MAX_TOKENS
+        and all(token not in GENERIC_TERMS and token not in QUERY_JOINERS for token in tokens)
+    ):
+        intent_type = "exact_name"
+    elif any(token in ALTERNATIVE_QUERY_TERMS for token in tokens):
+        intent_type = "alternative"
+    elif any(token in DOMAIN_QUERY_CUES for token in tokens) and len(keyword_tokens) >= 2:
+        intent_type = "domain"
+    else:
+        intent_type = "functional"
+    return {
+        "type": intent_type,
+        "specificity": specificity,
+        "keywords": keyword_tokens,
+        "primary_language": _query_primary_language_alias(query),
+    }
+
 
 class IndexMismatchError(RuntimeError):
     """Raised when the index was built with a different embedding model."""
@@ -576,6 +612,36 @@ def _all_metadata_text(metadata: dict[str, Any]) -> str:
         if isinstance(values, list):
             parts.extend(str(value) for value in values if isinstance(value, str) and value.strip())
     return "\n".join(parts)
+
+
+def _numeric_metadata_value(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.replace(",", ""))
+        except ValueError:
+            return None
+    return None
+
+
+def _popularity_bonus(metadata: dict[str, Any]) -> float:
+    stars = _numeric_metadata_value(metadata.get("stars"))
+    if stars is None or stars <= 0:
+        return 0.0
+    # Popularity is a weak tie-breaker, not a relevance replacement.
+    return min(0.015, math.log10(stars + 1.0) * 0.0025)
+
+
+def _repository_state_penalty(metadata: dict[str, Any]) -> float:
+    penalty = 0.0
+    if metadata.get("archived") is True:
+        penalty += 0.08
+    if metadata.get("disabled") is True:
+        penalty += 0.12
+    return penalty
 
 
 @lru_cache(maxsize=8192)
@@ -971,6 +1037,8 @@ def _metadata_score(
         )
 
     score += best_phrase_score
+    score += _popularity_bonus(metadata)
+    score -= _repository_state_penalty(metadata)
     if alternative_identity_match:
         score -= 0.2
     capped = min(
@@ -1083,6 +1151,80 @@ def _metadata_match_strength(
     return strength
 
 
+def _explain_result(
+    query: str,
+    item: dict[str, Any],
+    *,
+    semantic_score: float,
+    metadata_score: float,
+    query_variants: frozenset[str],
+    keyword_tokens: frozenset[str],
+    primary_language_alias: str | None,
+    phrase_match: dict[str, Any] | None,
+) -> list[str]:
+    metadata = item.get("metadata")
+    if not isinstance(metadata, dict):
+        return ["ranked by semantic similarity"]
+
+    reasons: list[str] = []
+    repo_id = str(item.get("repo_id") or "").lower()
+    name = str(metadata.get("name") or "").lower()
+    topics = {
+        token
+        for topic in metadata.get("topics") or []
+        for token in _tokenize(str(topic))
+    }
+    language = str(metadata.get("language") or "")
+    language_match = _language_matches_query(language, primary_alias=primary_language_alias)
+    phrase_match = phrase_match if phrase_match is not None else _profile_phrase_match(
+        query,
+        metadata,
+        query_variants=query_variants,
+        keyword_tokens=keyword_tokens,
+    )
+
+    if _exact_identity_match(query, query_variants, repo_id, name):
+        reasons.append("exact repo/name match")
+    elif _identity_in_text(query_variants, repo_id, name):
+        reasons.append("matched repo/name")
+
+    topic_overlap = sorted(keyword_tokens & topics)
+    if topic_overlap:
+        reasons.append("matched topic: " + ", ".join(topic_overlap[:3]))
+
+    if language_match and language:
+        reasons.append(f"matched language: {language}")
+
+    if phrase_match.get("exact"):
+        source = str(phrase_match.get("exact_source") or "profile")
+        reasons.append(f"matched {source} phrase")
+    elif int(phrase_match.get("partial_overlap", 0)) >= 3:
+        source = str(phrase_match.get("partial_source") or "profile")
+        reasons.append(f"overlapped {source} phrase")
+    elif int(phrase_match.get("coverage_overlap", 0)) >= 4:
+        reasons.append("covered query terms across profile")
+
+    stars = _numeric_metadata_value(metadata.get("stars"))
+    if stars is not None and stars >= 10000:
+        reasons.append("popular repository")
+
+    if metadata.get("archived") is True:
+        reasons.append("archived repository penalty")
+    if metadata.get("disabled") is True:
+        reasons.append("disabled repository penalty")
+
+    if not reasons:
+        if metadata_score > 0:
+            reasons.append("metadata overlap")
+        else:
+            reasons.append("ranked by semantic similarity")
+    if semantic_score >= HIGH_CONFIDENCE_THRESHOLD:
+        reasons.append("strong semantic match")
+    elif semantic_score >= EXPLORATORY_THRESHOLD:
+        reasons.append("moderate semantic match")
+    return reasons[:5]
+
+
 def _has_metadata_rescue_evidence(
     query: str,
     item: dict[str, Any],
@@ -1189,6 +1331,16 @@ def _rerank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str,
                     exact_phrase_match_count=phrase_match_count,
                     query_variants=query_variants,
                     keyword_tokens=keyword_tokens,
+                    phrase_match=phrase_match,
+                ),
+                "why": _explain_result(
+                    query,
+                    item,
+                    semantic_score=semantic_score,
+                    metadata_score=metadata_score,
+                    query_variants=query_variants,
+                    keyword_tokens=keyword_tokens,
+                    primary_language_alias=primary_language_alias,
                     phrase_match=phrase_match,
                 ),
             }
@@ -1410,7 +1562,7 @@ def rank_many(
 
     if not entries:
         return [
-            {"query": query, "abstained": True, "results": [], "considered": 0}
+            {"query": query, "query_intent": _query_intent(query), "abstained": True, "results": [], "considered": 0}
             for query in queries
         ]
 
@@ -1466,13 +1618,14 @@ def rank_many(
             ranked[row] = (
                 {
                     "query": query,
+                    "query_intent": _query_intent(query),
                     "abstained": len(results) == 0,
                     "results": results,
                     "considered": len(entries),
                 }
             )
 
-    return [item if item is not None else {"query": queries[index], "abstained": True, "results": [], "considered": len(entries)} for index, item in enumerate(ranked)]
+    return [item if item is not None else {"query": queries[index], "query_intent": _query_intent(queries[index]), "abstained": True, "results": [], "considered": len(entries)} for index, item in enumerate(ranked)]
 
 
 def rank(
@@ -1542,6 +1695,7 @@ def rank(
 
     return {
         "query": query,
+        "query_intent": _query_intent(query),
         "abstained": len(presented) == 0,
         "results": presented,
         "considered": len(scored),

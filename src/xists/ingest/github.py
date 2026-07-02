@@ -7,6 +7,7 @@ import json
 import os
 import re
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -26,6 +27,7 @@ README_CANDIDATES = (
     "readme.md", "readme.markdown", "readme.rst", "readme.txt", "readme",
     "Readme.md", "Readme.markdown", "Readme",
 )
+RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
 GRAPHQL_REPOSITORY_FRAGMENT = """
 fragment RepoSnapshotFields on Repository {
@@ -165,16 +167,27 @@ def request_json(path: str, token: str | None = None) -> dict[str, Any]:
         headers["Authorization"] = f"Bearer {token}"
 
     request = urllib.request.Request(url, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
+    last_error: Exception | None = None
+    for attempt in range(3):
         try:
-            payload = json.loads(error.read().decode("utf-8"))
-            message = payload.get("message") or str(error)
-        except Exception:
-            message = str(error)
-        raise GitHubAPIError(message, status=error.code) from error
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            try:
+                payload = json.loads(error.read().decode("utf-8"))
+                message = payload.get("message") or str(error)
+            except Exception:
+                message = str(error)
+            last_error = GitHubAPIError(message, status=error.code)
+            if error.code not in RETRYABLE_HTTP_STATUSES or attempt == 2:
+                raise last_error from error
+            time.sleep(2**attempt)
+        except urllib.error.URLError as error:
+            last_error = GitHubAPIError(f"{error}", status=None)
+            if attempt == 2:
+                raise last_error from error
+            time.sleep(2**attempt)
+    raise last_error or GitHubAPIError("GitHub request failed")
 
 
 def request_graphql(query: str, variables: dict[str, Any], token: str | None = None) -> dict[str, Any]:
@@ -193,16 +206,29 @@ def request_graphql(query: str, variables: dict[str, Any], token: str | None = N
         },
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as error:
+    last_error: Exception | None = None
+    for attempt in range(3):
         try:
-            payload = json.loads(error.read().decode("utf-8"))
-            message = payload.get("message") or str(error)
-        except Exception:
-            message = str(error)
-        raise GitHubAPIError(message, status=error.code) from error
+            with urllib.request.urlopen(request, timeout=60) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            break
+        except urllib.error.HTTPError as error:
+            try:
+                payload = json.loads(error.read().decode("utf-8"))
+                message = payload.get("message") or str(error)
+            except Exception:
+                message = str(error)
+            last_error = GitHubAPIError(message, status=error.code)
+            if error.code not in RETRYABLE_HTTP_STATUSES or attempt == 2:
+                raise last_error from error
+            time.sleep(2**attempt)
+        except urllib.error.URLError as error:
+            last_error = GitHubAPIError(f"{error}", status=None)
+            if attempt == 2:
+                raise last_error from error
+            time.sleep(2**attempt)
+    else:
+        raise last_error or GitHubAPIError("GitHub GraphQL request failed")
 
     errors = payload.get("errors") or []
     if errors:
@@ -347,9 +373,12 @@ def fetch_snapshot(repo_id: str, token: str | None = None) -> GitHubSnapshot:
         content = readme.get("content")
         if content and readme.get("encoding") == "base64":
             readme_text = base64.b64decode(content).decode("utf-8", errors="replace")
-    except GitHubAPIError as error:
-        if error.status != 404:
-            raise
+    except GitHubAPIError:
+        # README access is optional. When GitHub intermittently fails on the
+        # README endpoint, keep the rest of the repository snapshot so ingest
+        # can continue.
+        readme = None
+        readme_text = None
 
     tree = None
     default_branch = metadata.get("default_branch")

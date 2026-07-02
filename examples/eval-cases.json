@@ -1,0 +1,1373 @@
+{
+  "schema_version": 1,
+  "dataset_name": "xists-baseline-100",
+  "families": {
+    "frontend-ui": [
+      "react/react",
+      "vuejs/vue",
+      "sveltejs/svelte",
+      "angular/angular",
+      "mui/material-ui",
+      "ant-design/ant-design",
+      "twbs/bootstrap",
+      "shadcn-ui/ui"
+    ],
+    "python-web-frameworks": [
+      "fastapi/fastapi",
+      "django/django",
+      "pallets/flask"
+    ],
+    "js-runtimes-frameworks": [
+      "denoland/deno",
+      "oven-sh/bun",
+      "vitejs/vite",
+      "nestjs/nest",
+      "expressjs/express"
+    ],
+    "llm-app-frameworks": [
+      "langchain-ai/langchain",
+      "langflow-ai/langflow",
+      "langgenius/dify",
+      "open-webui/open-webui",
+      "lobehub/lobehub",
+      "infiniflow/ragflow"
+    ],
+    "ai-coding-agents": [
+      "openai/codex",
+      "anthropics/claude-code",
+      "OpenHands/OpenHands",
+      "anomalyco/opencode"
+    ],
+    "local-llm-runtime": [
+      "ollama/ollama",
+      "ggml-org/llama.cpp",
+      "nomic-ai/gpt4all",
+      "vllm-project/vllm"
+    ],
+    "workflow-automation": [
+      "n8n-io/n8n",
+      "langgenius/dify",
+      "langflow-ai/langflow"
+    ],
+    "browser-automation": [
+      "microsoft/playwright",
+      "puppeteer/puppeteer",
+      "browser-use/browser-use"
+    ],
+    "devtools-editors": [
+      "microsoft/vscode",
+      "zed-industries/zed",
+      "microsoft/terminal",
+      "google-gemini/gemini-cli"
+    ],
+    "observability-monitoring": [
+      "grafana/grafana",
+      "netdata/netdata",
+      "louislam/uptime-kuma"
+    ],
+    "go-backend": [
+      "gin-gonic/gin",
+      "golang/go",
+      "gohugoio/hugo",
+      "fatedier/frp"
+    ],
+    "databases-backend": [
+      "redis/redis",
+      "supabase/supabase",
+      "bitcoin/bitcoin"
+    ],
+    "mobile-desktop": [
+      "react/react-native",
+      "electron/electron",
+      "tauri-apps/tauri",
+      "rustdesk/rustdesk",
+      "localsend/localsend"
+    ],
+    "media-tools": [
+      "yt-dlp/yt-dlp",
+      "ytdl-org/youtube-dl",
+      "openai/whisper",
+      "PaddlePaddle/PaddleOCR",
+      "tesseract-ocr/tesseract",
+      "Stirling-Tools/Stirling-PDF"
+    ],
+    "learning-reference": [
+      "freeCodeCamp/freeCodeCamp",
+      "EbookFoundation/free-programming-books",
+      "donnemartin/system-design-primer",
+      "ossu/computer-science",
+      "Snailclimb/JavaGuide",
+      "d2l-ai/d2l-zh"
+    ],
+    "security-tools": [
+      "sherlock-project/sherlock",
+      "swisskyrepo/PayloadsAllTheThings",
+      "Z4nzu/hackingtool"
+    ],
+    "game-graphics": [
+      "godotengine/godot",
+      "opencv/opencv",
+      "d3/d3",
+      "mermaid-js/mermaid",
+      "excalidraw/excalidraw",
+      "3b1b/manim"
+    ],
+    "shell-terminal": [
+      "ohmyzsh/ohmyzsh",
+      "nvbn/thefuck",
+      "jesseduffield/lazygit",
+      "nvm-sh/nvm",
+      "astral-sh/uv"
+    ]
+  },
+  "cases": [
+    {
+      "id": "react-ui-library",
+      "query": "frontend ui library",
+      "expected_repo_id": "react/react",
+      "tags": [
+        "frontend",
+        "ui",
+        "function"
+      ],
+      "acceptable_families": [
+        "frontend-ui"
+      ]
+    },
+    {
+      "id": "vue-progressive-framework",
+      "query": "progressive frontend framework",
+      "expected_repo_id": "vuejs/vue",
+      "tags": [
+        "frontend",
+        "framework",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "react/react",
+        "sveltejs/svelte",
+        "angular/angular"
+      ]
+    },
+    {
+      "id": "svelte-compiler-framework",
+      "query": "compile-time frontend framework with small runtime",
+      "expected_repo_id": "sveltejs/svelte",
+      "tags": [
+        "frontend",
+        "framework",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "vuejs/vue",
+        "react/react"
+      ]
+    },
+    {
+      "id": "angular-enterprise-framework",
+      "query": "enterprise typescript frontend framework",
+      "expected_repo_id": "angular/angular",
+      "tags": [
+        "frontend",
+        "typescript",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "react/react",
+        "vuejs/vue"
+      ]
+    },
+    {
+      "id": "mui-react-components",
+      "query": "material design components for react",
+      "expected_repo_id": "mui/material-ui",
+      "tags": [
+        "frontend",
+        "components",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "ant-design/ant-design",
+        "shadcn-ui/ui"
+      ]
+    },
+    {
+      "id": "antd-enterprise-components",
+      "query": "enterprise react component library",
+      "expected_repo_id": "ant-design/ant-design",
+      "tags": [
+        "frontend",
+        "components",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "mui/material-ui",
+        "shadcn-ui/ui"
+      ]
+    },
+    {
+      "id": "bootstrap-css-framework",
+      "query": "css framework for responsive websites",
+      "expected_repo_id": "twbs/bootstrap",
+      "tags": [
+        "frontend",
+        "css",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "shadcn-ui/ui",
+        "mui/material-ui"
+      ]
+    },
+    {
+      "id": "shadcn-ui-components",
+      "query": "copy paste accessible react components",
+      "expected_repo_id": "shadcn-ui/ui",
+      "tags": [
+        "frontend",
+        "components",
+        "name"
+      ],
+      "acceptable_repo_ids": [
+        "mui/material-ui",
+        "ant-design/ant-design"
+      ]
+    },
+    {
+      "id": "vite-build-tool",
+      "query": "fast frontend build tool and dev server",
+      "expected_repo_id": "vitejs/vite",
+      "tags": [
+        "frontend",
+        "build",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "oven-sh/bun",
+        "denoland/deno"
+      ]
+    },
+    {
+      "id": "storybook-component-workshop",
+      "query": "component development workshop and documentation",
+      "expected_repo_id": "storybookjs/storybook",
+      "tags": [
+        "frontend",
+        "testing",
+        "function"
+      ]
+    },
+    {
+      "id": "fastapi-api-framework",
+      "query": "python web framework for building apis",
+      "expected_repo_id": "fastapi/fastapi",
+      "tags": [
+        "python",
+        "api",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "django/django",
+        "pallets/flask"
+      ]
+    },
+    {
+      "id": "django-web-framework",
+      "query": "batteries included python web framework",
+      "expected_repo_id": "django/django",
+      "tags": [
+        "python",
+        "web",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "fastapi/fastapi",
+        "pallets/flask"
+      ]
+    },
+    {
+      "id": "flask-microframework",
+      "query": "lightweight python micro web framework",
+      "expected_repo_id": "pallets/flask",
+      "tags": [
+        "python",
+        "web",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "fastapi/fastapi",
+        "django/django"
+      ]
+    },
+    {
+      "id": "awesome-python-list",
+      "query": "curated list of python libraries",
+      "expected_repo_id": "vinta/awesome-python",
+      "tags": [
+        "python",
+        "awesome-list",
+        "function"
+      ]
+    },
+    {
+      "id": "uv-python-package-manager",
+      "query": "fast python package and project manager",
+      "expected_repo_id": "astral-sh/uv",
+      "tags": [
+        "python",
+        "cli",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "nvm-sh/nvm"
+      ]
+    },
+    {
+      "id": "paddle-ocr",
+      "query": "ocr toolkit for extracting text from images",
+      "expected_repo_id": "PaddlePaddle/PaddleOCR",
+      "tags": [
+        "python",
+        "ocr",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "tesseract-ocr/tesseract"
+      ]
+    },
+    {
+      "id": "manim-math-animation",
+      "query": "python library for mathematical animations",
+      "expected_repo_id": "3b1b/manim",
+      "tags": [
+        "python",
+        "graphics",
+        "function"
+      ]
+    },
+    {
+      "id": "typescript-language",
+      "query": "typed superset of javascript",
+      "expected_repo_id": "microsoft/TypeScript",
+      "tags": [
+        "typescript",
+        "language",
+        "name"
+      ]
+    },
+    {
+      "id": "node-alternative-deno",
+      "query": "secure typescript javascript runtime",
+      "expected_repo_id": "denoland/deno",
+      "tags": [
+        "javascript",
+        "runtime",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "oven-sh/bun"
+      ]
+    },
+    {
+      "id": "bun-runtime",
+      "query": "fast javascript runtime bundler package manager",
+      "expected_repo_id": "oven-sh/bun",
+      "tags": [
+        "javascript",
+        "runtime",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "denoland/deno"
+      ]
+    },
+    {
+      "id": "nestjs-node-framework",
+      "query": "nodejs backend framework with dependency injection",
+      "expected_repo_id": "nestjs/nest",
+      "tags": [
+        "typescript",
+        "backend",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "expressjs/express"
+      ]
+    },
+    {
+      "id": "axios-http-client",
+      "query": "promise based http client for browser and node",
+      "expected_repo_id": "axios/axios",
+      "tags": [
+        "javascript",
+        "http",
+        "function"
+      ]
+    },
+    {
+      "id": "playwright-browser-testing",
+      "query": "browser automation and end to end testing",
+      "expected_repo_id": "microsoft/playwright",
+      "tags": [
+        "browser",
+        "testing",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "puppeteer/puppeteer",
+        "browser-use/browser-use"
+      ]
+    },
+    {
+      "id": "puppeteer-browser-control",
+      "query": "control chrome from node for scraping and tests",
+      "expected_repo_id": "puppeteer/puppeteer",
+      "tags": [
+        "browser",
+        "automation",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "microsoft/playwright"
+      ]
+    },
+    {
+      "id": "json-server-mock-api",
+      "query": "fake rest api from json file",
+      "expected_repo_id": "typicode/json-server",
+      "tags": [
+        "javascript",
+        "api",
+        "function"
+      ]
+    },
+    {
+      "id": "clean-code-javascript",
+      "query": "clean code guidelines for javascript",
+      "expected_repo_id": "ryanmcdermott/clean-code-javascript",
+      "tags": [
+        "javascript",
+        "learning",
+        "domain"
+      ]
+    },
+    {
+      "id": "javascript-style-guide",
+      "query": "javascript style guide",
+      "expected_repo_id": "airbnb/javascript",
+      "tags": [
+        "javascript",
+        "learning",
+        "domain"
+      ],
+      "acceptable_repo_ids": [
+        "ryanmcdermott/clean-code-javascript"
+      ]
+    },
+    {
+      "id": "transformers-nlp-library",
+      "query": "transformer models for natural language processing",
+      "expected_repo_id": "huggingface/transformers",
+      "tags": [
+        "ai",
+        "nlp",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "tensorflow/tensorflow"
+      ]
+    },
+    {
+      "id": "langchain-llm-apps",
+      "query": "framework for building llm applications",
+      "expected_repo_id": "langchain-ai/langchain",
+      "tags": [
+        "ai",
+        "llm",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "langflow-ai/langflow",
+        "langgenius/dify"
+      ]
+    },
+    {
+      "id": "langflow-visual-llm-builder",
+      "query": "visual builder for langchain and llm workflows",
+      "expected_repo_id": "langflow-ai/langflow",
+      "tags": [
+        "ai",
+        "llm",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "langchain-ai/langchain",
+        "langgenius/dify"
+      ]
+    },
+    {
+      "id": "dify-llm-platform",
+      "query": "open source llm app development platform",
+      "expected_repo_id": "langgenius/dify",
+      "tags": [
+        "ai",
+        "llm",
+        "platform"
+      ],
+      "acceptable_repo_ids": [
+        "langchain-ai/langchain",
+        "langflow-ai/langflow",
+        "open-webui/open-webui"
+      ]
+    },
+    {
+      "id": "open-webui-local-llm-ui",
+      "query": "web ui for local llm chat",
+      "expected_repo_id": "open-webui/open-webui",
+      "tags": [
+        "ai",
+        "llm",
+        "ui"
+      ],
+      "acceptable_repo_ids": [
+        "lobehub/lobehub",
+        "ChatGPTNextWeb/NextChat"
+      ]
+    },
+    {
+      "id": "lobe-chat-ui",
+      "query": "modern ai chat interface",
+      "expected_repo_id": "lobehub/lobehub",
+      "tags": [
+        "ai",
+        "llm",
+        "ui"
+      ],
+      "acceptable_repo_ids": [
+        "open-webui/open-webui",
+        "ChatGPTNextWeb/NextChat"
+      ]
+    },
+    {
+      "id": "ragflow-rag-engine",
+      "query": "rag engine for document question answering",
+      "expected_repo_id": "infiniflow/ragflow",
+      "tags": [
+        "ai",
+        "rag",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "langgenius/dify",
+        "langchain-ai/langchain"
+      ]
+    },
+    {
+      "id": "ollama-local-models",
+      "query": "run large language models locally",
+      "expected_repo_id": "ollama/ollama",
+      "tags": [
+        "ai",
+        "local-llm",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "ggml-org/llama.cpp",
+        "nomic-ai/gpt4all"
+      ]
+    },
+    {
+      "id": "llama-cpp-inference",
+      "query": "llama inference in c and cpp",
+      "expected_repo_id": "ggml-org/llama.cpp",
+      "tags": [
+        "ai",
+        "local-llm",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "ollama/ollama",
+        "nomic-ai/gpt4all"
+      ]
+    },
+    {
+      "id": "vllm-serving",
+      "query": "high throughput llm serving engine",
+      "expected_repo_id": "vllm-project/vllm",
+      "tags": [
+        "ai",
+        "serving",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "ollama/ollama"
+      ]
+    },
+    {
+      "id": "gpt4all-local-chat",
+      "query": "local gpt chat client and models",
+      "expected_repo_id": "nomic-ai/gpt4all",
+      "tags": [
+        "ai",
+        "local-llm",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "ollama/ollama",
+        "ggml-org/llama.cpp"
+      ]
+    },
+    {
+      "id": "codex-terminal-agent",
+      "query": "ai coding assistant for the terminal",
+      "expected_repo_id": "openai/codex",
+      "tags": [
+        "ai",
+        "coding",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "anthropics/claude-code",
+        "OpenHands/OpenHands",
+        "anomalyco/opencode"
+      ]
+    },
+    {
+      "id": "claude-code-agent",
+      "query": "claude coding agent in terminal",
+      "expected_repo_id": "anthropics/claude-code",
+      "tags": [
+        "ai",
+        "coding",
+        "name"
+      ],
+      "acceptable_repo_ids": [
+        "openai/codex",
+        "OpenHands/OpenHands"
+      ]
+    },
+    {
+      "id": "openhands-agent",
+      "query": "open source software engineering agent",
+      "expected_repo_id": "OpenHands/OpenHands",
+      "tags": [
+        "ai",
+        "coding",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "openai/codex",
+        "anthropics/claude-code"
+      ]
+    },
+    {
+      "id": "comfyui-image-workflow",
+      "query": "node based stable diffusion image generation ui",
+      "expected_repo_id": "Comfy-Org/ComfyUI",
+      "tags": [
+        "ai",
+        "image",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "AUTOMATIC1111/stable-diffusion-webui"
+      ]
+    },
+    {
+      "id": "whisper-speech-recognition",
+      "query": "speech recognition and transcription model",
+      "expected_repo_id": "openai/whisper",
+      "tags": [
+        "ai",
+        "audio",
+        "function"
+      ]
+    },
+    {
+      "id": "prompt-engineering-guide",
+      "query": "prompt engineering guide",
+      "expected_repo_id": "dair-ai/Prompt-Engineering-Guide",
+      "tags": [
+        "ai",
+        "learning",
+        "domain"
+      ],
+      "acceptable_repo_ids": [
+        "f/prompts.chat"
+      ]
+    },
+    {
+      "id": "n8n-workflow-automation",
+      "query": "open source workflow automation platform",
+      "expected_repo_id": "n8n-io/n8n",
+      "tags": [
+        "automation",
+        "workflow",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "langgenius/dify",
+        "langflow-ai/langflow"
+      ]
+    },
+    {
+      "id": "firecrawl-web-scraping",
+      "query": "turn websites into llm ready markdown",
+      "expected_repo_id": "firecrawl/firecrawl",
+      "tags": [
+        "automation",
+        "scraping",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "microsoft/markitdown",
+        "unclecode/crawl4ai"
+      ],
+      "notes": "crawl4ai is an acceptable close substitute for web crawling into LLM-ready content."
+    },
+    {
+      "id": "markitdown-converter",
+      "query": "convert documents to markdown",
+      "expected_repo_id": "microsoft/markitdown",
+      "tags": [
+        "tools",
+        "markdown",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "Stirling-Tools/Stirling-PDF"
+      ]
+    },
+    {
+      "id": "hoppscotch-api-client",
+      "query": "open source api client like postman",
+      "expected_repo_id": "hoppscotch/hoppscotch",
+      "tags": [
+        "api",
+        "devtools",
+        "function"
+      ]
+    },
+    {
+      "id": "vscode-editor",
+      "query": "code editor from microsoft",
+      "expected_repo_id": "microsoft/vscode",
+      "tags": [
+        "editor",
+        "devtools",
+        "name"
+      ],
+      "acceptable_repo_ids": [
+        "zed-industries/zed"
+      ]
+    },
+    {
+      "id": "zed-editor",
+      "query": "fast collaborative code editor",
+      "expected_repo_id": "zed-industries/zed",
+      "tags": [
+        "editor",
+        "devtools",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "microsoft/vscode"
+      ]
+    },
+    {
+      "id": "terminal-windows",
+      "query": "modern terminal application from microsoft",
+      "expected_repo_id": "microsoft/terminal",
+      "tags": [
+        "terminal",
+        "devtools",
+        "name"
+      ]
+    },
+    {
+      "id": "gemini-cli",
+      "query": "gemini command line ai assistant",
+      "expected_repo_id": "google-gemini/gemini-cli",
+      "tags": [
+        "cli",
+        "ai",
+        "name"
+      ],
+      "acceptable_repo_ids": [
+        "openai/codex",
+        "anthropics/claude-code"
+      ]
+    },
+    {
+      "id": "lazygit-terminal-ui",
+      "query": "terminal ui for git",
+      "expected_repo_id": "jesseduffield/lazygit",
+      "tags": [
+        "cli",
+        "git",
+        "function"
+      ]
+    },
+    {
+      "id": "thefuck-shell-corrections",
+      "query": "correct previous console command",
+      "expected_repo_id": "nvbn/thefuck",
+      "tags": [
+        "cli",
+        "shell",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "ohmyzsh/ohmyzsh"
+      ]
+    },
+    {
+      "id": "ohmyzsh-shell-config",
+      "query": "zsh configuration framework",
+      "expected_repo_id": "ohmyzsh/ohmyzsh",
+      "tags": [
+        "shell",
+        "terminal",
+        "function"
+      ]
+    },
+    {
+      "id": "nvm-node-version",
+      "query": "node version manager",
+      "expected_repo_id": "nvm-sh/nvm",
+      "tags": [
+        "javascript",
+        "cli",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "oven-sh/bun"
+      ]
+    },
+    {
+      "id": "powertoys-windows-utilities",
+      "query": "windows power user utilities",
+      "expected_repo_id": "microsoft/PowerToys",
+      "tags": [
+        "desktop",
+        "windows",
+        "function"
+      ]
+    },
+    {
+      "id": "scrcpy-android-screen",
+      "query": "control android device from desktop",
+      "expected_repo_id": "Genymobile/scrcpy",
+      "tags": [
+        "desktop",
+        "android",
+        "function"
+      ]
+    },
+    {
+      "id": "uptime-kuma-monitoring",
+      "query": "self hosted uptime monitoring",
+      "expected_repo_id": "louislam/uptime-kuma",
+      "tags": [
+        "monitoring",
+        "self-hosted",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "grafana/grafana",
+        "netdata/netdata"
+      ]
+    },
+    {
+      "id": "grafana-dashboards",
+      "query": "metrics dashboards and observability",
+      "expected_repo_id": "grafana/grafana",
+      "tags": [
+        "monitoring",
+        "observability",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "netdata/netdata"
+      ]
+    },
+    {
+      "id": "netdata-monitoring",
+      "query": "real time infrastructure monitoring",
+      "expected_repo_id": "netdata/netdata",
+      "tags": [
+        "monitoring",
+        "observability",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "grafana/grafana"
+      ]
+    },
+    {
+      "id": "kubernetes-container-orchestration",
+      "query": "container orchestration platform",
+      "expected_repo_id": "kubernetes/kubernetes",
+      "tags": [
+        "infrastructure",
+        "containers",
+        "function"
+      ]
+    },
+    {
+      "id": "supabase-backend",
+      "query": "open source firebase alternative",
+      "expected_repo_id": "supabase/supabase",
+      "tags": [
+        "database",
+        "backend",
+        "alternative"
+      ],
+      "acceptable_repo_ids": [
+        "redis/redis"
+      ]
+    },
+    {
+      "id": "redis-in-memory-database",
+      "query": "in memory data structure store",
+      "expected_repo_id": "redis/redis",
+      "tags": [
+        "database",
+        "cache",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "supabase/supabase"
+      ]
+    },
+    {
+      "id": "spring-boot-java",
+      "query": "java framework for production spring applications",
+      "expected_repo_id": "spring-projects/spring-boot",
+      "tags": [
+        "java",
+        "backend",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "nestjs/nest",
+        "fastapi/fastapi"
+      ]
+    },
+    {
+      "id": "gin-go-web-framework",
+      "query": "go web framework",
+      "expected_repo_id": "gin-gonic/gin",
+      "tags": [
+        "go",
+        "web",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "golang/go"
+      ]
+    },
+    {
+      "id": "hugo-static-site",
+      "query": "static site generator written in go",
+      "expected_repo_id": "gohugoio/hugo",
+      "tags": [
+        "go",
+        "static-site",
+        "function"
+      ]
+    },
+    {
+      "id": "frp-reverse-proxy",
+      "query": "fast reverse proxy for exposing local services",
+      "expected_repo_id": "fatedier/frp",
+      "tags": [
+        "networking",
+        "proxy",
+        "function"
+      ]
+    },
+    {
+      "id": "react-native-mobile",
+      "query": "build native mobile apps with react",
+      "expected_repo_id": "react/react-native",
+      "tags": [
+        "mobile",
+        "frontend",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "electron/electron",
+        "tauri-apps/tauri"
+      ]
+    },
+    {
+      "id": "electron-desktop-apps",
+      "query": "build cross platform desktop apps with javascript",
+      "expected_repo_id": "electron/electron",
+      "tags": [
+        "desktop",
+        "javascript",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "tauri-apps/tauri"
+      ]
+    },
+    {
+      "id": "tauri-desktop-apps",
+      "query": "rust based lightweight desktop app framework",
+      "expected_repo_id": "tauri-apps/tauri",
+      "tags": [
+        "desktop",
+        "rust",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "electron/electron"
+      ]
+    },
+    {
+      "id": "rustdesk-remote-desktop",
+      "query": "open source remote desktop",
+      "expected_repo_id": "rustdesk/rustdesk",
+      "tags": [
+        "desktop",
+        "remote",
+        "function"
+      ]
+    },
+    {
+      "id": "localsend-file-sharing",
+      "query": "local network file sharing app",
+      "expected_repo_id": "localsend/localsend",
+      "tags": [
+        "desktop",
+        "mobile",
+        "function"
+      ]
+    },
+    {
+      "id": "immich-photo-backup",
+      "query": "self hosted photo and video backup",
+      "expected_repo_id": "immich-app/immich",
+      "tags": [
+        "self-hosted",
+        "photos",
+        "function"
+      ]
+    },
+    {
+      "id": "yt-dlp-download",
+      "query": "download videos from youtube and other sites",
+      "expected_repo_id": "yt-dlp/yt-dlp",
+      "tags": [
+        "media",
+        "cli",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "ytdl-org/youtube-dl"
+      ]
+    },
+    {
+      "id": "stirling-pdf-tools",
+      "query": "self hosted pdf tools",
+      "expected_repo_id": "Stirling-Tools/Stirling-PDF",
+      "tags": [
+        "documents",
+        "pdf",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "microsoft/markitdown"
+      ]
+    },
+    {
+      "id": "ventoy-boot-usb",
+      "query": "bootable usb solution for iso files",
+      "expected_repo_id": "ventoy/Ventoy",
+      "tags": [
+        "system",
+        "usb",
+        "function"
+      ]
+    },
+    {
+      "id": "freecodecamp-learning",
+      "query": "learn to code curriculum",
+      "expected_repo_id": "freeCodeCamp/freeCodeCamp",
+      "tags": [
+        "learning",
+        "programming",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "EbookFoundation/free-programming-books"
+      ]
+    },
+    {
+      "id": "free-programming-books",
+      "query": "free programming books",
+      "expected_repo_id": "EbookFoundation/free-programming-books",
+      "tags": [
+        "learning",
+        "books",
+        "name"
+      ],
+      "acceptable_repo_ids": [
+        "freeCodeCamp/freeCodeCamp"
+      ]
+    },
+    {
+      "id": "developer-roadmap",
+      "query": "developer roadmap guides",
+      "expected_repo_id": "nilbuild/developer-roadmap",
+      "tags": [
+        "learning",
+        "roadmap",
+        "name"
+      ]
+    },
+    {
+      "id": "system-design-primer",
+      "query": "learn system design",
+      "expected_repo_id": "donnemartin/system-design-primer",
+      "tags": [
+        "learning",
+        "system-design",
+        "name"
+      ]
+    },
+    {
+      "id": "javascript-algorithms",
+      "query": "javascript algorithms and data structures",
+      "expected_repo_id": "trekhleb/javascript-algorithms",
+      "tags": [
+        "learning",
+        "algorithms",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "krahets/hello-algo"
+      ]
+    },
+    {
+      "id": "hello-algo",
+      "query": "animated algorithm tutorial",
+      "expected_repo_id": "krahets/hello-algo",
+      "tags": [
+        "learning",
+        "algorithms",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "trekhleb/javascript-algorithms",
+        "MisterBooo/LeetCodeAnimation"
+      ]
+    },
+    {
+      "id": "tech-interview-handbook",
+      "query": "software engineering interview preparation",
+      "expected_repo_id": "yangshun/tech-interview-handbook",
+      "tags": [
+        "learning",
+        "interview",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "donnemartin/system-design-primer"
+      ]
+    },
+    {
+      "id": "java-guide",
+      "query": "java interview and learning guide",
+      "expected_repo_id": "Snailclimb/JavaGuide",
+      "tags": [
+        "learning",
+        "java",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "doocs/advanced-java"
+      ]
+    },
+    {
+      "id": "computer-science-curriculum",
+      "query": "open source computer science curriculum",
+      "expected_repo_id": "ossu/computer-science",
+      "tags": [
+        "learning",
+        "cs",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "freeCodeCamp/freeCodeCamp"
+      ]
+    },
+    {
+      "id": "deep-learning-book-cn",
+      "query": "deep learning chinese textbook",
+      "expected_repo_id": "d2l-ai/d2l-zh",
+      "tags": [
+        "learning",
+        "ai",
+        "domain"
+      ],
+      "acceptable_repo_ids": [
+        "mlabonne/llm-course"
+      ]
+    },
+    {
+      "id": "llm-course",
+      "query": "large language model course",
+      "expected_repo_id": "mlabonne/llm-course",
+      "tags": [
+        "learning",
+        "ai",
+        "llm"
+      ],
+      "acceptable_repo_ids": [
+        "dair-ai/Prompt-Engineering-Guide"
+      ]
+    },
+    {
+      "id": "sherlock-username-search",
+      "query": "hunt usernames across social networks",
+      "expected_repo_id": "sherlock-project/sherlock",
+      "tags": [
+        "security",
+        "osint",
+        "function"
+      ]
+    },
+    {
+      "id": "payloads-all-the-things",
+      "query": "web security payloads and bypasses",
+      "expected_repo_id": "swisskyrepo/PayloadsAllTheThings",
+      "tags": [
+        "security",
+        "reference",
+        "name"
+      ],
+      "acceptable_repo_ids": [
+        "Z4nzu/hackingtool"
+      ]
+    },
+    {
+      "id": "hacking-toolkit",
+      "query": "all in one hacking tool",
+      "expected_repo_id": "Z4nzu/hackingtool",
+      "tags": [
+        "security",
+        "tools",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "swisskyrepo/PayloadsAllTheThings"
+      ]
+    },
+    {
+      "id": "godot-game-engine",
+      "query": "open source game engine",
+      "expected_repo_id": "godotengine/godot",
+      "tags": [
+        "game",
+        "engine",
+        "function"
+      ]
+    },
+    {
+      "id": "opencv-computer-vision",
+      "query": "computer vision library",
+      "expected_repo_id": "opencv/opencv",
+      "tags": [
+        "vision",
+        "graphics",
+        "function"
+      ]
+    },
+    {
+      "id": "d3-data-visualization",
+      "query": "javascript data visualization library",
+      "expected_repo_id": "d3/d3",
+      "tags": [
+        "visualization",
+        "javascript",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "mermaid-js/mermaid"
+      ]
+    },
+    {
+      "id": "mermaid-diagrams",
+      "query": "markdown diagrams and flowcharts",
+      "expected_repo_id": "mermaid-js/mermaid",
+      "tags": [
+        "diagrams",
+        "markdown",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "excalidraw/excalidraw"
+      ]
+    },
+    {
+      "id": "excalidraw-whiteboard",
+      "query": "virtual whiteboard for sketching diagrams",
+      "expected_repo_id": "excalidraw/excalidraw",
+      "tags": [
+        "diagrams",
+        "whiteboard",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "mermaid-js/mermaid"
+      ]
+    },
+    {
+      "id": "home-assistant-automation",
+      "query": "open source home automation platform",
+      "expected_repo_id": "home-assistant/core",
+      "tags": [
+        "iot",
+        "automation",
+        "function"
+      ],
+      "acceptable_repo_ids": [
+        "n8n-io/n8n"
+      ]
+    },
+    {
+      "id": "bitcoin-core",
+      "query": "bitcoin full node implementation",
+      "expected_repo_id": "bitcoin/bitcoin",
+      "tags": [
+        "crypto",
+        "database",
+        "name"
+      ]
+    },
+    {
+      "id": "github-readme-stats",
+      "query": "dynamic github readme stats cards",
+      "expected_repo_id": "anuraghazra/github-readme-stats",
+      "tags": [
+        "github",
+        "readme",
+        "function"
+      ]
+    },
+    {
+      "id": "realworld-app-example",
+      "query": "example fullstack realworld app implementations",
+      "expected_repo_id": "realworld-apps/realworld",
+      "tags": [
+        "examples",
+        "fullstack",
+        "function"
+      ]
+    }
+  ]
+}

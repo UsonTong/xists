@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from xists import __version__
+from xists.eval.inspect import inspect_report, load_report
 from xists.eval.run import evaluate_dataset
 from xists.eval.schema import EvaluationDatasetError
 from xists.ingest.github import (
@@ -76,11 +77,35 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def _collect_with_fallback(repo_id: str, token_pool: TokenPool, github_api: str) -> dict[str, Any]:
+    if github_api == "graphql":
+        try:
+            return collect_record_graphql(repo_id, token=token_pool.next_token())
+        except GitHubAPIError as graph_error:
+            try:
+                return collect_record(repo_id, token=token_pool.next_token())
+            except GitHubAPIError as rest_error:
+                raise GitHubAPIError(
+                    f"GraphQL failed: {graph_error}; REST fallback failed: {rest_error}",
+                    status=rest_error.status or graph_error.status,
+                ) from rest_error
+
+    try:
+        return collect_record(repo_id, token=token_pool.next_token())
+    except GitHubAPIError as rest_error:
+        try:
+            return collect_record_graphql(repo_id, token=token_pool.next_token())
+        except GitHubAPIError as graph_error:
+            raise GitHubAPIError(
+                f"REST failed: {rest_error}; GraphQL fallback failed: {graph_error}",
+                status=rest_error.status or graph_error.status,
+            ) from graph_error
+
+
 def _ingest_one(repo_id: str, token_pool: TokenPool, llm_config: Any, github_api: str = "rest") -> dict[str, Any]:
     """Ingest a single repo. Returns a result dict with either 'record' or 'error'."""
     try:
-        collector = collect_record_graphql if github_api == "graphql" else collect_record
-        record = collector(repo_id, token=token_pool.next_token())
+        record = _collect_with_fallback(repo_id, token_pool, github_api)
         profile = generate_llm_profile(record, llm_config)
         attach_llm_profile(record, profile)
         return {"repo_id": repo_id, "record": record}
@@ -97,15 +122,23 @@ def _ingest_graphql_batch(repo_ids: list[str], token_pool: TokenPool, llm_config
     try:
         records = collect_records_graphql(repo_ids, token=token_pool.next_token())
     except GitHubAPIError as error:
-        return [
-            {"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": error.status}}
-            for repo_id in repo_ids
-        ]
+        if len(repo_ids) == 1:
+            return [
+                {"repo_id": repo_ids[0], "error": {"repo_id": repo_ids[0], "reason": str(error), "status": error.status}}
+            ]
+        results: list[dict[str, Any]] = []
+        for repo_id in repo_ids:
+            results.append(_ingest_one(repo_id, token_pool, llm_config, github_api="graphql"))
+        return results
     except Exception as error:
-        return [
-            {"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": None}}
-            for repo_id in repo_ids
-        ]
+        if len(repo_ids) == 1:
+            return [
+                {"repo_id": repo_ids[0], "error": {"repo_id": repo_ids[0], "reason": str(error), "status": None}}
+            ]
+        results = []
+        for repo_id in repo_ids:
+            results.append(_ingest_one(repo_id, token_pool, llm_config, github_api="graphql"))
+        return results
 
     results: list[dict[str, Any]] = []
     for repo_id, record in zip(repo_ids, records):
@@ -120,8 +153,27 @@ def _ingest_graphql_batch(repo_ids: list[str], token_pool: TokenPool, llm_config
     return results
 
 
+def _summarize_error(result: dict[str, Any]) -> str:
+    error = result.get("error") or {}
+    reason = error.get("reason") or "unknown error"
+    status = error.get("status")
+    repo_id = error.get("repo_id") or result.get("repo_id") or "<unknown>"
+    if status is not None:
+        return f"{repo_id}: {reason} (status={status})"
+    return f"{repo_id}: {reason}"
+
+
 def _chunks(items: list[str], size: int) -> list[list[str]]:
     return [items[i : i + size] for i in range(0, len(items), size)]
+
+
+def _print_ingest_progress(*, processed: int, total: int, generated: int, failed: int, skipped: int) -> None:
+    print(
+        f"ingest progress: {processed}/{total} processed "
+        f"({generated} generated, {failed} failed, {skipped} skipped)",
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def ingest_github(args: argparse.Namespace) -> int:
@@ -155,11 +207,21 @@ def ingest_github(args: argparse.Namespace) -> int:
     workers = getattr(args, "workers", 1) or 1
     github_api = getattr(args, "github_api", "rest")
     github_batch_size = getattr(args, "github_batch_size", 1) or 1
+    total_to_process = len(to_ingest)
+
+    print(
+        f"ingest starting: {len(repo_ids)} input repos, {len(skipped)} skipped, "
+        f"{total_to_process} to process, api={github_api}, "
+        f"batch_size={github_batch_size}, workers={workers}",
+        file=sys.stderr,
+        flush=True,
+    )
 
     def process_result(result: dict[str, Any]) -> None:
         nonlocal generated, with_readme, without_readme, abstained
         if "error" in result:
             failed.append(result["error"])
+            print(f"ingest failed: {_summarize_error(result)}", file=sys.stderr, flush=True)
             return
         record = result["record"]
         merged.append(record)
@@ -183,11 +245,25 @@ def ingest_github(args: argparse.Namespace) -> int:
                     for result in future.result():
                         process_result(result)
                     write_json(args.output, merged)
+                    _print_ingest_progress(
+                        processed=generated + len(failed),
+                        total=total_to_process,
+                        generated=generated,
+                        failed=len(failed),
+                        skipped=len(skipped),
+                    )
         else:
             for batch in batches:
                 for result in _ingest_graphql_batch(batch, token_pool, llm_config):
                     process_result(result)
                 write_json(args.output, merged)
+                _print_ingest_progress(
+                    processed=generated + len(failed),
+                    total=total_to_process,
+                    generated=generated,
+                    failed=len(failed),
+                    skipped=len(skipped),
+                )
     elif workers > 1 and to_ingest:
         # Multi-threaded: process repos concurrently, write checkpoint after all complete.
         with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -199,11 +275,25 @@ def ingest_github(args: argparse.Namespace) -> int:
                 process_result(future.result())
                 # Checkpoint after each thread completes.
                 write_json(args.output, merged)
+                _print_ingest_progress(
+                    processed=generated + len(failed),
+                    total=total_to_process,
+                    generated=generated,
+                    failed=len(failed),
+                    skipped=len(skipped),
+                )
     else:
         # Single-threaded: process one by one with checkpoint after each.
         for repo_id in to_ingest:
             process_result(_ingest_one(repo_id, token_pool, llm_config, github_api))
             write_json(args.output, merged)
+            _print_ingest_progress(
+                processed=generated + len(failed),
+                total=total_to_process,
+                generated=generated,
+                failed=len(failed),
+                skipped=len(skipped),
+            )
 
     finished_at = datetime.now(timezone.utc)
     report = {
@@ -463,6 +553,23 @@ def eval_run(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def eval_inspect(args: argparse.Namespace) -> int:
+    try:
+        report = load_report(args.report)
+        payload = inspect_report(
+            report,
+            status=args.status,
+            limit=args.limit,
+            include_exact=args.include_exact,
+        )
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="xists helps developers find what already exists.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -516,6 +623,13 @@ def build_parser() -> argparse.ArgumentParser:
     eval_run_parser.add_argument("--records", type=Path, default=None, help="Records JSON used for optional LLM judge comparisons")
     eval_run_parser.add_argument("--llm-judge", action="store_true", help="Run an LLM pairwise judge on top-1 mismatches")
     eval_run_parser.set_defaults(func=eval_run)
+
+    eval_inspect_parser = eval_subparsers.add_parser("inspect", help="Inspect misses and summary from an evaluation report")
+    eval_inspect_parser.add_argument("--report", type=Path, default=Path("eval-report.json"), help="Evaluation report JSON to inspect")
+    eval_inspect_parser.add_argument("--status", choices=("exact", "acceptable", "serious_mismatch", "insufficient_evidence"), default=None, help="Only show cases with this top-1 status")
+    eval_inspect_parser.add_argument("--limit", type=int, default=20, help="Maximum cases to print")
+    eval_inspect_parser.add_argument("--include-exact", action="store_true", help="Include exact top-1 cases in the inspection output")
+    eval_inspect_parser.set_defaults(func=eval_inspect)
 
     return parser
 

@@ -200,6 +200,7 @@ TYPE_CUE_TERMS = {
     "design-system",
     "design-systems",
     "desktop",
+    "engine",
     "example",
     "examples",
     "framework",
@@ -241,6 +242,12 @@ TYPE_CUE_TERMS = {
     "wiki",
     "workshop",
     "workshops",
+    "agent",
+    "chat",
+    "interface",
+    "model",
+    "models",
+    "web",
 }
 ARTIFACT_LIKE_TYPE_CUES = {
     "boilerplate",
@@ -281,6 +288,7 @@ REPO_QUALIFIER_TERMS = {
     "core",
     "demo",
     "desktop",
+    "engine",
     "example",
     "frontend",
     "guide",
@@ -646,7 +654,15 @@ def _repository_state_penalty(metadata: dict[str, Any]) -> float:
 
 @lru_cache(maxsize=8192)
 def _type_cue_tokens(text: str) -> frozenset[str]:
-    return frozenset(token for token in _tokenize(text) if token in TYPE_CUE_TERMS)
+    cues: set[str] = set()
+    for token in _compound_token_parts(text):
+        candidates = {token}
+        if token.endswith("s") and len(token) > 3:
+            candidates.add(token[:-1])
+        else:
+            candidates.add(f"{token}s")
+        cues.update(candidate for candidate in candidates if candidate in TYPE_CUE_TERMS)
+    return frozenset(cues)
 
 
 @lru_cache(maxsize=8192)
@@ -979,11 +995,12 @@ def _metadata_score(
     if off_target_repo_qualifiers and query_specificity >= 0.45 and not exact_identity_match:
         score -= min(0.05, 0.018 * len(off_target_repo_qualifiers))
     type_overlap = len(query_type_cues & metadata_type_cues)
-    if type_overlap:
-        score += min(0.08, 0.018 * type_overlap)
-    if query_type_cues and query_type_cues.issubset(metadata_type_cues):
-        score += min(0.025, 0.012 * len(query_type_cues))
     full_type_cue_match = bool(query_type_cues) and query_type_cues.issubset(metadata_type_cues)
+    meaningful_type_overlap = full_type_cue_match or type_overlap >= 2 or len(query_type_cues) <= 1
+    if type_overlap and meaningful_type_overlap:
+        score += min(0.08, 0.018 * type_overlap)
+    if full_type_cue_match:
+        score += min(0.025, 0.012 * len(query_type_cues))
     off_target_type_cues = (metadata_type_cues & ARTIFACT_LIKE_TYPE_CUES) - query_type_cues
     if query_type_cues and off_target_type_cues and type_overlap == 0:
         score -= min(0.04, 0.012 * len(off_target_type_cues))
@@ -1123,7 +1140,7 @@ def _metadata_match_strength(
         )
     )
     if query_type_cues and query_type_cues.issubset(metadata_type_cues):
-        strength = max(strength, 1)
+        strength = max(strength, 2 if len(query_type_cues) >= 2 else 1)
 
     phrase_match = phrase_match if phrase_match is not None else _profile_phrase_match(
         query,
@@ -1397,12 +1414,36 @@ def _rerank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str,
                 )
                 if challenger_strength < 2 or challenger_strength <= current_strength:
                     continue
-                if challenger["score"] >= current_top["score"] - 0.02:
+                allowed_gap = 0.035 if challenger_strength >= 2 and current_strength == 0 else 0.02
+                if challenger["score"] >= current_top["score"] - allowed_gap:
                     reranked.remove(challenger)
                     reranked.insert(0, challenger)
                     break
     elif len(reranked) > 1 and query_specificity >= 0.65:
         semantic_winner = max(reranked, key=lambda candidate: candidate["semantic_score"])
+        if semantic_winner is not reranked[0]:
+            current_top = reranked[0]
+            semantic_phrase = phrase_matches.get(str(semantic_winner.get("repo_id") or ""), {})
+            current_phrase = phrase_matches.get(str(current_top.get("repo_id") or ""), {})
+            semantic_strength = _metadata_match_strength(
+                query,
+                semantic_winner,
+                query_variants=query_variants,
+                keyword_tokens=keyword_tokens,
+                phrase_match=semantic_phrase,
+            )
+            current_strength = _metadata_match_strength(
+                query,
+                current_top,
+                query_variants=query_variants,
+                keyword_tokens=keyword_tokens,
+                phrase_match=current_phrase,
+            )
+            score_gap = current_top["score"] - semantic_winner["score"]
+            if semantic_strength > current_strength and score_gap <= 0.02:
+                reranked.remove(semantic_winner)
+                reranked.insert(0, semantic_winner)
+                return reranked
         if semantic_winner is reranked[0]:
             semantic_phrase = phrase_matches.get(str(semantic_winner.get("repo_id") or ""), {})
             semantic_strength = _metadata_match_strength(

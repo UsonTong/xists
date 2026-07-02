@@ -211,6 +211,7 @@ def test_eval_inspect_prints_filtered_cases(tmp_path, capsys):
                         "expected_repo_id": "fastapi/fastapi",
                         "top_result_repo_id": "react/react",
                         "top_result_confidence": "high_confidence",
+                        "top_result_why": ["ranked by semantic similarity"],
                     },
                 ],
             }
@@ -225,6 +226,7 @@ def test_eval_inspect_prints_filtered_cases(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["matching_count"] == 1
     assert payload["cases"][0]["id"] == "bad"
+    assert payload["cases"][0]["top_result_why"] == ["ranked by semantic similarity"]
     assert "wrong high-confidence: 1 cases" in payload["summary_text"]
 
 def _make_record(repo_id: str) -> dict:

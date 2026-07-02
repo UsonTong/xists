@@ -2122,3 +2122,134 @@ def test_rank_keeps_semantic_winner_when_no_candidate_has_stronger_structured_ev
     result = rank("binary analysis platform", index, CONFIG, top_k=2, embed=fake_embed)
 
     assert result["results"][0]["repo_id"] == "generic/platform"
+
+
+def test_entry_metadata_includes_repository_health_signals(monkeypatch):
+    def fake_call(config, inputs, *, timeout=60):
+        return [[1.0, 0.0] for _ in inputs]
+
+    monkeypatch.setattr("xists.search.index.call_embeddings", fake_call)
+    record = make_record("react/react")
+    record["github"].update(
+        {
+            "stars": 123456,
+            "forks": 12000,
+            "archived": False,
+            "disabled": False,
+            "pushed_at": "2026-01-01T00:00:00Z",
+        }
+    )
+
+    index = build_index([record], CONFIG)
+
+    metadata = index["vectors"][0]["metadata"]
+    assert metadata["stars"] == 123456
+    assert metadata["forks"] == 12000
+    assert metadata["archived"] is False
+    assert metadata["disabled"] is False
+    assert metadata["pushed_at"] == "2026-01-01T00:00:00Z"
+
+
+def test_rank_returns_query_intent_and_result_explanations():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "fastapi/fastapi",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "fastapi",
+                    "description": "FastAPI framework, high performance, easy to learn, fast to code.",
+                    "topics": ["api", "apis", "python", "framework"],
+                    "language": "Python",
+                    "stars": 90000,
+                    "summary": "FastAPI is a Python web framework for building APIs.",
+                    "use_cases": ["building Python APIs"],
+                    "capabilities": ["async API framework"],
+                    "search_phrases": ["python web framework for building apis"],
+                },
+            }
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("python web framework for building apis", index, CONFIG, embed=fake_embed)
+
+    assert result["query_intent"]["type"] in {"domain", "functional"}
+    assert result["query_intent"]["primary_language"] == "python"
+    assert result["results"][0]["repo_id"] == "fastapi/fastapi"
+    assert any(reason.startswith("matched topic:") for reason in result["results"][0]["why"])
+    assert "matched language: Python" in result["results"][0]["why"]
+    assert "popular repository" in result["results"][0]["why"]
+
+
+def test_rank_marks_exact_name_query_intent():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "react/react",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "react",
+                    "description": "The library for web and native user interfaces.",
+                    "topics": ["frontend", "ui"],
+                    "language": "JavaScript",
+                },
+            }
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("react", index, CONFIG, embed=fake_embed)
+
+    assert result["query_intent"]["type"] == "exact_name"
+    assert "exact repo/name match" in result["results"][0]["why"]
+
+
+def test_repository_state_penalty_can_break_tie_against_archived_repo():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "old/tool",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "tool",
+                    "description": "CLI tool for project automation.",
+                    "topics": ["cli", "automation"],
+                    "language": "Python",
+                    "archived": True,
+                    "search_phrases": ["cli tool for project automation"],
+                },
+            },
+            {
+                "repo_id": "new/tool",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "tool",
+                    "description": "CLI tool for project automation.",
+                    "topics": ["cli", "automation"],
+                    "language": "Python",
+                    "archived": False,
+                    "search_phrases": ["cli tool for project automation"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("cli tool for project automation", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "new/tool"
+    archived = next(item for item in result["results"] if item["repo_id"] == "old/tool")
+    assert "archived repository penalty" in archived["why"]

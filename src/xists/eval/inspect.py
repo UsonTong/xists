@@ -101,12 +101,14 @@ def case_brief(result: dict[str, Any]) -> dict[str, Any]:
     brief = {
         "id": result.get("id"),
         "query": result.get("query"),
+        "query_intent": result.get("query_intent"),
         "tags": result.get("tags") or [],
         "top1_status": result.get("top1_status"),
         "abstained": bool(result.get("abstained")),
         "expected_repo_id": result.get("expected_repo_id"),
         "top_result_repo_id": result.get("top_result_repo_id"),
         "top_result_confidence": result.get("top_result_confidence"),
+        "top_result_why": result.get("top_result_why") or [],
         "exact_rank": result.get("exact_rank"),
         "acceptable_rank": result.get("acceptable_rank"),
     }

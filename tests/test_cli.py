@@ -2,7 +2,18 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from xists.cli import build_parser, eval_inspect, eval_run, index_build, ingest_github, load_env_file, load_repo_ids
+from xists.cli import (
+    build_parser,
+    doctor,
+    eval_inspect,
+    eval_run,
+    index_build,
+    index_stats,
+    ingest_github,
+    load_env_file,
+    load_repo_ids,
+    records_inspect,
+)
 from xists.ingest.github import GitHubAPIError
 from xists.search.embed import EmbeddingError
 
@@ -98,6 +109,29 @@ def test_ingest_github_parser_accepts_custom_paths():
     assert args.repos == Path("data/repos.txt")
     assert args.output == Path("data/records.json")
     assert args.report == Path("data/report.json")
+
+
+def test_doctor_parser_uses_default_paths():
+    args = build_parser().parse_args(["doctor"])
+
+    assert args.records == Path("records.json")
+    assert args.index == Path("index.json")
+    assert args.cases == Path("eval-cases.json")
+
+
+def test_index_stats_parser_uses_default_path():
+    args = build_parser().parse_args(["index", "stats"])
+
+    assert args.index == Path("index.json")
+    assert args.limit == 10
+
+
+def test_records_inspect_parser_uses_default_path():
+    args = build_parser().parse_args(["records", "inspect"])
+
+    assert args.records == Path("records.json")
+    assert args.repo is None
+    assert args.limit == 20
 
 
 def test_eval_run_parser_uses_default_paths():
@@ -228,6 +262,116 @@ def test_eval_inspect_prints_filtered_cases(tmp_path, capsys):
     assert payload["cases"][0]["id"] == "bad"
     assert payload["cases"][0]["top_result_why"] == ["ranked by semantic similarity"]
     assert "wrong high-confidence: 1 cases" in payload["summary_text"]
+
+
+def test_doctor_reports_config_and_files_without_secrets(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text("[]", encoding="utf-8")
+    index_file = tmp_path / "index.json"
+    index_file.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setenv("EMBEDDING_API_KEY", "embed-secret")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    monkeypatch.setenv("LLM_API_KEY", "llm-secret")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost/v1")
+    monkeypatch.setenv("LLM_MODEL", "gpt-test")
+    monkeypatch.setenv("GITHUB_TOKEN", "github-secret")
+
+    args = build_parser().parse_args(
+        [
+            "doctor",
+            "--records", str(records_file),
+            "--index", str(index_file),
+            "--cases", str(tmp_path / "missing-eval-cases.json"),
+        ]
+    )
+
+    code = doctor(args)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    statuses = {check["name"]: check["status"] for check in payload["checks"]}
+    assert statuses["embedding_config"] == "ok"
+    assert statuses["llm_config"] == "ok"
+    assert statuses["github_token"] == "ok"
+    assert statuses["eval_cases_file"] == "warn"
+    serialized = json.dumps(payload)
+    assert "embed-secret" not in serialized
+    assert "llm-secret" not in serialized
+    assert "github-secret" not in serialized
+
+
+def test_index_stats_prints_compact_summary(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "index_version": 1,
+                "embedding_model": "BAAI/bge-m3",
+                "embedding_base_url": "http://localhost:6597/v1",
+                "embedding_input_version": 1,
+                "dimension": 2,
+                "built_at": "2026-01-01T00:00:00+00:00",
+                "record_count": 2,
+                "skipped": ["empty/repo"],
+                "vectors": [
+                    {
+                        "repo_id": "react/react",
+                        "embedding_input_fingerprint": "abc",
+                        "metadata": {"language": "JavaScript", "topics": ["frontend", "ui"]},
+                        "vector": [1.0, 0.0],
+                    },
+                    {
+                        "repo_id": "fastapi/fastapi",
+                        "metadata": {"language": "Python", "topics": ["api", "framework"]},
+                        "vector": [0.0, 1.0],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(["index", "stats", "--index", str(index_file), "--limit", "1"])
+
+    code = index_stats(args)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["vector_count"] == 2
+    assert payload["skipped_count"] == 1
+    assert payload["missing_fingerprint_count"] == 1
+    assert payload["top_languages"] == [{"language": "JavaScript", "count": 1}]
+    assert "vectors" not in payload
+
+
+def test_records_inspect_filters_and_summarizes_records(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(
+        json.dumps(
+            [
+                _make_record("react/react"),
+                _make_record("fastapi/fastapi"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(
+        ["records", "inspect", "--records", str(records_file), "--repo", "fastapi", "--limit", "5"]
+    )
+
+    code = records_inspect(args)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["record_count"] == 2
+    assert payload["matching_count"] == 1
+    assert payload["items"][0]["repo_id"] == "fastapi/fastapi"
+    assert payload["items"][0]["summary"] == "fastapi/fastapi summary"
+
 
 def _make_record(repo_id: str) -> dict:
     return {

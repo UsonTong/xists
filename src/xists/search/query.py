@@ -244,6 +244,8 @@ TYPE_CUE_TERMS = {
     "workshops",
     "agent",
     "chat",
+    "compile",
+    "compile-time",
     "interface",
     "model",
     "models",
@@ -275,6 +277,68 @@ ARTIFACT_LIKE_TYPE_CUES = {
     "tutorials",
     "workshop",
     "workshops",
+}
+LEARNING_RESOURCE_CUES = {
+    "course",
+    "courses",
+    "curriculum",
+    "guide",
+    "guides",
+    "learn",
+    "learning",
+    "notebook",
+    "notebooks",
+    "roadmap",
+    "roadmaps",
+    "tutorial",
+    "tutorials",
+}
+LEARNING_QUERY_CUES = {"course", "courses", "guide", "learn", "learning", "roadmap", "tutorial", "tutorials"}
+FRONTEND_TOOLING_CUES = {
+    "asset",
+    "assets",
+    "build-tool",
+    "bundler",
+    "dev-server",
+    "hmr",
+    "tooling",
+}
+BACKEND_OR_NATIVE_CUES = {
+    "backend",
+    "desktop",
+    "mobile",
+    "native",
+    "server",
+    "server-side",
+    "webview",
+}
+LANGUAGE_PROJECT_CUES = {"language", "superset", "typechecker", "type-checker"}
+PROVIDER_AGGREGATOR_CUES = {
+    "aggregator",
+    "api",
+    "provider",
+    "providers",
+    "reverse-engineering",
+}
+PRIVATE_LOCAL_MODEL_CUES = {"offline", "private", "privacy", "cpu", "device", "devices"}
+NORMALIZED_TOKEN_GROUPS = (
+    ("app", ("app", "apps", "application", "applications")),
+    ("build", ("build", "building", "built")),
+    ("chat", ("chat", "chatbot", "chatbots")),
+    ("code", ("code", "coding", "developer", "developers", "development", "engineering", "software")),
+    ("compile", ("compile", "compiler", "compile-time", "compiled", "compiles")),
+    ("component", ("component", "components", "ui-component", "ui-components")),
+    ("develop", ("develop", "developing", "development", "developer", "developers")),
+    ("framework", ("framework", "frameworks")),
+    ("llm", ("llm", "llms", "large-language-model", "large-language-models")),
+    ("local", ("local", "locally", "offline", "self-host", "self-hosted", "self-hosting")),
+    ("model", ("model", "models")),
+    ("platform", ("platform", "platforms")),
+)
+NORMALIZED_TOKEN_ALIASES = {
+    alias: set(aliases)
+    for _, aliases in NORMALIZED_TOKEN_GROUPS
+    for alias in aliases
 }
 REPO_QUALIFIER_TERMS = {
     "android",
@@ -677,6 +741,103 @@ def _repo_descriptor_tokens(text: str) -> frozenset[str]:
     )
 
 
+def _expanded_token_aliases(token: str) -> set[str]:
+    aliases = set(NORMALIZED_TOKEN_ALIASES.get(token, (token,)))
+    aliases.add(token)
+    if token.endswith("s") and len(token) > 3:
+        aliases.add(token[:-1])
+    elif len(token) > 2:
+        aliases.add(f"{token}s")
+    return aliases
+
+
+def _expanded_token_set(tokens: set[str] | frozenset[str]) -> set[str]:
+    expanded: set[str] = set()
+    for token in tokens:
+        expanded.update(_expanded_token_aliases(token))
+    return expanded
+
+
+def _normalized_overlap_count(needles: set[str] | frozenset[str], haystack: set[str] | frozenset[str]) -> int:
+    if not needles or not haystack:
+        return 0
+    expanded_haystack = _expanded_token_set(haystack)
+    return sum(1 for token in needles if _expanded_token_aliases(token) & expanded_haystack)
+
+
+def _query_asks_frontend_framework(query_type_cues: frozenset[str], keyword_tokens: frozenset[str]) -> bool:
+    return "framework" in query_type_cues and "frontend" in query_type_cues
+
+
+def _role_mismatch_penalty(
+    *,
+    query_tokens: tuple[str, ...],
+    keyword_tokens: frozenset[str],
+    query_type_cues: frozenset[str],
+    metadata_type_cues: frozenset[str],
+    metadata_tokens: set[str],
+    topics: set[str],
+    repo_descriptor_tokens: frozenset[str],
+) -> float:
+    """Penalize candidates whose artifact type contradicts the query type.
+
+    The penalty is intentionally small and transparent: semantic similarity is
+    still the primary signal, but a course should not beat an LLM framework just
+    because both mention "building LLM applications", and a build tool should
+    not beat a frontend framework when the query explicitly asks for one.
+    """
+
+    penalty = 0.0
+    all_tokens = metadata_tokens | topics | set(metadata_type_cues) | set(repo_descriptor_tokens)
+    query_token_set = set(query_tokens)
+
+    asks_frameworkish = bool(query_type_cues & {"framework", "platform", "app", "application", "agent"})
+    asks_learning = bool(query_token_set & LEARNING_QUERY_CUES)
+    if asks_frameworkish and not asks_learning and all_tokens & LEARNING_RESOURCE_CUES:
+        penalty += 0.055
+
+    if _query_asks_frontend_framework(query_type_cues, keyword_tokens):
+        has_frontend_framework_signal = (
+            "framework" in metadata_type_cues
+            and bool(metadata_type_cues & {"frontend", "web"})
+            and not bool(topics & LANGUAGE_PROJECT_CUES)
+        )
+        component_library_signal = bool(
+            all_tokens & {"component", "components", "ui-components", "ui-kit", "design-system", "design-systems", "library"}
+        )
+        if all_tokens & FRONTEND_TOOLING_CUES:
+            penalty += 0.065
+        if all_tokens & BACKEND_OR_NATIVE_CUES and "compiler" not in metadata_type_cues:
+            if has_frontend_framework_signal:
+                if all_tokens & {"backend", "native", "webview"}:
+                    penalty += 0.04
+            else:
+                penalty += 0.16
+        if topics & LANGUAGE_PROJECT_CUES and not has_frontend_framework_signal:
+            penalty += 0.06
+        if component_library_signal and "framework" not in metadata_type_cues:
+            penalty += 0.055
+
+    if {"local", "chat", "model"} <= _expanded_token_set(keyword_tokens):
+        if all_tokens & PROVIDER_AGGREGATOR_CUES and not all_tokens & PRIVATE_LOCAL_MODEL_CUES:
+            penalty += 0.08
+
+    query_is_software_engineering_agent = (
+        "agent" in query_type_cues and "engineering" in query_tokens and ("software" in query_tokens or "code" in query_tokens)
+    )
+    if query_is_software_engineering_agent:
+        if repo_descriptor_tokens & {"skills", "skill"} and "agent" not in repo_descriptor_tokens:
+            penalty += 0.16
+        if not all_tokens & {"coding", "code", "developer", "developer-tools", "dev"}:
+            penalty += 0.09
+
+    if {"app", "platform"} & query_type_cues and "llm" in _expanded_token_set(keyword_tokens):
+        if "platform" not in metadata_type_cues and bool(all_tokens & {"runner", "inference", "cli"}):
+            penalty += 0.07
+
+    return min(penalty, 0.3)
+
+
 def _profile_phrases(metadata: dict[str, Any]) -> list[tuple[str, str]]:
     phrases: list[tuple[str, str]] = []
     for key in ("description", "summary"):
@@ -981,6 +1142,13 @@ def _metadata_score(
         topic_overlap = len(keyword_tokens & topics)
         if topic_overlap:
             score += min(0.06, 0.025 * topic_overlap)
+        expanded_metadata_tokens = metadata_tokens | topics | repo_part_tokens | name_part_tokens
+        normalized_overlap = _normalized_overlap_count(keyword_tokens, expanded_metadata_tokens)
+        exact_overlap = len(keyword_tokens & expanded_metadata_tokens)
+        if normalized_overlap > exact_overlap:
+            score += min(0.05, 0.014 * (normalized_overlap - exact_overlap))
+        if len(keyword_tokens) >= 2 and normalized_overlap == len(keyword_tokens):
+            score += 0.025
     repo_descriptor_overlap = repo_descriptor_tokens & keyword_tokens
     extra_repo_descriptors = repo_descriptor_tokens - keyword_tokens
     repo_qualifier_tokens = (repo_part_tokens | name_part_tokens) & REPO_QUALIFIER_TERMS
@@ -993,7 +1161,7 @@ def _metadata_score(
     ):
         score -= min(0.02, 0.006 * len(extra_repo_descriptors))
     if off_target_repo_qualifiers and query_specificity >= 0.45 and not exact_identity_match:
-        score -= min(0.05, 0.018 * len(off_target_repo_qualifiers))
+        score -= min(0.07, 0.026 * len(off_target_repo_qualifiers))
     type_overlap = len(query_type_cues & metadata_type_cues)
     full_type_cue_match = bool(query_type_cues) and query_type_cues.issubset(metadata_type_cues)
     meaningful_type_overlap = full_type_cue_match or type_overlap >= 2 or len(query_type_cues) <= 1
@@ -1004,6 +1172,17 @@ def _metadata_score(
     off_target_type_cues = (metadata_type_cues & ARTIFACT_LIKE_TYPE_CUES) - query_type_cues
     if query_type_cues and off_target_type_cues and type_overlap == 0:
         score -= min(0.04, 0.012 * len(off_target_type_cues))
+
+    role_mismatch_penalty = _role_mismatch_penalty(
+        query_tokens=query_tokens,
+        keyword_tokens=keyword_tokens,
+        query_type_cues=query_type_cues,
+        metadata_type_cues=metadata_type_cues,
+        metadata_tokens=metadata_tokens,
+        topics=topics,
+        repo_descriptor_tokens=repo_descriptor_tokens,
+    )
+    score -= role_mismatch_penalty
 
     if language_mismatch:
         score -= 0.04
@@ -1093,8 +1272,35 @@ def _metadata_score(
             tie_break += 0.012
         elif language_mismatch:
             tie_break -= 0.012
+    if keyword_tokens:
+        all_tokens = metadata_tokens | topics | repo_part_tokens | name_part_tokens
+        normalized_overlap = _normalized_overlap_count(keyword_tokens, all_tokens)
+        if len(keyword_tokens) >= 2 and normalized_overlap == len(keyword_tokens):
+            tie_break += 0.024
+            if _query_asks_frontend_framework(query_type_cues, keyword_tokens):
+                tie_break += 0.016
+        if (
+            len(keyword_tokens) >= 2
+            and partial_overlap == len(keyword_tokens)
+            and partial_ratio >= 0.9
+            and partial_specificity >= 0.04
+        ):
+            tie_break += 0.012
+    if (
+        "agent" in query_type_cues
+        and "engineering" in query_tokens
+        and ("software" in query_tokens or "code" in query_tokens)
+        and "agent" in metadata_type_cues
+        and (metadata_tokens | topics | repo_part_tokens | name_part_tokens)
+        & {"coding", "code", "developer", "developer-tools", "dev"}
+    ):
+        tie_break += 0.03
     if full_type_cue_match:
         tie_break += min(0.012, 0.006 * len(query_type_cues))
+    if off_target_repo_qualifiers and query_specificity >= 0.45 and not exact_identity_match:
+        tie_break -= min(0.018, 0.008 * len(off_target_repo_qualifiers))
+    if role_mismatch_penalty:
+        tie_break -= min(0.18, role_mismatch_penalty * 0.8)
     if coverage_overlap >= 4 and coverage_ratio >= 0.75 and coverage_phrase_hits >= 2:
         tie_break += min(0.02, 0.006 + 0.004 * max(0, coverage_overlap - 4))
     if coverage_overlap >= 5 and coverage_ratio >= 0.7 and coverage_phrase_hits >= 3:
@@ -1122,6 +1328,14 @@ def _metadata_match_strength(
 
     repo_id = str(item.get("repo_id") or "").lower()
     name = str(metadata.get("name") or "").lower()
+    topics = {
+        token
+        for topic in metadata.get("topics") or []
+        for token in _tokenize(str(topic))
+    }
+    metadata_tokens = _token_set_without_query_languages(_all_metadata_text(metadata).lower(), query)
+    repo_part_tokens = set(_compound_token_parts(repo_id.replace("/", " ")))
+    name_part_tokens = set(_compound_token_parts(name))
     strength = 0
     if _variant_in_text(query_variants, repo_id) or _variant_in_text(query_variants, name):
         strength = 2
@@ -1141,6 +1355,11 @@ def _metadata_match_strength(
     )
     if query_type_cues and query_type_cues.issubset(metadata_type_cues):
         strength = max(strength, 2 if len(query_type_cues) >= 2 else 1)
+    if keyword_tokens:
+        all_tokens = metadata_tokens | topics | repo_part_tokens | name_part_tokens
+        normalized_overlap = _normalized_overlap_count(keyword_tokens, all_tokens)
+        if len(keyword_tokens) >= 2 and normalized_overlap == len(keyword_tokens):
+            strength = max(strength, 2 if _query_asks_frontend_framework(query_type_cues, keyword_tokens) else 1)
 
     phrase_match = phrase_match if phrase_match is not None else _profile_phrase_match(
         query,
@@ -1390,7 +1609,13 @@ def _rerank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str,
             required_advantage = 0.001 + max(0.0, semantic_gap)
         else:
             required_advantage = 0.04 + max(0.0, semantic_gap)
-        if semantic_winner is not rerank_winner and semantic_gap > 0.0 and metadata_advantage < required_advantage:
+        tiny_semantic_gap_with_metadata_edge = semantic_gap <= 0.001 and metadata_advantage >= 0.001
+        if (
+            semantic_winner is not rerank_winner
+            and semantic_gap > 0.0
+            and metadata_advantage < required_advantage
+            and not tiny_semantic_gap_with_metadata_edge
+        ):
             reranked.remove(semantic_winner)
             reranked.insert(0, semantic_winner)
         current_top = reranked[0]

@@ -657,7 +657,11 @@
       ],
       "acceptable_repo_ids": [
         "openai/codex",
-        "anthropics/claude-code"
+        "anthropics/claude-code",
+        "anomalyco/opencode",
+        "FoundationAgents/MetaGPT",
+        "msitarzewski/agency-agents",
+        "bytedance/deer-flow"
       ]
     },
     {

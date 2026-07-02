@@ -2329,3 +2329,118 @@ def test_type_cue_strength_promotes_rag_engine_over_document_tool_when_close():
     result = rank("rag engine for document question answering", index, CONFIG, top_k=2, embed=fake_embed)
 
     assert result["results"][0]["repo_id"] == "infiniflow/ragflow"
+
+
+def test_rank_prefers_framework_over_course_when_query_asks_for_llm_framework():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "learning/llm-course",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "llm-course",
+                    "description": "Course and roadmap for learning large language models.",
+                    "topics": ["course", "llm", "roadmap"],
+                    "summary": "A course for building and deploying LLM applications with notebooks.",
+                    "search_phrases": ["LLM course", "learn large language models"],
+                },
+            },
+            {
+                "repo_id": "langchain-ai/langchain",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "langchain",
+                    "description": "The agent engineering platform.",
+                    "topics": ["llm", "framework", "agents"],
+                    "summary": "Framework for building LLM-powered applications.",
+                    "search_phrases": ["LLM application development", "agent framework for LLM"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("framework for building llm applications", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "langchain-ai/langchain"
+
+
+def test_rank_prefers_frontend_framework_over_backend_framework_for_frontend_query():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "nestjs/nest",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "nest",
+                    "description": "Enterprise-grade server-side framework with TypeScript.",
+                    "topics": ["typescript", "framework", "server"],
+                    "summary": "Backend framework for server-side applications.",
+                    "search_phrases": ["TypeScript backend framework"],
+                },
+            },
+            {
+                "repo_id": "angular/angular",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "angular",
+                    "description": "Web application framework using TypeScript.",
+                    "topics": ["typescript", "web-framework", "web"],
+                    "summary": "Angular is a platform for enterprise frontend web applications.",
+                    "use_cases": ["Building large-scale enterprise web applications"],
+                    "search_phrases": ["enterprise typescript frontend framework"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("enterprise typescript frontend framework", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "angular/angular"
+
+
+def test_rank_prefers_local_model_app_over_provider_aggregator_for_local_chat_query():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "xtekky/gpt4free",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "gpt4free",
+                    "description": "Provider aggregator with API clients for GPT models.",
+                    "topics": ["gpt", "api", "reverse-engineering"],
+                    "summary": "Multi-provider LLM aggregator with OpenAI-compatible API.",
+                    "search_phrases": ["free chatgpt api", "multi-provider llm aggregator"],
+                },
+            },
+            {
+                "repo_id": "nomic-ai/gpt4all",
+                "vector": [0.99, 0.01],
+                "metadata": {
+                    "name": "gpt4all",
+                    "description": "Run Local LLMs on Any Device.",
+                    "topics": ["ai-chat", "llm-inference"],
+                    "summary": "Desktop app for offline local AI chat with private models.",
+                    "search_phrases": ["offline AI chat app", "private AI assistant no GPU"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("local gpt chat client and models", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "nomic-ai/gpt4all"

@@ -14,17 +14,17 @@ xists eval inspect --report demo-eval-report.json
 
 `repos.txt` is the current 200-repository demo list and `examples/eval-cases.json` is the 100-case baseline dataset meant to keep ranking changes measurable.
 
-For the full walkthrough, see [docs/demo.md](/home/usontong/Repositories/xists/docs/demo.md).
+For the full walkthrough, see [docs/demo.md](demo.md).
 
 ## Installation
 
 Install xists in development mode:
 
 ```bash
-pip install -e .
+python -m pip install -e ".[dev]"
 ```
 
-This makes the `xists` command available globally.
+This makes the `xists` command available globally and installs the test dependency used by CI.
 
 ## Configuration
 
@@ -91,6 +91,47 @@ Supported formats:
 
 Blank lines and lines starting with `#` are ignored.
 
+## Recommended local file layout
+
+For local experiments, keep generated files under `data/` so it is obvious which files are inputs and outputs:
+
+```text
+data/
+  repos.txt
+  records.json
+  index.json
+  eval-cases.json
+  eval-report.json
+```
+
+The default root-level generated artifacts (`records.json`, `index.json`, `report.json`, `eval-report.json`) are ignored by Git. Do not commit `.env`, token files, or generated demo data unless you are intentionally updating a small fixture.
+
+## Preflight check
+
+Run `doctor` before a full ingest/index/eval cycle:
+
+```bash
+xists doctor \
+  --records demo-records.json \
+  --index demo-index.json \
+  --cases examples/eval-cases.json
+```
+
+It checks whether embedding, LLM, and GitHub configuration are present and whether the expected records, index, and evaluation case files exist. The output is JSON and does not include secret values:
+
+```json
+{
+  "ok": true,
+  "checks": [
+    {"name": "embedding_config", "status": "ok", "model": "BAAI/bge-m3"},
+    {"name": "llm_config", "status": "ok", "model": "gpt-5.4"},
+    {"name": "github_token", "status": "ok", "token_count": 1}
+  ]
+}
+```
+
+Warnings usually mean a file has not been generated yet. Errors mean a required endpoint configuration is missing or invalid.
+
 ## Workflow
 
 ### Step 1: Ingest repositories
@@ -139,6 +180,17 @@ Performance example (10 repos):
 | `--workers 1` | 2m 41s | 1x |
 | `--workers 5` | 31s | 5.2x |
 
+### Inspect generated records
+
+Before building or rebuilding an index, inspect records to verify that ingestion and LLM profiling produced usable metadata:
+
+```bash
+xists records inspect --records demo-records.json --limit 5
+xists records inspect --records demo-records.json --repo react --limit 2
+```
+
+This prints a compact JSON summary with repo id, URL, language, topics, README presence, profile confidence, abstain state, and the generated summary. It intentionally omits large README/profile payloads.
+
 ### Step 2: Build the embedding index
 
 ```bash
@@ -167,6 +219,16 @@ Each batch (64 records) is written to disk as it completes. If interrupted, comp
 
 If `index.json` was built with a different embedding model than the one configured, `index build` refuses to run and asks you to rebuild or match the model. This prevents silent corruption from mixing incompatible vectors.
 
+#### Inspect index statistics
+
+Use `index stats` when you want to confirm what is inside an index without printing large embedding vectors:
+
+```bash
+xists index stats --index demo-index.json --limit 5
+```
+
+The output includes model, dimension, record/vector counts, skipped count, missing metadata/fingerprint counts, and the most common languages/topics. This is useful before evaluation because it catches stale or incomplete indexes quickly.
+
 ### Step 3: Search
 
 ```bash
@@ -185,7 +247,8 @@ Returns ranked results with confidence tiers:
       "score": 0.68,
       "semantic_score": 0.62,
       "metadata_score": 0.06,
-      "confidence": "high_confidence"
+      "confidence": "high_confidence",
+      "why": ["matched topic: frontend", "matched phrase: UI library"]
     },
     {
       "repo_id": "vuejs/core",
@@ -204,6 +267,8 @@ from the embedding search, and `metadata_score` is the bounded reranking bonus
 from repository names, descriptions, topics, and generated profile phrases.
 Exact repository/name queries receive stronger metadata evidence than ordinary
 substring overlap.
+
+`query_intent` describes the detected query shape, and each result may include a `why` list explaining the metadata/topic/name/phrase signals that affected the rank.
 
 #### Confidence tiers
 
@@ -226,7 +291,7 @@ such as a repository/name match or a unique exact generated profile phrase.
 ### Step 4: Evaluate retrieval quality
 
 ```bash
-xists eval run --cases eval-cases.json --index index.json --output eval-report.json
+xists eval run --cases examples/eval-cases.json --index index.json --output eval-report.json
 ```
 
 This runs a fixed evaluation dataset against the current index and writes an evaluation report you can compare across prompt, embedding, and ranking iterations.
@@ -346,3 +411,25 @@ A JSON report for the ingest run. Includes started_at, finished_at, duration_sec
 | `report.json` | Yes | Last ingest report |
 
 To start fresh, delete `records.json` and `index.json` and re-run the workflow.
+
+## CI and release checklist
+
+The repository includes GitHub Actions CI in `.github/workflows/ci.yml`. On every push and pull request it installs the package in editable dev mode and runs `pytest` on Python 3.11 and 3.12.
+
+Before tagging a release:
+
+```bash
+python -m pip install -e ".[dev]"
+pytest
+xists doctor --records demo-records.json --index demo-index.json --cases examples/eval-cases.json
+xists index stats --index demo-index.json
+xists eval inspect --report demo-eval-report.json --status serious_mismatch
+```
+
+Release readiness expectations for `0.1.0`:
+
+- package version and `xists.__version__` are aligned
+- README remains the short project entry point unless intentionally changed
+- docs cover the full local workflow and inspection commands
+- generated records, indexes, reports, `.env`, and token files stay uncommitted
+- `pytest` and GitHub Actions CI pass

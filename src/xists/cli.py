@@ -517,6 +517,11 @@ def _check_payload(name: str, status: str, message: str, **extra: Any) -> dict[s
     return {"name": name, "status": status, "message": message, **extra}
 
 
+def version(args: argparse.Namespace) -> int:
+    print(json.dumps({"version": __version__}, ensure_ascii=False, indent=2))
+    return 0
+
+
 def doctor(args: argparse.Namespace) -> int:
     checks: list[dict[str, Any]] = []
 
@@ -712,7 +717,11 @@ def eval_inspect(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="xists helps developers find what already exists.")
+    parser.add_argument("--version", action="version", version=f"xists {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    version_parser = subparsers.add_parser("version", help="Print the xists version as JSON")
+    version_parser.set_defaults(func=version)
 
     doctor_parser = subparsers.add_parser("doctor", help="Check local configuration and expected data files")
     doctor_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to check")

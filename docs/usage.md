@@ -108,6 +108,13 @@ The default root-level generated artifacts (`records.json`, `index.json`, `repor
 
 ## Preflight check
 
+Check the installed version:
+
+```bash
+xists --version
+xists version
+```
+
 Run `doctor` before a full ingest/index/eval cycle:
 
 ```bash
@@ -413,6 +420,8 @@ A JSON report for the ingest run. Includes started_at, finished_at, duration_sec
 To start fresh, delete `records.json` and `index.json` and re-run the workflow.
 
 ## CI and release checklist
+
+See [docs/release.md](release.md) for the full release checklist.
 
 The repository includes GitHub Actions CI in `.github/workflows/ci.yml`. On every push and pull request it installs the package in editable dev mode and runs `pytest` on Python 3.11 and 3.12.
 

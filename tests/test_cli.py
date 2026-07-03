@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+from xists import __version__
 from xists.cli import (
     build_parser,
     doctor,
@@ -13,6 +14,7 @@ from xists.cli import (
     load_env_file,
     load_repo_ids,
     records_inspect,
+    version,
 )
 from xists.ingest.github import GitHubAPIError
 from xists.search.embed import EmbeddingError
@@ -74,6 +76,30 @@ def test_load_repo_ids_skips_blank_lines_and_comments(tmp_path):
     )
     assert load_repo_ids(repos_file) == ["facebook/react", "vuejs/core"]
 
+
+def test_version_parser_accepts_version_command():
+    args = build_parser().parse_args(["version"])
+
+    assert args.func is version
+
+
+def test_version_prints_json(capsys):
+    args = build_parser().parse_args(["version"])
+
+    code = version(args)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {"version": __version__}
+
+
+def test_global_version_flag_prints_plain_version(capsys):
+    try:
+        build_parser().parse_args(["--version"])
+    except SystemExit as error:
+        assert error.code == 0
+
+    assert capsys.readouterr().out.strip() == f"xists {__version__}"
 
 def test_ingest_github_parser_uses_default_paths():
     args = build_parser().parse_args(["ingest", "github"])

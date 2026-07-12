@@ -12,7 +12,7 @@ xists eval run --cases examples/eval-cases.json --index demo-index.json --output
 xists eval inspect --report demo-eval-report.json
 ```
 
-`repos.txt` is the current 200-repository demo list and `examples/eval-cases.json` is the 100-case baseline dataset meant to keep ranking changes measurable.
+`repos.txt` is the current 200-repository demo list. `examples/eval-cases.json` is an optional 100-case dataset for checking retrieval quality.
 
 For the full walkthrough, see [docs/demo.md](demo.md).
 
@@ -43,18 +43,23 @@ GITHUB_TOKEN=your_github_token_here
 # Multiple tokens (comma-separated, for higher rate limits):
 # GITHUB_TOKENS=tok1,tok2,tok3
 
-# LLM (required for ingest)
+# LLM profile generation (required for ingest)
 LLM_API_KEY=your_llm_api_key_here
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-5.4
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-v4-pro
 
-# Embedding (required for index build and search)
-EMBEDDING_API_KEY=your_embedding_api_key_here
-EMBEDDING_BASE_URL=https://api.openai.com/v1
-EMBEDDING_MODEL=text-embedding-3-small
+# Embedding vector calculation (required for index build, search, and eval)
+# The endpoint only computes vectors. xists stores index.json and searches locally.
+EMBEDDING_API_KEY=local
+EMBEDDING_BASE_URL=http://localhost:6597/v1
+EMBEDDING_MODEL=BAAI/bge-m3
 ```
 
 All three sections are required for the full workflow. `.env` is ignored by Git.
+
+The embedding endpoint is a vector calculator, not a query service. During `index build`, xists sends repository texts to the endpoint and stores the returned vectors in local `index.json`. During `search` and `eval run`, xists sends only the query text to get its query vector, then performs vector search and reranking locally against `index.json`. Remote embedding APIs are usable, but only for calculation.
+
+The same embedding config is intentionally shared by indexing, search, and evaluation. The query vector must be computed by the same model used to build the index vectors. Do not change `EMBEDDING_MODEL` after building `index.json`; if you change it, rebuild the index with `xists index build --force`.
 
 #### Multiple GitHub tokens
 
@@ -301,12 +306,12 @@ such as a repository/name match or a unique exact generated profile phrase.
 xists eval run --cases examples/eval-cases.json --index index.json --output eval-report.json
 ```
 
-This runs a fixed evaluation dataset against the current index and writes an evaluation report you can compare across prompt, embedding, and ranking iterations.
+This runs a fixed evaluation dataset against the current index and writes an evaluation report you can use to sanity-check search behavior across repository lists, regenerated summaries, or search configuration changes.
 
 
 ### Inspect evaluation failures
 
-After `xists eval run`, inspect the report before changing ranking code:
+After `xists eval run`, inspect the report to see which queries missed or returned weak substitutes:
 
 ```bash
 xists eval inspect --report eval-report.json
@@ -322,7 +327,7 @@ The inspect output includes the report metrics, the readable `summary_text`, and
 - confidence
 - exact and acceptable ranks
 
-This is the recommended tuning loop:
+This optional loop is useful when you want to compare search behavior after changes:
 
 ```bash
 pytest

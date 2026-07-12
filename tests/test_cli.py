@@ -143,6 +143,15 @@ def test_doctor_parser_uses_default_paths():
     assert args.records == Path("records.json")
     assert args.index == Path("index.json")
     assert args.cases == Path("eval-cases.json")
+    assert args.check_endpoints is False
+    assert args.strict is False
+
+
+def test_doctor_parser_accepts_strict_flag():
+    args = build_parser().parse_args(["doctor", "--strict"])
+
+    assert args.strict is True
+    assert args.check_endpoints is False
 
 
 def test_index_stats_parser_uses_default_path():
@@ -327,6 +336,90 @@ def test_doctor_reports_config_and_files_without_secrets(tmp_path, monkeypatch, 
     assert "embed-secret" not in serialized
     assert "llm-secret" not in serialized
     assert "github-secret" not in serialized
+
+
+def test_doctor_check_endpoints_reports_embedding_probe(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text("[]", encoding="utf-8")
+    index_file = tmp_path / "index.json"
+    index_file.write_text("{}", encoding="utf-8")
+    cases_file = tmp_path / "eval-cases.json"
+    cases_file.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setenv("EMBEDDING_API_KEY", "embed-secret")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    monkeypatch.setenv("LLM_API_KEY", "llm-secret")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost/v1")
+    monkeypatch.setenv("LLM_MODEL", "gpt-test")
+
+    args = build_parser().parse_args(
+        [
+            "doctor",
+            "--check-endpoints",
+            "--records", str(records_file),
+            "--index", str(index_file),
+            "--cases", str(cases_file),
+        ]
+    )
+
+    with patch(
+        "xists.cli.probe_embedding_endpoint",
+        return_value={
+            "model": "BAAI/bge-m3",
+            "dimension": 1024,
+            "resolved_url": "http://localhost:6597/v1/embeddings",
+            "response_kind": "openai",
+        },
+    ) as probe:
+        code = doctor(args)
+
+    assert code == 0
+    probe.assert_called_once()
+    payload = json.loads(capsys.readouterr().out)
+    statuses = {check["name"]: check["status"] for check in payload["checks"]}
+    assert payload["ok"] is True
+    assert statuses["embedding_endpoint"] == "ok"
+    endpoint_check = next(check for check in payload["checks"] if check["name"] == "embedding_endpoint")
+    assert endpoint_check["dimension"] == 1024
+    assert endpoint_check["resolved_url"] == "http://localhost:6597/v1/embeddings"
+
+
+def test_doctor_strict_fails_when_embedding_probe_fails(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text("[]", encoding="utf-8")
+    index_file = tmp_path / "index.json"
+    index_file.write_text("{}", encoding="utf-8")
+    cases_file = tmp_path / "eval-cases.json"
+    cases_file.write_text("{}", encoding="utf-8")
+
+    monkeypatch.setenv("EMBEDDING_API_KEY", "embed-secret")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    monkeypatch.setenv("LLM_API_KEY", "llm-secret")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost/v1")
+    monkeypatch.setenv("LLM_MODEL", "gpt-test")
+
+    args = build_parser().parse_args(
+        [
+            "doctor",
+            "--strict",
+            "--records", str(records_file),
+            "--index", str(index_file),
+            "--cases", str(cases_file),
+        ]
+    )
+
+    with patch("xists.cli.probe_embedding_endpoint", side_effect=EmbeddingError("connection refused")):
+        code = doctor(args)
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    endpoint_check = next(check for check in payload["checks"] if check["name"] == "embedding_endpoint")
+    assert payload["ok"] is False
+    assert endpoint_check["status"] == "error"
+    assert endpoint_check["message"] == "connection refused"
+    assert "EMBEDDING_BASE_URL" in endpoint_check["hint"]
 
 
 def test_index_stats_prints_compact_summary(tmp_path, capsys):

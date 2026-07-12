@@ -1,4 +1,5 @@
 import math
+from urllib.error import URLError
 
 import pytest
 
@@ -82,6 +83,24 @@ def test_embedding_input_fingerprint_changes_with_text():
 
 def test_call_embeddings_empty_input_returns_empty():
     assert call_embeddings(CONFIG, []) == []
+
+
+def test_call_embeddings_reports_all_attempted_endpoints(monkeypatch):
+    from xists.search import embed as embed_module
+
+    def fake_request_json(url, body, headers, timeout):
+        raise URLError("connection refused")
+
+    monkeypatch.setattr(embed_module, "_request_json", fake_request_json)
+
+    with pytest.raises(EmbeddingError) as error:
+        call_embeddings(EmbeddingConfig(api_key="k", base_url="http://localhost:6597/v1", model="bge-m3"), ["hello"])
+
+    message = str(error.value)
+    assert "all configured endpoints" in message
+    assert "http://localhost:6597/v1/embeddings" in message
+    assert "http://localhost:6597/embed" in message
+    assert "Check that the embedding service is running" in message
 
 
 def test_cosine_similarity_basic():

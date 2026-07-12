@@ -129,7 +129,7 @@ xists doctor \
   --cases examples/eval-cases.json
 ```
 
-It checks whether embedding, LLM, and GitHub configuration are present and whether the expected records, index, and evaluation case files exist. The output is JSON and does not include secret values:
+It checks whether embedding, LLM, and GitHub configuration are present and whether the expected records, index, and evaluation case files exist. Add `--check-endpoints` to probe the embedding service with a real vector request, or `--strict` to make that probe fail the command. The output is JSON and does not include secret values:
 
 ```json
 {

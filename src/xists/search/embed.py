@@ -164,6 +164,88 @@ def _request_json(url: str, body: bytes, headers: dict[str, str], timeout: int) 
         return json.loads(response.read().decode("utf-8"))
 
 
+def _embedding_request_attempts(config: EmbeddingConfig, inputs: list[str]) -> list[tuple[str, dict[str, Any], dict[str, str], str]]:
+    headers = {
+        "Authorization": f"Bearer {config.api_key}",
+        "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
+    }
+    openai_headers = dict(headers)
+    tei_headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
+    return [
+        (config.embeddings_url, {"model": config.model, "input": inputs}, openai_headers, "OpenAI-compatible /embeddings"),
+        (config.tei_embed_url, {"inputs": inputs}, tei_headers, "TEI /embed"),
+    ]
+
+
+def _call_embeddings_with_details(
+    config: EmbeddingConfig,
+    inputs: list[str],
+    *,
+    timeout: int = 60,
+) -> tuple[list[list[float]], dict[str, Any]]:
+    if not inputs:
+        return [], {"attempted": []}
+
+    attempted: list[dict[str, str]] = []
+    for url, payload, hdrs, label in _embedding_request_attempts(config, inputs):
+        body = json.dumps(payload).encode("utf-8")
+        try:
+            data = _request_json(url, body, hdrs, timeout)
+        except urllib.error.HTTPError as error:
+            try:
+                detail = error.read().decode("utf-8")
+            except Exception:
+                detail = str(error)
+            attempted.append(
+                {
+                    "url": url,
+                    "label": label,
+                    "error": f"HTTP {error.code}: {detail}",
+                }
+            )
+            continue
+        except urllib.error.URLError as error:
+            attempted.append({"url": url, "label": label, "error": str(error)})
+            continue
+
+        vectors = _parse_openai_response(data, len(inputs))
+        if vectors is not None:
+            return vectors, {
+                "attempted": attempted,
+                "resolved_url": url,
+                "resolved_label": label,
+                "response_kind": "openai",
+            }
+        vectors = _parse_tei_response(data, len(inputs))
+        if vectors is not None:
+            return vectors, {
+                "attempted": attempted,
+                "resolved_url": url,
+                "resolved_label": label,
+                "response_kind": "tei",
+            }
+
+        attempted.append(
+            {
+                "url": url,
+                "label": label,
+                "error": f"unexpected response shape: {json.dumps(data)[:300]}",
+            }
+        )
+
+    attempted_lines = "\n".join(
+        f"- {item['label']} at {item['url']}: {item['error']}" for item in attempted
+    )
+    raise EmbeddingError(
+        "Embedding request failed for all configured endpoints. "
+        f"Configured base URL: {config.base_url}. "
+        "Tried:\n"
+        f"{attempted_lines}\n"
+        "Check that the embedding service is running and that EMBEDDING_BASE_URL points to the correct API root."
+    )
+
+
 def call_embeddings(
     config: EmbeddingConfig,
     inputs: list[str],
@@ -177,54 +259,25 @@ def call_embeddings(
     Supports both the OpenAI response shape ``{"data": [...]}`` and the TEI
     bare-array shape ``[[...], ...]``.
     """
+    vectors, _ = _call_embeddings_with_details(config, inputs, timeout=timeout)
+    return vectors
 
-    if not inputs:
-        return []
 
-    headers = {
-        "Authorization": f"Bearer {config.api_key}",
-        "Content-Type": "application/json",
-        "User-Agent": USER_AGENT,
+def probe_embedding_endpoint(config: EmbeddingConfig, *, timeout: int = 10) -> dict[str, Any]:
+    """Probe the configured embedding endpoint with a single vector request."""
+
+    vectors, details = _call_embeddings_with_details(config, ["xists endpoint probe"], timeout=timeout)
+    vector = vectors[0] if vectors else []
+    return {
+        "status": "ok",
+        "base_url": config.base_url,
+        "model": config.model,
+        "dimension": len(vector),
+        "resolved_url": details.get("resolved_url"),
+        "resolved_label": details.get("resolved_label"),
+        "response_kind": details.get("response_kind"),
+        "attempted": details.get("attempted", []),
     }
-
-    openai_headers = dict(headers)
-    tei_headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
-
-    last_error: Exception | None = None
-    for url, payload, hdrs in [
-        (config.embeddings_url, {"model": config.model, "input": inputs}, openai_headers),
-        (config.tei_embed_url, {"inputs": inputs}, tei_headers),
-    ]:
-        body = json.dumps(payload).encode("utf-8")
-        try:
-            data = _request_json(url, body, hdrs, timeout)
-        except urllib.error.HTTPError as error:
-            try:
-                detail = error.read().decode("utf-8")
-            except Exception:
-                detail = str(error)
-            last_error = EmbeddingError(
-                f"Embedding request failed at {url} (HTTP {error.code}): {detail}"
-            )
-            continue
-        except urllib.error.URLError as error:
-            last_error = EmbeddingError(f"Embedding request failed at {url}: {error}")
-            continue
-
-        vectors = _parse_openai_response(data, len(inputs))
-        if vectors is not None:
-            return vectors
-        vectors = _parse_tei_response(data, len(inputs))
-        if vectors is not None:
-            return vectors
-
-        last_error = EmbeddingError(
-            f"Unexpected embedding response shape from {url}: {json.dumps(data)[:300]}"
-        )
-
-    if last_error:
-        raise last_error
-    raise EmbeddingError("No embedding endpoint responded")
 
 
 def embed_query(config: EmbeddingConfig, query: str) -> list[float]:

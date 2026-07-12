@@ -5,7 +5,7 @@ This guide walks through the smallest end-to-end xists workflow using the commit
 ## Files
 
 - `repos.txt`: the current demo repository list in the project root
-- `examples/eval-cases.json`: the 100-case baseline evaluation dataset for checking retrieval quality
+- `examples/eval-cases.json`: optional 100-case evaluation dataset for checking retrieval quality
 
 ## 1. Install
 
@@ -58,9 +58,9 @@ xists search "python web framework for building apis" --index demo-index.json
 xists search "open source workflow automation platform" --index demo-index.json
 ```
 
-Expected results vary by model and prompt configuration, but the top results should come from the same neighborhood as the query.
+Expected results vary by model and repository data, but the top results should usually come from the same neighborhood as the query.
 
-## 6. Evaluate the demo index
+## 6. Optionally evaluate the demo index
 
 ```bash
 xists eval run \
@@ -84,9 +84,9 @@ xists eval inspect --report demo-eval-report.json
 xists eval inspect --report demo-eval-report.json --status serious_mismatch
 ```
 
-## 7. Iterate
+## 7. Inspect misses and iterate
 
-After changing prompts, embedding inputs, or ranking logic, rerun:
+After changing the repository list, regenerating summaries, or adjusting search behavior, rerun:
 
 ```bash
 xists index build --records demo-records.json --output demo-index.json --force
@@ -94,4 +94,4 @@ xists eval run --cases examples/eval-cases.json --index demo-index.json --output
 xists eval inspect --report demo-eval-report.json --status serious_mismatch
 ```
 
-That gives you a stable baseline loop before moving on to larger evaluation datasets.
+That gives you a stable way to sanity-check search behavior before moving on to larger repository lists or evaluation datasets.

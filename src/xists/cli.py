@@ -43,6 +43,7 @@ from xists.search.embed import (
     embedding_config_from_env,
     embedding_input_fingerprint,
     embedding_text_from_record,
+    probe_embedding_endpoint,
 )
 from xists.search.index import INDEX_VERSION, entry_metadata, load_index
 from xists.search.query import IndexMismatchError, rank
@@ -421,7 +422,7 @@ def index_build(args: argparse.Namespace) -> int:
         try:
             results = call_embeddings(config, [item["text"] for item in batch])
         except EmbeddingError as error:
-            print(str(error), file=sys.stderr)
+            _print_embedding_error(error, command="index build")
             return 1
         if len(results) != len(batch):
             print(
@@ -505,8 +506,11 @@ def search(args: argparse.Namespace) -> int:
     index = load_index(args.index)
     try:
         result = rank(args.query, index, config, top_k=args.top_k)
-    except (IndexMismatchError, EmbeddingError) as error:
+    except IndexMismatchError as error:
         print(str(error), file=sys.stderr)
+        return 1
+    except EmbeddingError as error:
+        _print_embedding_error(error, command="search")
         return 1
 
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -517,6 +521,15 @@ def _check_payload(name: str, status: str, message: str, **extra: Any) -> dict[s
     return {"name": name, "status": status, "message": message, **extra}
 
 
+def _print_embedding_error(error: EmbeddingError, *, command: str) -> None:
+    print(
+        f"xists {command} could not use the configured embedding endpoint.\n"
+        f"{error}\n"
+        "Run 'xists doctor --check-endpoints --strict' to verify the endpoint before retrying.",
+        file=sys.stderr,
+    )
+
+
 def version(args: argparse.Namespace) -> int:
     print(json.dumps({"version": __version__}, ensure_ascii=False, indent=2))
     return 0
@@ -524,12 +537,42 @@ def version(args: argparse.Namespace) -> int:
 
 def doctor(args: argparse.Namespace) -> int:
     checks: list[dict[str, Any]] = []
+    embedding_config = None
 
     try:
         config = embedding_config_from_env()
+        embedding_config = config
         checks.append(_check_payload("embedding_config", "ok", "embedding endpoint is configured", model=config.model))
     except EmbeddingNotConfiguredError as error:
         checks.append(_check_payload("embedding_config", "error", str(error)))
+
+    check_endpoints = bool(getattr(args, "check_endpoints", False) or getattr(args, "strict", False))
+    strict = bool(getattr(args, "strict", False))
+    if check_endpoints and embedding_config is not None:
+        try:
+            probe = probe_embedding_endpoint(embedding_config)
+            checks.append(
+                _check_payload(
+                    "embedding_endpoint",
+                    "ok",
+                    "embedding endpoint responded to a probe request",
+                    model=probe.get("model"),
+                    dimension=probe.get("dimension"),
+                    resolved_url=probe.get("resolved_url"),
+                    response_kind=probe.get("response_kind"),
+                )
+            )
+        except EmbeddingError as error:
+            checks.append(
+                _check_payload(
+                    "embedding_endpoint",
+                    "error" if strict else "warn",
+                    str(error),
+                    model=embedding_config.model,
+                    base_url=embedding_config.base_url,
+                    hint="Start the embedding service, fix EMBEDDING_BASE_URL, or rerun without --strict.",
+                )
+            )
 
     try:
         config = llm_config_from_env()
@@ -689,7 +732,10 @@ def eval_run(args: argparse.Namespace) -> int:
             llm_judge_config=llm_judge_config,
             records_path=args.records,
         )
-    except (EvaluationDatasetError, FileNotFoundError, IndexMismatchError, EmbeddingError, ValueError, LLMError) as error:
+    except EmbeddingError as error:
+        _print_embedding_error(error, command="eval run")
+        return 1
+    except (EvaluationDatasetError, FileNotFoundError, IndexMismatchError, ValueError, LLMError) as error:
         print(str(error), file=sys.stderr)
         return 1
 
@@ -728,6 +774,16 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to check")
     doctor_parser.add_argument("--cases", type=Path, default=Path("eval-cases.json"), help="Evaluation cases JSON to check")
     doctor_parser.add_argument("--token-file", type=Path, default=None, help="Optional file containing GitHub tokens")
+    doctor_parser.add_argument(
+        "--check-endpoints",
+        action="store_true",
+        help="Probe the configured embedding endpoint with a small real request",
+    )
+    doctor_parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Fail when endpoint probes fail; implies --check-endpoints",
+    )
     doctor_parser.set_defaults(func=doctor)
 
     ingest = subparsers.add_parser("ingest", help="Collect repository records")

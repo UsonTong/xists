@@ -127,7 +127,7 @@ xists eval inspect --report demo-eval-report.json --status serious_mismatch
 
 ## 常用命令一览
 
-- `xists doctor`：检查本地配置和文件状态。
+- `xists doctor`：检查本地配置和文件状态；加 `--check-endpoints` 或 `--strict` 可探测 embedding 服务。
 - `xists ingest github`：拉取仓库信息并生成短语摘要。
 - `xists index build`：构建或增量更新本地向量索引。
 - `xists search "query"`：执行搜索。

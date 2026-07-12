@@ -126,7 +126,7 @@ The report groups results into pragmatic categories:
 
 ## Commands
 
-- `xists doctor`: Check config and verify file status.
+- `xists doctor`: Check config and file status; add `--check-endpoints` or `--strict` to probe the embedding service.
 - `xists ingest github`: Fetch repo metadata and generate summaries.
 - `xists index build`: Build or incrementally update the local index.
 - `xists search "query"`: Query the local index.

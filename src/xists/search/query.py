@@ -1461,6 +1461,28 @@ def _explain_result(
     return reasons[:5]
 
 
+
+def _matched_query_terms(item: dict[str, Any], keyword_tokens: frozenset[str]) -> list[str]:
+    metadata = item.get("metadata")
+    if not isinstance(metadata, dict) or not keyword_tokens:
+        return []
+
+    metadata_tokens = _expanded_token_set(set(_tokenize(_all_metadata_text(metadata).lower())))
+    matched = [
+        token
+        for token in sorted(keyword_tokens)
+        if _expanded_token_aliases(token) & metadata_tokens
+    ]
+    return matched[:8]
+
+
+def _score_breakdown(*, semantic_score: float, metadata_score: float, final_score: float) -> dict[str, float]:
+    return {
+        "semantic": round(semantic_score, 6),
+        "metadata": round(metadata_score, 6),
+        "final": round(final_score, 6),
+    }
+
 def _has_metadata_rescue_evidence(
     query: str,
     item: dict[str, Any],
@@ -1569,6 +1591,12 @@ def _rerank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str,
                     keyword_tokens=keyword_tokens,
                     phrase_match=phrase_match,
                 ),
+                "score_breakdown": _score_breakdown(
+                    semantic_score=semantic_score,
+                    metadata_score=metadata_score,
+                    final_score=final_score,
+                ),
+                "matched_terms": _matched_query_terms(item, keyword_tokens),
                 "why": _explain_result(
                     query,
                     item,
@@ -1581,7 +1609,14 @@ def _rerank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str,
                 ),
             }
         )
-    reranked.sort(key=lambda candidate: candidate["score"], reverse=True)
+    reranked.sort(
+        key=lambda candidate: (
+            candidate["score"],
+            candidate["semantic_score"],
+            candidate["metadata_score"],
+        ),
+        reverse=True,
+    )
     if len(reranked) > 1 and query_specificity <= 0.45:
         semantic_winner = max(reranked, key=lambda candidate: candidate["semantic_score"])
         rerank_winner = reranked[0]

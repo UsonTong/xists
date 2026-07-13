@@ -2199,10 +2199,17 @@ def test_rank_returns_query_intent_and_result_explanations():
 
     assert result["query_intent"]["type"] in {"domain", "functional"}
     assert result["query_intent"]["primary_language"] == "python"
-    assert result["results"][0]["repo_id"] == "fastapi/fastapi"
-    assert any(reason.startswith("matched topic:") for reason in result["results"][0]["why"])
-    assert "matched language: Python" in result["results"][0]["why"]
-    assert "popular repository" in result["results"][0]["why"]
+    top = result["results"][0]
+    assert top["repo_id"] == "fastapi/fastapi"
+    assert any(reason.startswith("matched topic:") for reason in top["why"])
+    assert "matched language: Python" in top["why"]
+    assert "popular repository" in top["why"]
+    assert top["score_breakdown"] == {
+        "semantic": round(top["semantic_score"], 6),
+        "metadata": round(top["metadata_score"], 6),
+        "final": round(top["score"], 6),
+    }
+    assert {"apis", "building"}.issubset(set(top["matched_terms"]))
 
 
 def test_rank_marks_exact_name_query_intent():
@@ -2463,3 +2470,41 @@ def test_rank_prefers_local_model_app_over_provider_aggregator_for_local_chat_qu
     result = rank("local gpt chat client and models", index, CONFIG, top_k=2, embed=fake_embed)
 
     assert result["results"][0]["repo_id"] == "nomic-ai/gpt4all"
+
+
+def test_rerank_breaks_final_score_tie_with_semantic_score(monkeypatch):
+    from xists.search import query as query_module
+
+    results = [
+        {
+            "repo_id": "semantic/winner",
+            "score": 0.8,
+            "metadata": {
+                "name": "winner",
+                "description": "Project automation utility.",
+                "topics": [],
+                "language": "Python",
+            },
+        },
+        {
+            "repo_id": "metadata/winner",
+            "score": 0.7,
+            "metadata": {
+                "name": "winner",
+                "description": "Project automation utility.",
+                "topics": [],
+                "language": "Python",
+            },
+        },
+    ]
+
+    def fake_metadata_score(query, item, **kwargs):
+        return 0.1 if item["repo_id"] == "metadata/winner" else 0.0
+
+    monkeypatch.setattr(query_module, "_metadata_score", fake_metadata_score)
+
+    reranked = query_module._rerank_results("project automation", results)
+
+    assert reranked[0]["repo_id"] == "semantic/winner"
+    assert reranked[0]["score"] == pytest.approx(reranked[1]["score"])
+    assert reranked[0]["semantic_score"] > reranked[1]["semantic_score"]

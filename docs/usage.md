@@ -277,6 +277,8 @@ Returns ranked results with confidence tiers:
       "score": 0.68,
       "semantic_score": 0.62,
       "metadata_score": 0.06,
+      "score_breakdown": {"semantic": 0.62, "metadata": 0.06, "final": 0.68},
+      "matched_terms": ["frontend"],
       "confidence": "high_confidence",
       "why": ["matched topic: frontend", "matched phrase: UI library"]
     },
@@ -298,7 +300,11 @@ from repository names, descriptions, topics, and generated profile phrases.
 Exact repository/name queries receive stronger metadata evidence than ordinary
 substring overlap.
 
-`query_intent` describes the detected query shape, and each result may include a `why` list explaining the metadata/topic/name/phrase signals that affected the rank.
+`query_intent` describes the detected query shape. Each result includes:
+
+- `score_breakdown`: rounded semantic, metadata, and final scores for easier debugging
+- `matched_terms`: non-generic query terms found in the candidate metadata/profile
+- `why`: short human-readable metadata/topic/name/phrase signals that affected the rank
 
 #### Confidence tiers
 

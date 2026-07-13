@@ -1492,6 +1492,91 @@ def _matched_query_terms(item: dict[str, Any], keyword_tokens: frozenset[str]) -
     return matched[:8]
 
 
+def _tokens_from_metadata_list(metadata: dict[str, Any], key: str) -> set[str]:
+    values = metadata.get(key)
+    if not isinstance(values, list):
+        return set()
+    return {
+        token
+        for value in values
+        if isinstance(value, str)
+        for token in _tokenize(value)
+    }
+
+
+def _ranking_diagnostics(
+    query: str,
+    item: dict[str, Any],
+    *,
+    query_variants: frozenset[str],
+    keyword_tokens: frozenset[str],
+    primary_language_alias: str | None,
+    phrase_match: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Expose reusable ranking evidence without adding fixture-specific rules."""
+
+    metadata = item.get("metadata")
+    if not isinstance(metadata, dict):
+        return {
+            "query_terms": sorted(keyword_tokens),
+            "matched_terms": [],
+            "topic_matches": [],
+            "capability_terms": [],
+            "type_cue_matches": [],
+            "entity_match": None,
+            "language_match": None,
+            "phrase_match": None,
+        }
+
+    repo_id = str(item.get("repo_id") or "").lower()
+    name = str(metadata.get("name") or "").lower()
+    language = str(metadata.get("language") or "")
+    topics = {
+        token
+        for topic in metadata.get("topics") or []
+        for token in _tokenize(str(topic))
+    }
+    query_type_cues = _type_cue_tokens(query)
+    metadata_type_cues = _type_cue_tokens("\n".join(filter(None, [repo_id, name, _all_metadata_text(metadata).lower()])))
+    capability_tokens = (
+        _tokens_from_metadata_list(metadata, "capabilities")
+        | _tokens_from_metadata_list(metadata, "use_cases")
+        | _tokens_from_metadata_list(metadata, "search_phrases")
+    )
+    phrase_match = phrase_match if phrase_match is not None else _profile_phrase_match(
+        query,
+        metadata,
+        query_variants=query_variants,
+        keyword_tokens=keyword_tokens,
+    )
+
+    if _exact_identity_match(query, query_variants, repo_id, name):
+        entity_match = "exact_repo_or_name"
+    elif _identity_in_text(query_variants, repo_id, name):
+        entity_match = "repo_or_name"
+    else:
+        entity_match = None
+
+    phrase_source = None
+    if phrase_match.get("exact"):
+        phrase_source = str(phrase_match.get("exact_source") or "profile")
+    elif int(phrase_match.get("partial_overlap", 0)) >= 3:
+        phrase_source = str(phrase_match.get("partial_source") or "profile")
+    elif int(phrase_match.get("coverage_overlap", 0)) >= 4:
+        phrase_source = "profile_coverage"
+
+    return {
+        "query_terms": sorted(keyword_tokens),
+        "matched_terms": _matched_query_terms(item, keyword_tokens),
+        "topic_matches": sorted(keyword_tokens & topics),
+        "capability_terms": sorted(keyword_tokens & capability_tokens),
+        "type_cue_matches": sorted(query_type_cues & metadata_type_cues),
+        "entity_match": entity_match,
+        "language_match": language if _language_matches_query(language, primary_alias=primary_language_alias) else None,
+        "phrase_match": phrase_source,
+    }
+
+
 def _score_breakdown(*, semantic_score: float, metadata_score: float, final_score: float) -> dict[str, float]:
     return {
         "semantic": round(semantic_score, 6),
@@ -1613,6 +1698,14 @@ def _rerank_results(query: str, results: list[dict[str, Any]]) -> list[dict[str,
                     final_score=final_score,
                 ),
                 "matched_terms": _matched_query_terms(item, keyword_tokens),
+                "diagnostics": _ranking_diagnostics(
+                    query,
+                    item,
+                    query_variants=query_variants,
+                    keyword_tokens=keyword_tokens,
+                    primary_language_alias=primary_language_alias,
+                    phrase_match=phrase_match,
+                ),
                 "why": _explain_result(
                     query,
                     item,

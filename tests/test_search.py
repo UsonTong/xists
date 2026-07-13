@@ -2210,6 +2210,11 @@ def test_rank_returns_query_intent_and_result_explanations():
         "final": round(top["score"], 6),
     }
     assert {"apis", "building"}.issubset(set(top["matched_terms"]))
+    assert top["diagnostics"]["language_match"] == "Python"
+    assert "apis" in top["diagnostics"]["topic_matches"]
+    assert {"apis", "building"}.issubset(set(top["diagnostics"]["capability_terms"]))
+    assert "framework" in top["diagnostics"]["type_cue_matches"]
+    assert top["diagnostics"]["phrase_match"] == "search_phrases"
 
 
 def test_rank_marks_exact_name_query_intent():

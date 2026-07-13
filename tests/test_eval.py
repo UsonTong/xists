@@ -126,7 +126,26 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
                 "query": queries[0],
                 "abstained": False,
                 "query_intent": {"type": "functional"},
-                "results": [{"repo_id": "react/react", "score": 0.8, "confidence": "high_confidence", "why": ["matched topic: frontend"]}],
+                "results": [
+                    {
+                        "repo_id": "react/react",
+                        "score": 0.8,
+                        "confidence": "high_confidence",
+                        "why": ["matched topic: frontend"],
+                        "matched_terms": ["frontend"],
+                        "score_breakdown": {"semantic": 0.7, "metadata": 0.1, "final": 0.8},
+                        "diagnostics": {
+                            "query_terms": ["frontend"],
+                            "matched_terms": ["frontend"],
+                            "topic_matches": ["frontend"],
+                            "capability_terms": [],
+                            "type_cue_matches": [],
+                            "entity_match": None,
+                            "language_match": None,
+                            "phrase_match": None,
+                        },
+                    }
+                ],
                 "considered": 3,
             },
             {
@@ -207,6 +226,9 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
     assert report["top_misses"][0]["top1_status"] == "serious_mismatch"
     assert report["results"][0]["query_intent"] == {"type": "functional"}
     assert report["results"][0]["top_result_why"] == ["matched topic: frontend"]
+    assert report["results"][0]["top_result_matched_terms"] == ["frontend"]
+    assert report["results"][0]["top_result_diagnostics"]["topic_matches"] == ["frontend"]
+    assert report["results"][0]["top_result_score_breakdown"]["final"] == 0.8
     assert report["results"][0]["top1_status"] == "exact"
     assert report["results"][1]["top1_status"] == "acceptable"
     assert report["results"][1]["exact_match"] is False
@@ -223,6 +245,8 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
     assert tagged["filter"]["tag"] == "frontend"
     assert tagged["matching_count"] == 1
     assert tagged["cases"][0]["id"] == "exact-top-1"
+    assert tagged["cases"][0]["top_result_diagnostics"]["topic_matches"] == ["frontend"]
+    assert tagged["cases"][0]["top_result_matched_terms"] == ["frontend"]
 
     functional = inspect_report(report, intent="functional", include_exact=True, limit=5)
     assert functional["filter"]["intent"] == "functional"

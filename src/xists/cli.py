@@ -541,6 +541,12 @@ def _format_search_number(value: Any) -> str:
     return str(value) if value is not None else "n/a"
 
 
+def _format_search_list(values: Any) -> str:
+    if not isinstance(values, list):
+        return ""
+    return ", ".join(str(value) for value in values if str(value).strip())
+
+
 def _format_search_text(result: dict[str, Any], index: dict[str, Any]) -> str:
     summaries = _index_summaries_by_repo_id(index)
     intent = result.get("query_intent") or {}
@@ -583,6 +589,28 @@ def _format_search_text(result: dict[str, Any], index: dict[str, Any]) -> str:
         matched_terms = item.get("matched_terms") or []
         if matched_terms:
             lines.append(f"   matched_terms: {', '.join(str(term) for term in matched_terms)}")
+
+        diagnostics = item.get("diagnostics") or {}
+        if isinstance(diagnostics, dict) and diagnostics:
+            evidence_parts = []
+            for label, key in (
+                ("topics", "topic_matches"),
+                ("capabilities", "capability_terms"),
+                ("types", "type_cue_matches"),
+            ):
+                value = _format_search_list(diagnostics.get(key))
+                if value:
+                    evidence_parts.append(f"{label}={value}")
+            for label, key in (
+                ("entity", "entity_match"),
+                ("language", "language_match"),
+                ("phrase", "phrase_match"),
+            ):
+                value = diagnostics.get(key)
+                if value:
+                    evidence_parts.append(f"{label}={value}")
+            if evidence_parts:
+                lines.append(f"   diagnostics: {'; '.join(evidence_parts)}")
 
         breakdown = item.get("score_breakdown") or {}
         if isinstance(breakdown, dict) and breakdown:

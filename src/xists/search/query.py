@@ -55,6 +55,10 @@ GENERIC_TERMS = {
     "developer",
     "distributed",
     "engine",
+    "editor",
+    "editors",
+    "code-editor",
+    "text-editor",
     "example",
     "examples",
     "framework",
@@ -201,6 +205,10 @@ TYPE_CUE_TERMS = {
     "design-systems",
     "desktop",
     "engine",
+    "editor",
+    "editors",
+    "code-editor",
+    "text-editor",
     "example",
     "examples",
     "framework",
@@ -353,6 +361,10 @@ REPO_QUALIFIER_TERMS = {
     "demo",
     "desktop",
     "engine",
+    "editor",
+    "editors",
+    "code-editor",
+    "text-editor",
     "example",
     "frontend",
     "guide",
@@ -834,6 +846,10 @@ def _role_mismatch_penalty(
     if {"app", "platform"} & query_type_cues and "llm" in _expanded_token_set(keyword_tokens):
         if "platform" not in metadata_type_cues and bool(all_tokens & {"runner", "inference", "cli"}):
             penalty += 0.07
+
+    if "editor" in query_type_cues and "editor" not in metadata_type_cues:
+        if all_tokens & (LANGUAGE_PROJECT_CUES | {"compiler"}):
+            penalty += 0.12
 
     return min(penalty, 0.3)
 

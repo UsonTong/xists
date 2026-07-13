@@ -88,6 +88,7 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
                         "id": "exact-top-1",
                         "query": "frontend ui library",
                         "expected_repo_id": "react/react",
+                        "tags": ["frontend"],
                     },
                     {
                         "id": "acceptable-family",
@@ -217,6 +218,16 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
     assert inspection["summary"]["case_count"] == 3
     assert inspection["matching_count"] == 1
     assert inspection["cases"][0]["id"] == "abstain"
+
+    tagged = inspect_report(report, tag="frontend", include_exact=True, limit=5)
+    assert tagged["filter"]["tag"] == "frontend"
+    assert tagged["matching_count"] == 1
+    assert tagged["cases"][0]["id"] == "exact-top-1"
+
+    functional = inspect_report(report, intent="functional", include_exact=True, limit=5)
+    assert functional["filter"]["intent"] == "functional"
+    assert functional["matching_count"] == 1
+    assert functional["cases"][0]["id"] == "exact-top-1"
 
 
 def test_evaluate_dataset_with_llm_judge_keeps_hard_metrics_and_adds_analysis(tmp_path):
@@ -469,6 +480,7 @@ def test_evaluate_dataset_partitions_top1_miss_buckets(tmp_path):
                         "id": "exact",
                         "query": "react ui library",
                         "expected_repo_id": "react/react",
+                        "tags": ["frontend"],
                     },
                     {
                         "id": "dataset-acceptable",

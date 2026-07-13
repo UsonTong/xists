@@ -16,7 +16,7 @@ from typing import Any
 from xists import __version__
 from xists.eval.inspect import inspect_report, load_report
 from xists.eval.run import evaluate_dataset
-from xists.eval.schema import EvaluationDatasetError
+from xists.eval.schema import EvaluationDatasetError, load_dataset
 from xists.ingest.github import (
     GitHubAPIError,
     TokenPool,
@@ -46,7 +46,7 @@ from xists.search.embed import (
     probe_embedding_endpoint,
 )
 from xists.search.index import INDEX_VERSION, entry_metadata, load_index
-from xists.search.query import IndexMismatchError, rank
+from xists.search.query import IndexMismatchError, _query_intent, rank
 
 
 def load_env_file(path: Path) -> None:
@@ -822,11 +822,60 @@ def eval_inspect(args: argparse.Namespace) -> int:
             status=args.status,
             limit=args.limit,
             include_exact=args.include_exact,
+            tag=args.tag,
+            intent=args.query_intent,
         )
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 1
 
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
+def eval_cases(args: argparse.Namespace) -> int:
+    try:
+        dataset = load_dataset(args.cases)
+    except EvaluationDatasetError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+    selected: list[dict[str, Any]] = []
+    for case in dataset["cases"]:
+        if args.tag and args.tag not in case.get("tags", []):
+            continue
+        intent = _query_intent(case["query"]).get("type")
+        if args.query_intent and intent != args.query_intent:
+            continue
+        selected.append(
+            {
+                "id": case["id"],
+                "query": case["query"],
+                "query_intent": intent,
+                "expected_repo_id": case["expected_repo_id"],
+                "acceptable_repo_ids": case.get("acceptable_repo_ids") or [],
+                "acceptable_families": case.get("acceptable_families") or [],
+                "tags": case.get("tags") or [],
+                "notes": case.get("notes"),
+            }
+        )
+
+    tag_counts = Counter(tag for case in dataset["cases"] for tag in case.get("tags", []))
+    intent_counts = Counter(_query_intent(case["query"]).get("type") for case in dataset["cases"])
+    payload = {
+        "dataset_name": dataset.get("dataset_name"),
+        "schema_version": dataset.get("schema_version"),
+        "case_count": len(dataset["cases"]),
+        "family_count": len(dataset.get("families") or {}),
+        "tag_counts": [{"tag": tag, "count": count} for tag, count in tag_counts.most_common(args.limit)],
+        "query_intent_counts": [
+            {"query_intent": intent, "count": count} for intent, count in intent_counts.most_common()
+        ],
+        "filter": {"tag": args.tag, "query_intent": args.query_intent, "limit": args.limit},
+        "matching_count": len(selected),
+        "inspected_count": min(len(selected), args.limit),
+        "cases": selected[: args.limit],
+    }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
@@ -922,7 +971,28 @@ def build_parser() -> argparse.ArgumentParser:
     eval_inspect_parser.add_argument("--status", choices=("exact", "acceptable", "serious_mismatch", "insufficient_evidence"), default=None, help="Only show cases with this top-1 status")
     eval_inspect_parser.add_argument("--limit", type=int, default=20, help="Maximum cases to print")
     eval_inspect_parser.add_argument("--include-exact", action="store_true", help="Include exact top-1 cases in the inspection output")
+    eval_inspect_parser.add_argument("--tag", default=None, help="Only show cases carrying this tag")
+    eval_inspect_parser.add_argument(
+        "--query-intent",
+        dest="query_intent",
+        choices=("empty", "exact_name", "alternative", "domain", "functional"),
+        default=None,
+        help="Only show cases with this query intent",
+    )
     eval_inspect_parser.set_defaults(func=eval_inspect)
+
+    eval_cases_parser = eval_subparsers.add_parser("cases", help="Validate and summarize an evaluation dataset")
+    eval_cases_parser.add_argument("--cases", type=Path, default=Path("eval-cases.json"), help="Evaluation dataset JSON")
+    eval_cases_parser.add_argument("--tag", default=None, help="Only show cases carrying this tag")
+    eval_cases_parser.add_argument(
+        "--query-intent",
+        dest="query_intent",
+        choices=("empty", "exact_name", "alternative", "domain", "functional"),
+        default=None,
+        help="Only show cases with this query intent",
+    )
+    eval_cases_parser.add_argument("--limit", type=int, default=20, help="Maximum cases to print")
+    eval_cases_parser.set_defaults(func=eval_cases)
 
     return parser
 

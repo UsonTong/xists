@@ -131,5 +131,5 @@ xists eval inspect --report demo-eval-report.json --status serious_mismatch
 - `xists ingest github`：拉取仓库信息并生成短语摘要。
 - `xists index build`：构建或增量更新本地向量索引。
 - `xists search "query"`：执行搜索。
-- `xists eval run` / `xists eval inspect`：运行和检查检索评测。
+- `xists eval cases` / `xists eval run` / `xists eval inspect`：校验评测集并运行、检查检索评测。
 - `xists records inspect` / `xists index stats`：快速查看数据状态，避免终端被长 JSON 刷屏。

@@ -12,7 +12,7 @@ xists eval run --cases examples/eval-cases.json --index demo-index.json --output
 xists eval inspect --report demo-eval-report.json
 ```
 
-`repos.txt` is the current 200-repository demo list. `examples/eval-cases.json` is an optional 112-case dataset for checking retrieval quality.
+`repos.txt` is the current 200-repository demo list. `examples/eval-cases.json` is the committed 100-case baseline, and `examples/eval-cases-extended.json` adds 12 more cases for broader coverage.
 
 For the full walkthrough, see [docs/demo.md](demo.md).
 
@@ -328,6 +328,7 @@ such as a repository/name match or a unique exact generated profile phrase.
 
 ```bash
 xists eval cases --cases examples/eval-cases.json
+xists eval cases --cases examples/eval-cases-extended.json
 xists eval run --cases examples/eval-cases.json --index index.json --output eval-report.json
 ```
 
@@ -378,11 +379,15 @@ adding cases:
   weak-signal queries, and major product areas
 - run `xists eval cases --cases examples/eval-cases.json` and `pytest` before
   committing the dataset
+- keep the baseline file and the extended file in sync with `demo-eval-report.json`
+  and the release checklist; use the extended file for extra coverage without
+  disturbing the committed baseline report
 
 Useful review commands:
 
 ```bash
 xists eval cases --cases examples/eval-cases.json --tag alternative
+xists eval cases --cases examples/eval-cases-extended.json --tag weak-signal
 xists eval cases --cases examples/eval-cases.json --query-intent functional
 xists eval inspect --report demo-eval-report.json --tag weak-signal
 ```

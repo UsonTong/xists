@@ -36,6 +36,8 @@ xists doctor \
   --index demo-index.json \
   --cases examples/eval-cases.json
 
+xists eval cases --cases examples/eval-cases.json
+xists eval cases --cases examples/eval-cases-extended.json
 xists index stats --index demo-index.json --limit 5
 
 xists eval inspect \
@@ -44,7 +46,13 @@ xists eval inspect \
   --limit 20
 ```
 
-The expected v0.1.0 baseline has no serious mismatches on the committed 112-case evaluation set when run against the current local demo index.
+The expected v0.1.0 baseline has no serious mismatches on the committed 100-case evaluation set when run against the current local demo index. Use the extended 112-case file for broader local spot checks.
+
+For a no-network artifact smoke test, run:
+
+```bash
+python scripts/smoke_check.py
+```
 
 ## 5. Commit release-prep changes
 

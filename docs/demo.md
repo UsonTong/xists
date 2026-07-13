@@ -5,7 +5,8 @@ This guide walks through the smallest end-to-end xists workflow using the commit
 ## Files
 
 - `repos.txt`: the current demo repository list in the project root
-- `examples/eval-cases.json`: optional 112-case evaluation dataset for checking retrieval quality
+- `examples/eval-cases.json`: committed 100-case evaluation baseline
+- `examples/eval-cases-extended.json`: optional 112-case evaluation dataset for broader checking
 
 ## 1. Install
 
@@ -106,6 +107,7 @@ Expected results vary by model and repository data, but the top results should u
 ## 7. Optionally evaluate the demo index
 
 ```bash
+xists eval cases --cases examples/eval-cases.json
 xists eval run \
   --cases examples/eval-cases.json \
   --index demo-index.json \
@@ -125,6 +127,7 @@ Inspect the failures that matter most:
 ```bash
 xists eval inspect --report demo-eval-report.json
 xists eval inspect --report demo-eval-report.json --status serious_mismatch
+xists eval inspect --report demo-eval-report.json --tag ai
 ```
 
 ## 8. Inspect misses and iterate
@@ -133,6 +136,7 @@ After changing the repository list, regenerating summaries, or adjusting search 
 
 ```bash
 xists index build --records demo-records.json --output demo-index.json --force
+xists eval cases --cases examples/eval-cases.json
 xists eval run --cases examples/eval-cases.json --index demo-index.json --output demo-eval-report.json
 xists eval inspect --report demo-eval-report.json --status serious_mismatch
 ```

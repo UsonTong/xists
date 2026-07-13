@@ -130,5 +130,5 @@ The report groups results into pragmatic categories:
 - `xists ingest github`: Fetch repo metadata and generate summaries.
 - `xists index build`: Build or incrementally update the local index.
 - `xists search "query"`: Query the local index.
-- `xists eval run` / `xists eval inspect`: Run and review ranking tests.
+- `xists eval cases` / `xists eval run` / `xists eval inspect`: Validate the dataset and run/review ranking tests.
 - `xists records inspect` / `xists index stats`: Quickly view data without printing huge payloads to your terminal.

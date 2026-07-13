@@ -129,20 +129,38 @@ xists doctor \
   --cases examples/eval-cases.json
 ```
 
-It checks whether embedding, LLM, and GitHub configuration are present and whether the expected records, index, and evaluation case files exist. Add `--check-endpoints` to probe the embedding service with a real vector request, or `--strict` to make that probe fail the command. The output is JSON and does not include secret values:
+It checks whether embedding, LLM, and GitHub configuration are present and whether the expected records, index, and evaluation case files exist. Add `--check-endpoints` to probe the embedding service with a real vector request, or `--strict` to make that probe fail the command. The output is JSON and does not include secret values. Failing or warning checks include `next_steps` when xists can suggest a concrete fix:
 
 ```json
 {
-  "ok": true,
+  "ok": false,
   "checks": [
     {"name": "embedding_config", "status": "ok", "model": "BAAI/bge-m3"},
     {"name": "llm_config", "status": "ok", "model": "gpt-5.4"},
-    {"name": "github_token", "status": "ok", "token_count": 1}
+    {
+      "name": "embedding_endpoint",
+      "status": "error",
+      "message": "Embedding request failed for all configured endpoints...",
+      "next_steps": [
+        "Start the embedding service referenced by EMBEDDING_BASE_URL.",
+        "Confirm the base URL is the API root, for example http://localhost:6597/v1 for OpenAI-compatible servers.",
+        "Run xists doctor --check-endpoints --strict before retrying index/search/eval commands."
+      ]
+    }
   ]
 }
 ```
 
-Warnings usually mean a file has not been generated yet. Errors mean a required endpoint configuration is missing or invalid.
+Warnings usually mean a file has not been generated yet or an ingest-only token is missing. Errors mean a required endpoint configuration is missing or an endpoint probe failed in strict mode. A good demo preflight is:
+
+```bash
+xists doctor \
+  --records demo-records.json \
+  --index demo-index.json \
+  --cases examples/eval-cases.json \
+  --check-endpoints \
+  --strict
+```
 
 ## Workflow
 

@@ -23,7 +23,50 @@ cp .env.example .env
 
 Set the required GitHub, LLM, and embedding credentials in `.env`.
 
-## 3. Ingest example repositories
+## 3. Preflight and endpoint checks
+
+Before spending GitHub or LLM quota, verify the local files and configuration:
+
+```bash
+xists doctor \
+  --records demo-records.json \
+  --index demo-index.json \
+  --cases examples/eval-cases.json
+```
+
+`doctor` returns JSON. Missing generated files are warnings because the demo may
+not have been generated yet. Missing embedding or LLM variables are errors with
+`next_steps` entries showing what to set in `.env`.
+
+When your embedding service is supposed to be running, probe it with a real
+request before building an index, searching, or running eval:
+
+```bash
+xists doctor \
+  --records demo-records.json \
+  --index demo-index.json \
+  --cases examples/eval-cases.json \
+  --check-endpoints
+```
+
+Use `--strict` in scripts or CI-style smoke checks when endpoint failures should
+make the command exit non-zero:
+
+```bash
+xists doctor \
+  --records demo-records.json \
+  --index demo-index.json \
+  --cases examples/eval-cases.json \
+  --check-endpoints \
+  --strict
+```
+
+If the probe cannot connect, start the embedding server referenced by
+`EMBEDDING_BASE_URL`, confirm the URL is the API root such as
+`http://localhost:6597/v1`, and rerun the strict doctor command before retrying
+`index build`, `search`, or `eval run`.
+
+## 4. Ingest example repositories
 
 ```bash
 xists ingest github \
@@ -42,7 +85,7 @@ This fetches GitHub data, generates LLM profiles, and writes checkpoints as reco
 
 The ingest command prints progress to stderr while it runs. If your LLM endpoint is rate-limited, reduce `--workers` to `1` or `2`.
 
-## 4. Build the example index
+## 5. Build the example index
 
 ```bash
 xists index build \
@@ -50,7 +93,7 @@ xists index build \
   --output demo-index.json
 ```
 
-## 5. Run a few searches
+## 6. Run a few searches
 
 ```bash
 xists search "frontend ui library" --index demo-index.json
@@ -60,7 +103,7 @@ xists search "open source workflow automation platform" --index demo-index.json
 
 Expected results vary by model and repository data, but the top results should usually come from the same neighborhood as the query.
 
-## 6. Optionally evaluate the demo index
+## 7. Optionally evaluate the demo index
 
 ```bash
 xists eval run \
@@ -84,7 +127,7 @@ xists eval inspect --report demo-eval-report.json
 xists eval inspect --report demo-eval-report.json --status serious_mismatch
 ```
 
-## 7. Inspect misses and iterate
+## 8. Inspect misses and iterate
 
 After changing the repository list, regenerating summaries, or adjusting search behavior, rerun:
 
@@ -95,3 +138,19 @@ xists eval inspect --report demo-eval-report.json --status serious_mismatch
 ```
 
 That gives you a stable way to sanity-check search behavior before moving on to larger repository lists or evaluation datasets.
+
+## Common run failures
+
+- `Embedding is required ... Missing environment variables`: copy `.env.example`
+  to `.env` and set `EMBEDDING_API_KEY`, `EMBEDDING_BASE_URL`, and
+  `EMBEDDING_MODEL`.
+- `Embedding request failed for all configured endpoints`: the embedding server
+  is not reachable at `EMBEDDING_BASE_URL`, the URL points at the wrong API root,
+  or the server exposes only one of the supported OpenAI-compatible `/embeddings`
+  or TEI `/embed` shapes. Run `xists doctor --check-endpoints --strict` after
+  fixing it.
+- `LLM endpoint is not configured`: set `LLM_API_KEY`, `LLM_BASE_URL`, and
+  `LLM_MODEL`; this is required for ingest because profiles are LLM-generated.
+- `GitHub token is not configured`: set `GITHUB_TOKEN`/`GITHUB_TOKENS` or pass
+  `--token-file` before ingesting. Existing records, indexes, search, and eval do
+  not need a GitHub token.

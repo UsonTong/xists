@@ -338,6 +338,46 @@ def test_doctor_reports_config_and_files_without_secrets(tmp_path, monkeypatch, 
     assert "github-secret" not in serialized
 
 
+
+def test_doctor_reports_actionable_next_steps_for_missing_config(tmp_path, monkeypatch, capsys):
+    for name in (
+        "EMBEDDING_API_KEY",
+        "EMBEDDING_BASE_URL",
+        "EMBEDDING_MODEL",
+        "LLM_API_KEY",
+        "LLM_BASE_URL",
+        "LLM_MODEL",
+        "GITHUB_TOKEN",
+        "GITHUB_TOKENS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    args = build_parser().parse_args(
+        [
+            "doctor",
+            "--records", str(tmp_path / "records.json"),
+            "--index", str(tmp_path / "index.json"),
+            "--cases", str(tmp_path / "eval-cases.json"),
+        ]
+    )
+
+    code = doctor(args)
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    checks = {check["name"]: check for check in payload["checks"]}
+    assert payload["ok"] is False
+    assert checks["embedding_config"]["status"] == "error"
+    assert any("EMBEDDING_API_KEY" in step for step in checks["embedding_config"]["next_steps"])
+    assert checks["llm_config"]["status"] == "error"
+    assert any("LLM_API_KEY" in step for step in checks["llm_config"]["next_steps"])
+    assert checks["github_token"]["status"] == "warn"
+    assert any("GITHUB_TOKEN" in step for step in checks["github_token"]["next_steps"])
+    assert checks["records_file"]["status"] == "warn"
+    assert "xists ingest github" in checks["records_file"]["next_steps"][0]
+    assert "xists index build" in checks["index_file"]["next_steps"][0]
+    assert "examples/eval-cases.json" in checks["eval_cases_file"]["next_steps"][0]
+
 def test_doctor_check_endpoints_reports_embedding_probe(tmp_path, monkeypatch, capsys):
     records_file = tmp_path / "records.json"
     records_file.write_text("[]", encoding="utf-8")
@@ -420,6 +460,8 @@ def test_doctor_strict_fails_when_embedding_probe_fails(tmp_path, monkeypatch, c
     assert endpoint_check["status"] == "error"
     assert endpoint_check["message"] == "connection refused"
     assert "EMBEDDING_BASE_URL" in endpoint_check["hint"]
+    assert any("EMBEDDING_BASE_URL" in step for step in endpoint_check["next_steps"])
+    assert any("doctor --check-endpoints --strict" in step for step in endpoint_check["next_steps"])
 
 
 def test_index_stats_prints_compact_summary(tmp_path, capsys):

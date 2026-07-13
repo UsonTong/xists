@@ -1,7 +1,7 @@
 {
-  "started_at": "2026-07-13T04:43:15.780179+00:00",
-  "finished_at": "2026-07-13T04:43:22.797509+00:00",
-  "duration_seconds": 7.017342,
+  "started_at": "2026-07-13T04:48:52.511586+00:00",
+  "finished_at": "2026-07-13T04:48:59.660431+00:00",
+  "duration_seconds": 7.148855,
   "xists_version": "0.1.0",
   "dataset_name": "xists-baseline-112",
   "cases": "examples/eval-cases-extended.json",
@@ -10,35 +10,35 @@
   "batch_size": 64,
   "case_count": 112,
   "metrics": {
-    "exact_hit_at_1": 0.875,
+    "exact_hit_at_1": 0.883929,
     "exact_hit_at_k": 0.991071,
-    "mrr_exact": 0.922619,
-    "acceptable_hit_at_1": 0.991071,
+    "mrr_exact": 0.927083,
+    "acceptable_hit_at_1": 1.0,
     "acceptable_hit_at_k": 1.0,
-    "mrr_acceptable": 0.995536,
+    "mrr_acceptable": 1.0,
     "abstain_rate": 0.0,
     "acceptable_minus_exact_hit_at_1": 0.116071,
     "acceptable_minus_exact_hit_at_k": 0.008929,
     "mrr_acceptable_minus_exact": 0.072917,
-    "exact_top1_rate": 0.875,
+    "exact_top1_rate": 0.883929,
     "acceptable_top1_rate": 0.116071,
-    "serious_top1_error_rate": 0.008929,
+    "serious_top1_error_rate": 0.0,
     "insufficient_evidence_top1_rate": 0.0,
-    "effective_top1_rate": 0.991071
+    "effective_top1_rate": 1.0
   },
   "confidence": {
     "top_1_high_confidence_count": 112,
     "top_1_exploratory_count": 0,
     "top_1_missing_count": 0,
-    "wrong_high_confidence_top_1_count": 1
+    "wrong_high_confidence_top_1_count": 0
   },
   "top1_summary": {
-    "top1_miss_count": 14,
+    "top1_miss_count": 13,
     "top1_miss_acceptable_count": 13,
-    "top1_miss_serious_count": 1,
+    "top1_miss_serious_count": 0,
     "top1_miss_insufficient_evidence_count": 0,
-    "top1_miss_acceptable_rate": 0.928571,
-    "top1_miss_serious_rate": 0.071429,
+    "top1_miss_acceptable_rate": 1.0,
+    "top1_miss_serious_rate": 0.0,
     "top1_miss_insufficient_evidence_rate": 0.0
   },
   "judge_summary": {
@@ -56,12 +56,12 @@
   "summary": {
     "case_count": 112,
     "exact_top_1": {
-      "count": 98,
-      "rate": 0.875
+      "count": 99,
+      "rate": 0.883929
     },
     "acceptable_top_1": {
-      "count": 111,
-      "rate": 0.991071,
+      "count": 112,
+      "rate": 1.0,
       "description": "top-1 was exact or an acceptable repo/family/judge substitute"
     },
     "acceptable_substitute_top_1": {
@@ -70,13 +70,13 @@
       "description": "top-1 missed exact target but matched an acceptable repo/family or judge substitute"
     },
     "effective_top_1": {
-      "count": 111,
-      "rate": 0.991071,
+      "count": 112,
+      "rate": 1.0,
       "description": "alias of acceptable_top_1 for backwards-readable reports"
     },
     "serious_mismatch": {
-      "count": 1,
-      "rate": 0.008929
+      "count": 0,
+      "rate": 0.0
     },
     "insufficient_evidence": {
       "count": 0,
@@ -87,50 +87,21 @@
       "rate": 0.0
     },
     "wrong_high_confidence": {
-      "count": 1,
-      "rate": 0.008929,
+      "count": 0,
+      "rate": 0.0,
       "description": "top-1 was high_confidence but outside the acceptable set"
     }
   },
   "summary_text": [
-    "exact top-1: 87.5% (98/112)",
-    "acceptable top-1: 99.1% (111/112)",
-    "effective top-1: 99.1% (111/112)",
-    "serious mismatch: 0.9% (1/112)",
+    "exact top-1: 88.4% (99/112)",
+    "acceptable top-1: 100.0% (112/112)",
+    "effective top-1: 100.0% (112/112)",
+    "serious mismatch: 0.0% (0/112)",
     "insufficient evidence: 0.0% (0/112)",
     "abstain rate: 0.0% (0/112)",
-    "wrong high-confidence: 1 cases"
+    "wrong high-confidence: 0 cases"
   ],
   "top_misses": [
-    {
-      "id": "zed-modern-editor",
-      "query": "modern rust based editor",
-      "query_intent": {
-        "type": "functional",
-        "specificity": 0.8,
-        "keywords": [
-          "based",
-          "editor",
-          "rust"
-        ],
-        "primary_language": null
-      },
-      "tags": [
-        "editor",
-        "function"
-      ],
-      "top1_status": "serious_mismatch",
-      "abstained": false,
-      "expected_repo_id": "zed-industries/zed",
-      "top_result_repo_id": "rust-lang/rust",
-      "top_result_confidence": "high_confidence",
-      "top_result_why": [
-        "matched topic: rust",
-        "moderate semantic match"
-      ],
-      "exact_rank": 2,
-      "acceptable_rank": 2
-    },
     {
       "id": "codex-terminal-agent",
       "query": "ai coding assistant for the terminal",
@@ -2485,7 +2456,6 @@
         "specificity": 0.8,
         "keywords": [
           "code",
-          "editor",
           "from",
           "microsoft"
         ],
@@ -2500,8 +2470,7 @@
       "expected_repo_id": "microsoft/vscode",
       "top_result_repo_id": "microsoft/vscode",
       "top_result_why": [
-        "matched topic: editor, microsoft",
-        "overlapped summary phrase",
+        "matched topic: microsoft",
         "strong semantic match"
       ],
       "exact_match": true,
@@ -2528,7 +2497,6 @@
         "keywords": [
           "code",
           "collaborative",
-          "editor",
           "fast"
         ],
         "primary_language": null
@@ -4950,10 +4918,9 @@
       "query": "modern rust based editor",
       "query_intent": {
         "type": "functional",
-        "specificity": 0.8,
+        "specificity": 0.45,
         "keywords": [
           "based",
-          "editor",
           "rust"
         ],
         "primary_language": null
@@ -4964,17 +4931,17 @@
       ],
       "abstained": false,
       "expected_repo_id": "zed-industries/zed",
-      "top_result_repo_id": "rust-lang/rust",
+      "top_result_repo_id": "zed-industries/zed",
       "top_result_why": [
-        "matched topic: rust",
-        "moderate semantic match"
+        "metadata overlap",
+        "strong semantic match"
       ],
-      "exact_match": false,
-      "acceptable_match": false,
-      "exact_rank": 2,
-      "acceptable_rank": 2,
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
       "top_result_confidence": "high_confidence",
-      "top1_status": "serious_mismatch",
+      "top1_status": "exact",
       "judge_ran": false,
       "judge_verdict": null,
       "judge_difference_size": null,

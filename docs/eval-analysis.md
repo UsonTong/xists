@@ -7,7 +7,7 @@ This note records the current demo retrieval baselines and the main follow-up it
 | Report | Dataset | Cases | Exact top-1 | Acceptable top-1 | Serious mismatch |
 | --- | --- | ---: | ---: | ---: | ---: |
 | `demo-eval-report.json` | `xists-baseline-100` | 100 | 89.0% | 100.0% | 0.0% |
-| `demo-eval-report-extended.json` | `xists-baseline-112` | 112 | 87.5% | 99.1% | 0.9% |
+| `demo-eval-report-extended.json` | `xists-baseline-112` | 112 | 88.4% | 100.0% | 0.0% |
 
 The extended report was generated against `demo-index.json` with the configured `BAAI/bge-m3` embedding endpoint.
 
@@ -24,16 +24,16 @@ xists eval inspect --report demo-eval-report-extended.json --status acceptable
 
 Summary:
 
-- Exact top-1: 98/112 cases.
-- Acceptable top-1: 111/112 cases.
-- Serious mismatch: 1/112 cases.
+- Exact top-1: 99/112 cases.
+- Acceptable top-1: 112/112 cases.
+- Serious mismatch: 0/112 cases.
 - Acceptable-but-not-exact: 13/112 cases.
 
-### Serious mismatch to fix first
+### Fixed gap
 
-| Case | Query | Expected | Top-1 | Exact rank | Notes |
-| --- | --- | --- | --- | ---: | --- |
-| `zed-modern-editor` | `modern rust based editor` | `zed-industries/zed` | `rust-lang/rust` | 2 | Language-ecosystem signal (`rust`) overpowers the product type (`editor`). |
+The previous `zed-modern-editor` miss is now fixed: `modern rust based editor`
+returns `zed-industries/zed` at top-1 instead of letting the broad Rust language
+repository outrank the editor/product cue.
 
 ### Acceptable-but-not-exact themes
 
@@ -44,4 +44,4 @@ The 13 acceptable misses are mostly broad, same-family substitutions. The main c
 - LLM app/runtime tools: Dify/LangChain and vLLM/llama.cpp.
 - Workflow/web extraction/media alternatives: n8n/Dify, Firecrawl/crawl4ai, yt-dlp/youtube-dl.
 
-The next ranking pass should preserve these as acceptable while improving exact matches where a query contains a strong product-type cue such as `editor`.
+The next ranking pass should preserve these as acceptable while keeping the editor/product cue fix stable.

@@ -2357,6 +2357,47 @@ def test_type_cue_strength_promotes_rag_engine_over_document_tool_when_close():
     assert result["results"][0]["repo_id"] == "infiniflow/ragflow"
 
 
+def test_editor_query_prefers_editor_product_over_language_repo():
+    index = {
+        "embedding_model": "bge-m3",
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "rust-lang/rust",
+                "vector": [0.97, 0.03],
+                "metadata": {
+                    "name": "rust",
+                    "description": "Empowering everyone to build reliable and efficient software.",
+                    "topics": ["compiler", "language", "rust"],
+                    "language": "Rust",
+                    "summary": "The official repository for the Rust programming language.",
+                    "search_phrases": ["Rust programming language", "Rust compiler source code"],
+                },
+            },
+            {
+                "repo_id": "zed-industries/zed",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "zed",
+                    "description": "High-performance code editor.",
+                    "topics": ["text-editor", "rust-lang", "zed"],
+                    "language": "Rust",
+                    "summary": "Zed is a high-performance, multiplayer code editor written in Rust.",
+                    "search_phrases": ["Rust-based editor", "multiplayer code editor"],
+                },
+            },
+        ],
+    }
+
+    def fake_embed(config, query):
+        return [1.0, 0.0]
+
+    result = rank("modern rust based editor", index, CONFIG, top_k=2, embed=fake_embed)
+
+    assert result["results"][0]["repo_id"] == "zed-industries/zed"
+    assert result["results"][0]["metadata_score"] > result["results"][1]["metadata_score"]
+
+
 def test_rank_prefers_framework_over_course_when_query_asks_for_llm_framework():
     index = {
         "embedding_model": "bge-m3",

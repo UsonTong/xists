@@ -118,6 +118,9 @@ def evaluate_dataset(
         top_result_repo_id = top_result.get("repo_id") if top_result else None
         top_result_confidence = top_result.get("confidence") if top_result else None
         top_result_why = top_result.get("why") if top_result else None
+        top_result_diagnostics = top_result.get("diagnostics") if top_result else None
+        top_result_matched_terms = top_result.get("matched_terms") if top_result else None
+        top_result_score_breakdown = top_result.get("score_breakdown") if top_result else None
         exact_match = top_result_repo_id == expected_repo_id
         acceptable_match = top_result_repo_id in acceptable_set if top_result_repo_id else False
 
@@ -191,6 +194,9 @@ def evaluate_dataset(
                 "expected_repo_id": expected_repo_id,
                 "top_result_repo_id": top_result_repo_id,
                 "top_result_why": top_result_why if isinstance(top_result_why, list) else [],
+                "top_result_diagnostics": top_result_diagnostics if isinstance(top_result_diagnostics, dict) else {},
+                "top_result_matched_terms": top_result_matched_terms if isinstance(top_result_matched_terms, list) else [],
+                "top_result_score_breakdown": top_result_score_breakdown if isinstance(top_result_score_breakdown, dict) else {},
                 "exact_match": exact_match,
                 "acceptable_match": acceptable_match,
                 "exact_rank": exact_rank,

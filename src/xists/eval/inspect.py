@@ -109,6 +109,9 @@ def case_brief(result: dict[str, Any]) -> dict[str, Any]:
         "top_result_repo_id": result.get("top_result_repo_id"),
         "top_result_confidence": result.get("top_result_confidence"),
         "top_result_why": result.get("top_result_why") or [],
+        "top_result_diagnostics": result.get("top_result_diagnostics") or {},
+        "top_result_matched_terms": result.get("top_result_matched_terms") or [],
+        "top_result_score_breakdown": result.get("top_result_score_breakdown") or {},
         "exact_rank": result.get("exact_rank"),
         "acceptable_rank": result.get("acceptable_rank"),
     }

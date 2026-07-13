@@ -274,6 +274,14 @@ def test_search_text_format_prints_readable_results(tmp_path, monkeypatch, capsy
                     "score": 0.712345,
                     "why": ["ranked by semantic similarity", "metadata overlap"],
                     "matched_terms": ["python", "api", "framework"],
+                    "diagnostics": {
+                        "topic_matches": ["api"],
+                        "capability_terms": ["building"],
+                        "type_cue_matches": ["framework"],
+                        "entity_match": None,
+                        "language_match": "Python",
+                        "phrase_match": "search_phrases",
+                    },
                     "score_breakdown": {"semantic": 0.61, "metadata": 0.102345, "final": 0.712345},
                 }
             ],
@@ -288,6 +296,7 @@ def test_search_text_format_prints_readable_results(tmp_path, monkeypatch, capsy
     assert "score: 0.712345" in output
     assert "summary: A modern, fast web framework for building APIs with Python." in output
     assert "why: ranked by semantic similarity; metadata overlap" in output
+    assert "diagnostics: topics=api; capabilities=building; types=framework; language=Python; phrase=search_phrases" in output
 
 
 def test_eval_run_writes_report(tmp_path, monkeypatch):

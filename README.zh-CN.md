@@ -78,13 +78,14 @@ xists index build \
 
 # 3. 开始搜索！
 xists search "open source firebase alternative" --index demo-index.json
+xists search "open source firebase alternative" --index demo-index.json --format text
 ```
 
 ---
 
 ## 检索结果示例
 
-每次搜索，`xists` 都会以 JSON 返回排序后的仓库。简化后的结果类似这样：
+每次搜索，`xists` 默认都会以 JSON 返回排序后的仓库。简化后的结果类似这样：
 
 ```json
 {
@@ -98,7 +99,7 @@ xists search "open source firebase alternative" --index demo-index.json
 }
 ```
 
-`score` 是最终排序分数，越高代表匹配越强。
+`score` 是最终排序分数，越高代表匹配越强。使用 `--format text` 可获得更适合终端阅读的输出，包含 repo、confidence、score、why 和 summary。
 
 ---
 
@@ -130,6 +131,6 @@ xists eval inspect --report demo-eval-report.json --status serious_mismatch
 - `xists doctor`：检查本地配置和文件状态；加 `--check-endpoints` 或 `--strict` 可探测 embedding 服务。
 - `xists ingest github`：拉取仓库信息并生成短语摘要。
 - `xists index build`：构建或增量更新本地向量索引。
-- `xists search "query"`：执行搜索。
+- `xists search "query"`：执行搜索；加 `--format text` 可输出更易读的终端格式。
 - `xists eval cases` / `xists eval run` / `xists eval inspect`：校验评测集并运行、检查检索评测。
 - `xists records inspect` / `xists index stats`：快速查看数据状态，避免终端被长 JSON 刷屏。

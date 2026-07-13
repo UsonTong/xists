@@ -12,7 +12,7 @@ xists eval run --cases examples/eval-cases.json --index demo-index.json --output
 xists eval inspect --report demo-eval-report.json
 ```
 
-`repos.txt` is the current 200-repository demo list. `examples/eval-cases.json` is an optional 100-case dataset for checking retrieval quality.
+`repos.txt` is the current 200-repository demo list. `examples/eval-cases.json` is an optional 112-case dataset for checking retrieval quality.
 
 For the full walkthrough, see [docs/demo.md](demo.md).
 
@@ -327,10 +327,15 @@ such as a repository/name match or a unique exact generated profile phrase.
 ### Step 4: Evaluate retrieval quality
 
 ```bash
+xists eval cases --cases examples/eval-cases.json
 xists eval run --cases examples/eval-cases.json --index index.json --output eval-report.json
 ```
 
-This runs a fixed evaluation dataset against the current index and writes an evaluation report you can use to sanity-check search behavior across repository lists, regenerated summaries, or search configuration changes.
+`eval cases` validates the dataset and summarizes tag/query-intent coverage before
+any embedding calls are made. `eval run` runs that fixed dataset against the
+current index and writes an evaluation report you can use to sanity-check search
+behavior across repository lists, regenerated summaries, or search configuration
+changes.
 
 
 ### Inspect evaluation failures
@@ -340,6 +345,8 @@ After `xists eval run`, inspect the report to see which queries missed or return
 ```bash
 xists eval inspect --report eval-report.json
 xists eval inspect --report eval-report.json --status serious_mismatch --limit 20
+xists eval inspect --report eval-report.json --tag weak-signal
+xists eval inspect --report eval-report.json --query-intent functional
 ```
 
 The inspect output includes the report metrics, the readable `summary_text`, and a sorted list of cases with:
@@ -357,6 +364,27 @@ This optional loop is useful when you want to compare search behavior after chan
 pytest
 xists eval run --cases examples/eval-cases.json --index demo-index.json --output demo-eval-report.json
 xists eval inspect --report demo-eval-report.json --status serious_mismatch
+```
+
+#### Maintaining evaluation cases
+
+`examples/eval-cases.json` is intentionally small enough to review by hand. When
+adding cases:
+
+- keep `id` stable and descriptive; changing an id makes trend comparison harder
+- choose an `expected_repo_id` that exists in `repos.txt` and the demo records
+- add `acceptable_repo_ids` or `acceptable_families` for broad or ambiguous queries
+- use tags to preserve coverage across tools, language ecosystems, alternatives,
+  weak-signal queries, and major product areas
+- run `xists eval cases --cases examples/eval-cases.json` and `pytest` before
+  committing the dataset
+
+Useful review commands:
+
+```bash
+xists eval cases --cases examples/eval-cases.json --tag alternative
+xists eval cases --cases examples/eval-cases.json --query-intent functional
+xists eval inspect --report demo-eval-report.json --tag weak-signal
 ```
 
 #### Evaluation dataset shape

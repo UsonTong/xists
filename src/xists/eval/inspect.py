@@ -153,6 +153,8 @@ def inspect_report(
     status: str | None = None,
     limit: int = 20,
     include_exact: bool = False,
+    tag: str | None = None,
+    intent: str | None = None,
 ) -> dict[str, Any]:
     """Build a compact inspection payload from an evaluation report."""
 
@@ -168,6 +170,12 @@ def inspect_report(
         if not include_exact and top1_status == "exact":
             continue
         if status and top1_status != status:
+            continue
+        tags = result.get("tags") or []
+        if tag and tag not in tags:
+            continue
+        query_intent = result.get("query_intent") or {}
+        if intent and query_intent.get("type") != intent:
             continue
         selected.append(case_brief(result))
 
@@ -195,6 +203,8 @@ def inspect_report(
             "status": status,
             "include_exact": include_exact,
             "limit": limit,
+            "tag": tag,
+            "intent": intent,
         },
         "inspected_count": min(len(selected), limit),
         "matching_count": len(selected),

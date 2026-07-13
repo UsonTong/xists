@@ -44,7 +44,7 @@ xists eval inspect \
   --limit 20
 ```
 
-The expected v0.1.0 baseline has no serious mismatches on the committed 100-case evaluation set when run against the current local demo index.
+The expected v0.1.0 baseline has no serious mismatches on the committed 112-case evaluation set when run against the current local demo index.
 
 ## 5. Commit release-prep changes
 

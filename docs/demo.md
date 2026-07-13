@@ -5,7 +5,7 @@ This guide walks through the smallest end-to-end xists workflow using the commit
 ## Files
 
 - `repos.txt`: the current demo repository list in the project root
-- `examples/eval-cases.json`: optional 100-case evaluation dataset for checking retrieval quality
+- `examples/eval-cases.json`: optional 112-case evaluation dataset for checking retrieval quality
 
 ## 1. Install
 

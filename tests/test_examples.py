@@ -21,8 +21,8 @@ def test_example_eval_dataset_is_valid_and_matches_example_repos():
     dataset = load_dataset(ROOT / "examples" / "eval-cases.json")
     example_repo_ids = set(load_repo_ids(ROOT / "repos.txt"))
 
-    assert dataset["dataset_name"] == "xists-baseline-100"
-    assert len(dataset["cases"]) == 100
+    assert dataset["dataset_name"] == "xists-baseline-112"
+    assert len(dataset["cases"]) == 112
     assert set(dataset["families"]["frontend-ui"]).issubset(example_repo_ids)
 
     for case in dataset["cases"]:
@@ -31,4 +31,4 @@ def test_example_eval_dataset_is_valid_and_matches_example_repos():
 
     raw = json.loads((ROOT / "examples" / "eval-cases.json").read_text(encoding="utf-8"))
     assert raw["schema_version"] == 1
-    assert raw["dataset_name"] == "xists-baseline-100"
+    assert raw["dataset_name"] == "xists-baseline-112"

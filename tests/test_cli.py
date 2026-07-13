@@ -6,6 +6,7 @@ from xists import __version__
 from xists.cli import (
     build_parser,
     doctor,
+    eval_cases,
     eval_inspect,
     eval_run,
     index_build,
@@ -233,12 +234,50 @@ def test_eval_run_writes_report(tmp_path, monkeypatch):
     assert report["metrics"]["exact_hit_at_1"] == 1.0
 
 
+def test_eval_cases_prints_dataset_summary(tmp_path, capsys):
+    cases_file = tmp_path / "eval-cases.json"
+    cases_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "dataset_name": "smoke",
+                "cases": [
+                    {
+                        "id": "api",
+                        "query": "python api framework",
+                        "expected_repo_id": "fastapi/fastapi",
+                        "tags": ["api", "python"],
+                    },
+                    {
+                        "id": "exact",
+                        "query": "react",
+                        "expected_repo_id": "react/react",
+                        "tags": ["frontend", "name"],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(["eval", "cases", "--cases", str(cases_file), "--tag", "api"])
+
+    code = eval_cases(args)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["dataset_name"] == "smoke"
+    assert payload["case_count"] == 2
+    assert payload["matching_count"] == 1
+    assert payload["cases"][0]["id"] == "api"
+    assert {item["tag"] for item in payload["tag_counts"]} >= {"api", "python"}
+
+
 def test_eval_run_parser_supports_judge_flags():
     args = build_parser().parse_args(["eval", "run", "--llm-judge", "--records", "records.json"])
 
     assert args.llm_judge is True
     assert args.records == Path("records.json")
-
 
 
 def test_eval_inspect_parser_uses_default_report_path():
@@ -248,6 +287,70 @@ def test_eval_inspect_parser_uses_default_report_path():
     assert args.status is None
     assert args.limit == 20
     assert args.include_exact is False
+    assert args.tag is None
+    assert args.query_intent is None
+
+
+def test_eval_cases_parser_uses_default_path():
+    args = build_parser().parse_args(["eval", "cases"])
+
+    assert args.cases == Path("eval-cases.json")
+    assert args.tag is None
+    assert args.query_intent is None
+    assert args.limit == 20
+
+
+def test_eval_inspect_filters_by_tag_and_query_intent(tmp_path, capsys):
+    report_file = tmp_path / "eval-report.json"
+    report_file.write_text(
+        json.dumps(
+            {
+                "dataset_name": "smoke",
+                "case_count": 2,
+                "metrics": {"exact_top1_rate": 0.5, "serious_top1_error_rate": 0.5},
+                "confidence": {"wrong_high_confidence_top_1_count": 1},
+                "top1_summary": {
+                    "top1_miss_count": 1,
+                    "top1_miss_acceptable_count": 0,
+                    "top1_miss_serious_count": 1,
+                    "top1_miss_insufficient_evidence_count": 0,
+                },
+                "results": [
+                    {
+                        "id": "ok",
+                        "query": "react",
+                        "query_intent": {"type": "exact_name"},
+                        "tags": ["frontend", "name"],
+                        "top1_status": "exact",
+                        "expected_repo_id": "react/react",
+                        "top_result_repo_id": "react/react",
+                    },
+                    {
+                        "id": "bad",
+                        "query": "api framework",
+                        "query_intent": {"type": "functional"},
+                        "tags": ["api", "backend"],
+                        "top1_status": "serious_mismatch",
+                        "expected_repo_id": "fastapi/fastapi",
+                        "top_result_repo_id": "react/react",
+                        "top_result_confidence": "high_confidence",
+                        "top_result_why": ["ranked by semantic similarity"],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    args = build_parser().parse_args(["eval", "inspect", "--report", str(report_file), "--tag", "api", "--query-intent", "functional"])
+
+    code = eval_inspect(args)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["matching_count"] == 1
+    assert payload["cases"][0]["id"] == "bad"
+    assert payload["filter"]["tag"] == "api"
+    assert payload["filter"]["intent"] == "functional"
 
 
 def test_eval_inspect_prints_filtered_cases(tmp_path, capsys):

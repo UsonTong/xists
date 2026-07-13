@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "dataset_name": "xists-baseline-100",
+  "dataset_name": "xists-baseline-112",
   "families": {
     "frontend-ui": [
       "react/react",
@@ -1372,6 +1372,161 @@
         "fullstack",
         "function"
       ]
+    },
+    {
+      "id": "ripgrep-fast-search",
+      "query": "fast command line search tool",
+      "expected_repo_id": "BurntSushi/ripgrep",
+      "tags": [
+        "cli",
+        "tool",
+        "function"
+      ],
+      "notes": "Fast local search utility for source trees and codebases."
+    },
+    {
+      "id": "rust-language-compiler",
+      "query": "rust programming language compiler",
+      "expected_repo_id": "rust-lang/rust",
+      "tags": [
+        "language",
+        "function"
+      ],
+      "notes": "Language ecosystem case for a systems language toolchain."
+    },
+    {
+      "id": "go-language-toolchain",
+      "query": "go programming language toolchain",
+      "expected_repo_id": "golang/go",
+      "tags": [
+        "language",
+        "function"
+      ],
+      "notes": "Language ecosystem case for a standard Go distribution."
+    },
+    {
+      "id": "grafana-observability-dashboard",
+      "query": "metrics dashboards for observability",
+      "expected_repo_id": "grafana/grafana",
+      "acceptable_families": [
+        "observability-monitoring"
+      ],
+      "tags": [
+        "observability",
+        "function"
+      ],
+      "notes": "Observability product versus adjacent monitoring tools."
+    },
+    {
+      "id": "browser-use-automation",
+      "query": "browser automation using natural language",
+      "expected_repo_id": "browser-use/browser-use",
+      "acceptable_families": [
+        "browser-automation"
+      ],
+      "tags": [
+        "browser",
+        "ai",
+        "function"
+      ],
+      "notes": "Natural-language browser automation case."
+    },
+    {
+      "id": "supabase-firebase-alternative",
+      "query": "firebase alternative with postgres auth storage",
+      "expected_repo_id": "supabase/supabase",
+      "acceptable_families": [
+        "databases-backend"
+      ],
+      "tags": [
+        "database",
+        "alternative",
+        "function"
+      ],
+      "notes": "Backend platform alternative with explicit product comparison language."
+    },
+    {
+      "id": "firecrawl-markdown",
+      "query": "turn websites into llm ready markdown",
+      "expected_repo_id": "firecrawl/firecrawl",
+      "acceptable_repo_ids": [
+        "unclecode/crawl4ai"
+      ],
+      "tags": [
+        "web",
+        "llm",
+        "weak-signal",
+        "function"
+      ],
+      "notes": "Weak-signal content extraction case with a plausible substitute."
+    },
+    {
+      "id": "vllm-local-serving",
+      "query": "local llm server for serving models",
+      "expected_repo_id": "vllm-project/vllm",
+      "acceptable_families": [
+        "local-llm-runtime"
+      ],
+      "tags": [
+        "local-llm",
+        "function"
+      ],
+      "notes": "Local serving/runtime case for model inference infrastructure."
+    },
+    {
+      "id": "tauri-desktop-framework",
+      "query": "rust desktop app framework",
+      "expected_repo_id": "tauri-apps/tauri",
+      "acceptable_families": [
+        "mobile-desktop"
+      ],
+      "tags": [
+        "desktop",
+        "rust",
+        "function"
+      ],
+      "notes": "Desktop app framework search with a native runtime signal."
+    },
+    {
+      "id": "zed-modern-editor",
+      "query": "modern rust based editor",
+      "expected_repo_id": "zed-industries/zed",
+      "acceptable_families": [
+        "devtools-editors"
+      ],
+      "tags": [
+        "editor",
+        "function"
+      ],
+      "notes": "Editor/tooling case for modern developer environments."
+    },
+    {
+      "id": "lazygit-git-tui-workflow",
+      "query": "git terminal interface for staging commits",
+      "expected_repo_id": "jesseduffield/lazygit",
+      "acceptable_families": [
+        "shell-terminal"
+      ],
+      "tags": [
+        "cli",
+        "tool",
+        "function"
+      ],
+      "notes": "Second Git terminal workflow case using different wording from existing lazygit coverage."
+    },
+    {
+      "id": "playwright-browser-e2e-testing",
+      "query": "end to end browser testing automation",
+      "expected_repo_id": "microsoft/playwright",
+      "acceptable_families": [
+        "browser-automation"
+      ],
+      "tags": [
+        "browser",
+        "testing",
+        "function"
+      ],
+      "notes": "Testing-focused browser automation wording distinct from existing Playwright cases."
     }
   ]
 }

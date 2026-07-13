@@ -1,0 +1,5069 @@
+{
+  "started_at": "2026-07-13T04:43:15.780179+00:00",
+  "finished_at": "2026-07-13T04:43:22.797509+00:00",
+  "duration_seconds": 7.017342,
+  "xists_version": "0.1.0",
+  "dataset_name": "xists-baseline-112",
+  "cases": "examples/eval-cases-extended.json",
+  "index": "demo-index.json",
+  "top_k": 10,
+  "batch_size": 64,
+  "case_count": 112,
+  "metrics": {
+    "exact_hit_at_1": 0.875,
+    "exact_hit_at_k": 0.991071,
+    "mrr_exact": 0.922619,
+    "acceptable_hit_at_1": 0.991071,
+    "acceptable_hit_at_k": 1.0,
+    "mrr_acceptable": 0.995536,
+    "abstain_rate": 0.0,
+    "acceptable_minus_exact_hit_at_1": 0.116071,
+    "acceptable_minus_exact_hit_at_k": 0.008929,
+    "mrr_acceptable_minus_exact": 0.072917,
+    "exact_top1_rate": 0.875,
+    "acceptable_top1_rate": 0.116071,
+    "serious_top1_error_rate": 0.008929,
+    "insufficient_evidence_top1_rate": 0.0,
+    "effective_top1_rate": 0.991071
+  },
+  "confidence": {
+    "top_1_high_confidence_count": 112,
+    "top_1_exploratory_count": 0,
+    "top_1_missing_count": 0,
+    "wrong_high_confidence_top_1_count": 1
+  },
+  "top1_summary": {
+    "top1_miss_count": 14,
+    "top1_miss_acceptable_count": 13,
+    "top1_miss_serious_count": 1,
+    "top1_miss_insufficient_evidence_count": 0,
+    "top1_miss_acceptable_rate": 0.928571,
+    "top1_miss_serious_rate": 0.071429,
+    "top1_miss_insufficient_evidence_rate": 0.0
+  },
+  "judge_summary": {
+    "enabled": false,
+    "model": null,
+    "prompt_version": null,
+    "total_ran": 0,
+    "acceptable_substitute_count": 0,
+    "serious_mismatch_count": 0,
+    "insufficient_evidence_count": 0,
+    "small_difference_count": 0,
+    "moderate_difference_count": 0,
+    "large_difference_count": 0
+  },
+  "summary": {
+    "case_count": 112,
+    "exact_top_1": {
+      "count": 98,
+      "rate": 0.875
+    },
+    "acceptable_top_1": {
+      "count": 111,
+      "rate": 0.991071,
+      "description": "top-1 was exact or an acceptable repo/family/judge substitute"
+    },
+    "acceptable_substitute_top_1": {
+      "count": 13,
+      "rate": 0.116071,
+      "description": "top-1 missed exact target but matched an acceptable repo/family or judge substitute"
+    },
+    "effective_top_1": {
+      "count": 111,
+      "rate": 0.991071,
+      "description": "alias of acceptable_top_1 for backwards-readable reports"
+    },
+    "serious_mismatch": {
+      "count": 1,
+      "rate": 0.008929
+    },
+    "insufficient_evidence": {
+      "count": 0,
+      "rate": 0.0
+    },
+    "abstain": {
+      "count": 0,
+      "rate": 0.0
+    },
+    "wrong_high_confidence": {
+      "count": 1,
+      "rate": 0.008929,
+      "description": "top-1 was high_confidence but outside the acceptable set"
+    }
+  },
+  "summary_text": [
+    "exact top-1: 87.5% (98/112)",
+    "acceptable top-1: 99.1% (111/112)",
+    "effective top-1: 99.1% (111/112)",
+    "serious mismatch: 0.9% (1/112)",
+    "insufficient evidence: 0.0% (0/112)",
+    "abstain rate: 0.0% (0/112)",
+    "wrong high-confidence: 1 cases"
+  ],
+  "top_misses": [
+    {
+      "id": "zed-modern-editor",
+      "query": "modern rust based editor",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "based",
+          "editor",
+          "rust"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "editor",
+        "function"
+      ],
+      "top1_status": "serious_mismatch",
+      "abstained": false,
+      "expected_repo_id": "zed-industries/zed",
+      "top_result_repo_id": "rust-lang/rust",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "matched topic: rust",
+        "moderate semantic match"
+      ],
+      "exact_rank": 2,
+      "acceptable_rank": 2
+    },
+    {
+      "id": "codex-terminal-agent",
+      "query": "ai coding assistant for the terminal",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "assistant",
+          "coding",
+          "terminal"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "coding",
+        "function"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "openai/codex",
+      "top_result_repo_id": "anthropics/claude-code",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "overlapped search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_rank": 2,
+      "acceptable_rank": 1
+    },
+    {
+      "id": "comfyui-image-workflow",
+      "query": "node based stable diffusion image generation ui",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "based",
+          "diffusion",
+          "generation",
+          "image",
+          "node",
+          "stable"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "image",
+        "function"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "Comfy-Org/ComfyUI",
+      "top_result_repo_id": "AUTOMATIC1111/stable-diffusion-webui",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "matched topic: diffusion",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_rank": 2,
+      "acceptable_rank": 1
+    },
+    {
+      "id": "dify-llm-platform",
+      "query": "open source llm app development platform",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "app",
+          "development",
+          "llm"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "llm",
+        "platform"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "langgenius/dify",
+      "top_result_repo_id": "langchain-ai/langchain",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "matched topic: llm",
+        "strong semantic match"
+      ],
+      "exact_rank": 6,
+      "acceptable_rank": 1
+    },
+    {
+      "id": "django-web-framework",
+      "query": "batteries included python web framework",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "batteries",
+          "included",
+          "python"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "python",
+        "web",
+        "function"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "django/django",
+      "top_result_repo_id": "pallets/flask",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "matched topic: python",
+        "moderate semantic match"
+      ],
+      "exact_rank": 2,
+      "acceptable_rank": 1
+    },
+    {
+      "id": "fastapi-api-framework",
+      "query": "python web framework for building apis",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.65,
+        "keywords": [
+          "apis",
+          "building"
+        ],
+        "primary_language": "python"
+      },
+      "tags": [
+        "python",
+        "api",
+        "function"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "fastapi/fastapi",
+      "top_result_repo_id": "django/django",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "matched language: Python",
+        "moderate semantic match"
+      ],
+      "exact_rank": 2,
+      "acceptable_rank": 1
+    },
+    {
+      "id": "firecrawl-markdown",
+      "query": "turn websites into llm ready markdown",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "into",
+          "llm",
+          "markdown",
+          "ready",
+          "turn",
+          "websites"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "web",
+        "llm",
+        "weak-signal",
+        "function"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "firecrawl/firecrawl",
+      "top_result_repo_id": "unclecode/crawl4ai",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_rank": 4,
+      "acceptable_rank": 1
+    },
+    {
+      "id": "firecrawl-web-scraping",
+      "query": "turn websites into llm ready markdown",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "into",
+          "llm",
+          "markdown",
+          "ready",
+          "turn",
+          "websites"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "automation",
+        "scraping",
+        "function"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "firecrawl/firecrawl",
+      "top_result_repo_id": "unclecode/crawl4ai",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_rank": 4,
+      "acceptable_rank": 1
+    },
+    {
+      "id": "lobe-chat-ui",
+      "query": "modern ai chat interface",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.25,
+        "keywords": [
+          "chat"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "llm",
+        "ui"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "lobehub/lobehub",
+      "top_result_repo_id": "ChatGPTNextWeb/NextChat",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_rank": null,
+      "acceptable_rank": 1
+    },
+    {
+      "id": "n8n-workflow-automation",
+      "query": "open source workflow automation platform",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.0,
+        "keywords": [],
+        "primary_language": null
+      },
+      "tags": [
+        "automation",
+        "workflow",
+        "function"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "n8n-io/n8n",
+      "top_result_repo_id": "langgenius/dify",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_rank": 2,
+      "acceptable_rank": 1
+    },
+    {
+      "id": "nestjs-node-framework",
+      "query": "nodejs backend framework with dependency injection",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "dependency",
+          "injection",
+          "nodejs"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "typescript",
+        "backend",
+        "function"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "nestjs/nest",
+      "top_result_repo_id": "expressjs/express",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "matched topic: nodejs",
+        "strong semantic match"
+      ],
+      "exact_rank": 3,
+      "acceptable_rank": 1
+    },
+    {
+      "id": "openhands-agent",
+      "query": "open source software engineering agent",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.65,
+        "keywords": [
+          "agent",
+          "engineering"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "coding",
+        "function"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "OpenHands/OpenHands",
+      "top_result_repo_id": "msitarzewski/agency-agents",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_rank": 3,
+      "acceptable_rank": 1
+    },
+    {
+      "id": "vllm-local-serving",
+      "query": "local llm server for serving models",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 1.0,
+        "keywords": [
+          "llm",
+          "local",
+          "models",
+          "server",
+          "serving"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "local-llm",
+        "function"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "vllm-project/vllm",
+      "top_result_repo_id": "ggml-org/llama.cpp",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_rank": 2,
+      "acceptable_rank": 1
+    },
+    {
+      "id": "yt-dlp-download",
+      "query": "download videos from youtube and other sites",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "download",
+          "from",
+          "sites",
+          "videos",
+          "youtube"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "media",
+        "cli",
+        "function"
+      ],
+      "top1_status": "acceptable",
+      "abstained": false,
+      "expected_repo_id": "yt-dlp/yt-dlp",
+      "top_result_repo_id": "ytdl-org/youtube-dl",
+      "top_result_confidence": "high_confidence",
+      "top_result_why": [
+        "overlapped use_cases phrase",
+        "strong semantic match"
+      ],
+      "exact_rank": 2,
+      "acceptable_rank": 1
+    }
+  ],
+  "results": [
+    {
+      "id": "react-ui-library",
+      "query": "frontend ui library",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.0,
+        "keywords": [],
+        "primary_language": null
+      },
+      "tags": [
+        "frontend",
+        "ui",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "react/react",
+      "top_result_repo_id": "react/react",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "vue-progressive-framework",
+      "query": "progressive frontend framework",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.25,
+        "keywords": [
+          "progressive"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "frontend",
+        "framework",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "vuejs/vue",
+      "top_result_repo_id": "vuejs/vue",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "svelte-compiler-framework",
+      "query": "compile-time frontend framework with small runtime",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "compile-time",
+          "runtime",
+          "small"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "frontend",
+        "framework",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "sveltejs/svelte",
+      "top_result_repo_id": "sveltejs/svelte",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "angular-enterprise-framework",
+      "query": "enterprise typescript frontend framework",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.45,
+        "keywords": [
+          "enterprise",
+          "typescript"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "frontend",
+        "typescript",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "angular/angular",
+      "top_result_repo_id": "angular/angular",
+      "top_result_why": [
+        "matched topic: typescript",
+        "moderate semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "mui-react-components",
+      "query": "material design components for react",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "design",
+          "material",
+          "react"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "frontend",
+        "components",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "mui/material-ui",
+      "top_result_repo_id": "mui/material-ui",
+      "top_result_why": [
+        "matched topic: react",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "antd-enterprise-components",
+      "query": "enterprise react component library",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.45,
+        "keywords": [
+          "enterprise",
+          "react"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "frontend",
+        "components",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "ant-design/ant-design",
+      "top_result_repo_id": "ant-design/ant-design",
+      "top_result_why": [
+        "matched topic: react",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "bootstrap-css-framework",
+      "query": "css framework for responsive websites",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.65,
+        "keywords": [
+          "responsive",
+          "websites"
+        ],
+        "primary_language": "css"
+      },
+      "tags": [
+        "frontend",
+        "css",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "twbs/bootstrap",
+      "top_result_repo_id": "twbs/bootstrap",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "shadcn-ui-components",
+      "query": "copy paste accessible react components",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "accessible",
+          "copy",
+          "paste",
+          "react"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "frontend",
+        "components",
+        "name"
+      ],
+      "abstained": false,
+      "expected_repo_id": "shadcn-ui/ui",
+      "top_result_repo_id": "shadcn-ui/ui",
+      "top_result_why": [
+        "matched topic: react",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "vite-build-tool",
+      "query": "fast frontend build tool and dev server",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "dev",
+          "fast",
+          "server"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "frontend",
+        "build",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "vitejs/vite",
+      "top_result_repo_id": "vitejs/vite",
+      "top_result_why": [
+        "overlapped use_cases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "storybook-component-workshop",
+      "query": "component development workshop and documentation",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "development",
+          "documentation",
+          "workshop"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "frontend",
+        "testing",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "storybookjs/storybook",
+      "top_result_repo_id": "storybookjs/storybook",
+      "top_result_why": [
+        "matched topic: documentation, workshop",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "fastapi-api-framework",
+      "query": "python web framework for building apis",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.65,
+        "keywords": [
+          "apis",
+          "building"
+        ],
+        "primary_language": "python"
+      },
+      "tags": [
+        "python",
+        "api",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "fastapi/fastapi",
+      "top_result_repo_id": "django/django",
+      "top_result_why": [
+        "matched language: Python",
+        "moderate semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": 2,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "django-web-framework",
+      "query": "batteries included python web framework",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "batteries",
+          "included",
+          "python"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "python",
+        "web",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "django/django",
+      "top_result_repo_id": "pallets/flask",
+      "top_result_why": [
+        "matched topic: python",
+        "moderate semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": 2,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "flask-microframework",
+      "query": "lightweight python micro web framework",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "lightweight",
+          "micro",
+          "python"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "python",
+        "web",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "pallets/flask",
+      "top_result_repo_id": "pallets/flask",
+      "top_result_why": [
+        "matched topic: python",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "awesome-python-list",
+      "query": "curated list of python libraries",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "curated",
+          "libraries",
+          "python"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "python",
+        "awesome-list",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "vinta/awesome-python",
+      "top_result_repo_id": "vinta/awesome-python",
+      "top_result_why": [
+        "matched topic: python",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "uv-python-package-manager",
+      "query": "fast python package and project manager",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "fast",
+          "manager",
+          "package",
+          "python"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "python",
+        "cli",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "astral-sh/uv",
+      "top_result_repo_id": "astral-sh/uv",
+      "top_result_why": [
+        "matched topic: python",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "paddle-ocr",
+      "query": "ocr toolkit for extracting text from images",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 1.0,
+        "keywords": [
+          "extracting",
+          "from",
+          "images",
+          "ocr",
+          "text",
+          "toolkit"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "python",
+        "ocr",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "PaddlePaddle/PaddleOCR",
+      "top_result_repo_id": "PaddlePaddle/PaddleOCR",
+      "top_result_why": [
+        "matched topic: ocr",
+        "overlapped use_cases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "manim-math-animation",
+      "query": "python library for mathematical animations",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.65,
+        "keywords": [
+          "animations",
+          "mathematical"
+        ],
+        "primary_language": "python"
+      },
+      "tags": [
+        "python",
+        "graphics",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "3b1b/manim",
+      "top_result_repo_id": "3b1b/manim",
+      "top_result_why": [
+        "matched language: Python",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "typescript-language",
+      "query": "typed superset of javascript",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "javascript",
+          "superset",
+          "typed"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "typescript",
+        "language",
+        "name"
+      ],
+      "abstained": false,
+      "expected_repo_id": "microsoft/TypeScript",
+      "top_result_repo_id": "microsoft/TypeScript",
+      "top_result_why": [
+        "matched topic: javascript",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "node-alternative-deno",
+      "query": "secure typescript javascript runtime",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "javascript",
+          "runtime",
+          "secure",
+          "typescript"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "javascript",
+        "runtime",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "denoland/deno",
+      "top_result_repo_id": "denoland/deno",
+      "top_result_why": [
+        "matched topic: javascript, typescript",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "bun-runtime",
+      "query": "fast javascript runtime bundler package manager",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "bundler",
+          "fast",
+          "javascript",
+          "manager",
+          "package",
+          "runtime"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "javascript",
+        "runtime",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "oven-sh/bun",
+      "top_result_repo_id": "oven-sh/bun",
+      "top_result_why": [
+        "matched topic: bundler, javascript",
+        "overlapped description phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "nestjs-node-framework",
+      "query": "nodejs backend framework with dependency injection",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "dependency",
+          "injection",
+          "nodejs"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "typescript",
+        "backend",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "nestjs/nest",
+      "top_result_repo_id": "expressjs/express",
+      "top_result_why": [
+        "matched topic: nodejs",
+        "strong semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": 3,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "axios-http-client",
+      "query": "promise based http client for browser and node",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 1.0,
+        "keywords": [
+          "based",
+          "browser",
+          "client",
+          "http",
+          "node",
+          "promise"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "javascript",
+        "http",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "axios/axios",
+      "top_result_repo_id": "axios/axios",
+      "top_result_why": [
+        "matched topic: promise",
+        "overlapped description phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "playwright-browser-testing",
+      "query": "browser automation and end to end testing",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "browser",
+          "end",
+          "testing"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "browser",
+        "testing",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "microsoft/playwright",
+      "top_result_repo_id": "microsoft/playwright",
+      "top_result_why": [
+        "matched topic: testing",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "puppeteer-browser-control",
+      "query": "control chrome from node for scraping and tests",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 1.0,
+        "keywords": [
+          "chrome",
+          "control",
+          "from",
+          "node",
+          "scraping",
+          "tests"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "browser",
+        "automation",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "puppeteer/puppeteer",
+      "top_result_repo_id": "puppeteer/puppeteer",
+      "top_result_why": [
+        "matched topic: chrome",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "json-server-mock-api",
+      "query": "fake rest api from json file",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "fake",
+          "file",
+          "from",
+          "json",
+          "rest"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "javascript",
+        "api",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "typicode/json-server",
+      "top_result_repo_id": "typicode/json-server",
+      "top_result_why": [
+        "matched topic: fake, json, rest",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "clean-code-javascript",
+      "query": "clean code guidelines for javascript",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "clean",
+          "code",
+          "guidelines",
+          "javascript"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "javascript",
+        "learning",
+        "domain"
+      ],
+      "abstained": false,
+      "expected_repo_id": "ryanmcdermott/clean-code-javascript",
+      "top_result_repo_id": "ryanmcdermott/clean-code-javascript",
+      "top_result_why": [
+        "matched topic: javascript",
+        "overlapped use_cases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "javascript-style-guide",
+      "query": "javascript style guide",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.25,
+        "keywords": [
+          "style"
+        ],
+        "primary_language": "javascript"
+      },
+      "tags": [
+        "javascript",
+        "learning",
+        "domain"
+      ],
+      "abstained": false,
+      "expected_repo_id": "airbnb/javascript",
+      "top_result_repo_id": "airbnb/javascript",
+      "top_result_why": [
+        "matched language: JavaScript",
+        "matched description phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "transformers-nlp-library",
+      "query": "transformer models for natural language processing",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 1.0,
+        "keywords": [
+          "language",
+          "models",
+          "natural",
+          "processing",
+          "transformer"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "nlp",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "huggingface/transformers",
+      "top_result_repo_id": "huggingface/transformers",
+      "top_result_why": [
+        "matched topic: transformer",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "langchain-llm-apps",
+      "query": "framework for building llm applications",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.65,
+        "keywords": [
+          "building",
+          "llm"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "llm",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "langchain-ai/langchain",
+      "top_result_repo_id": "langchain-ai/langchain",
+      "top_result_why": [
+        "matched topic: llm",
+        "moderate semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "langflow-visual-llm-builder",
+      "query": "visual builder for langchain and llm workflows",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 1.0,
+        "keywords": [
+          "builder",
+          "langchain",
+          "llm",
+          "visual",
+          "workflows"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "llm",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "langflow-ai/langflow",
+      "top_result_repo_id": "langflow-ai/langflow",
+      "top_result_why": [
+        "overlapped capabilities phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "dify-llm-platform",
+      "query": "open source llm app development platform",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "app",
+          "development",
+          "llm"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "llm",
+        "platform"
+      ],
+      "abstained": false,
+      "expected_repo_id": "langgenius/dify",
+      "top_result_repo_id": "langchain-ai/langchain",
+      "top_result_why": [
+        "matched topic: llm",
+        "strong semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": 6,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "open-webui-local-llm-ui",
+      "query": "web ui for local llm chat",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "chat",
+          "llm",
+          "local"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "llm",
+        "ui"
+      ],
+      "abstained": false,
+      "expected_repo_id": "open-webui/open-webui",
+      "top_result_repo_id": "open-webui/open-webui",
+      "top_result_why": [
+        "matched topic: llm",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "lobe-chat-ui",
+      "query": "modern ai chat interface",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.25,
+        "keywords": [
+          "chat"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "llm",
+        "ui"
+      ],
+      "abstained": false,
+      "expected_repo_id": "lobehub/lobehub",
+      "top_result_repo_id": "ChatGPTNextWeb/NextChat",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": null,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "ragflow-rag-engine",
+      "query": "rag engine for document question answering",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "answering",
+          "document",
+          "question",
+          "rag"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "rag",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "infiniflow/ragflow",
+      "top_result_repo_id": "infiniflow/ragflow",
+      "top_result_why": [
+        "matched topic: rag",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "ollama-local-models",
+      "query": "run large language models locally",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "language",
+          "large",
+          "locally",
+          "models",
+          "run"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "local-llm",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "ollama/ollama",
+      "top_result_repo_id": "ollama/ollama",
+      "top_result_why": [
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "llama-cpp-inference",
+      "query": "llama inference in c and cpp",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "cpp",
+          "inference",
+          "llama"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "local-llm",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "ggml-org/llama.cpp",
+      "top_result_repo_id": "ggml-org/llama.cpp",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "vllm-serving",
+      "query": "high throughput llm serving engine",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "high",
+          "llm",
+          "serving",
+          "throughput"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "serving",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "vllm-project/vllm",
+      "top_result_repo_id": "vllm-project/vllm",
+      "top_result_why": [
+        "matched topic: llm",
+        "overlapped search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "gpt4all-local-chat",
+      "query": "local gpt chat client and models",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "chat",
+          "client",
+          "gpt",
+          "local",
+          "models"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "local-llm",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "nomic-ai/gpt4all",
+      "top_result_repo_id": "nomic-ai/gpt4all",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "codex-terminal-agent",
+      "query": "ai coding assistant for the terminal",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "assistant",
+          "coding",
+          "terminal"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "coding",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "openai/codex",
+      "top_result_repo_id": "anthropics/claude-code",
+      "top_result_why": [
+        "overlapped search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": 2,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "claude-code-agent",
+      "query": "claude coding agent in terminal",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "agent",
+          "claude",
+          "coding",
+          "terminal"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "coding",
+        "name"
+      ],
+      "abstained": false,
+      "expected_repo_id": "anthropics/claude-code",
+      "top_result_repo_id": "anthropics/claude-code",
+      "top_result_why": [
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "openhands-agent",
+      "query": "open source software engineering agent",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.65,
+        "keywords": [
+          "agent",
+          "engineering"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "coding",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "OpenHands/OpenHands",
+      "top_result_repo_id": "msitarzewski/agency-agents",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": 3,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "comfyui-image-workflow",
+      "query": "node based stable diffusion image generation ui",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "based",
+          "diffusion",
+          "generation",
+          "image",
+          "node",
+          "stable"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "image",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "Comfy-Org/ComfyUI",
+      "top_result_repo_id": "AUTOMATIC1111/stable-diffusion-webui",
+      "top_result_why": [
+        "matched topic: diffusion",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": 2,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "whisper-speech-recognition",
+      "query": "speech recognition and transcription model",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "model",
+          "recognition",
+          "speech",
+          "transcription"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "audio",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "openai/whisper",
+      "top_result_repo_id": "openai/whisper",
+      "top_result_why": [
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "prompt-engineering-guide",
+      "query": "prompt engineering guide",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.45,
+        "keywords": [
+          "engineering",
+          "prompt"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "ai",
+        "learning",
+        "domain"
+      ],
+      "abstained": false,
+      "expected_repo_id": "dair-ai/Prompt-Engineering-Guide",
+      "top_result_repo_id": "dair-ai/Prompt-Engineering-Guide",
+      "top_result_why": [
+        "matched search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "n8n-workflow-automation",
+      "query": "open source workflow automation platform",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.0,
+        "keywords": [],
+        "primary_language": null
+      },
+      "tags": [
+        "automation",
+        "workflow",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "n8n-io/n8n",
+      "top_result_repo_id": "langgenius/dify",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": 2,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "firecrawl-web-scraping",
+      "query": "turn websites into llm ready markdown",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "into",
+          "llm",
+          "markdown",
+          "ready",
+          "turn",
+          "websites"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "automation",
+        "scraping",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "firecrawl/firecrawl",
+      "top_result_repo_id": "unclecode/crawl4ai",
+      "top_result_why": [
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": 4,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "markitdown-converter",
+      "query": "convert documents to markdown",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "convert",
+          "documents",
+          "markdown"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "tools",
+        "markdown",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "microsoft/markitdown",
+      "top_result_repo_id": "microsoft/markitdown",
+      "top_result_why": [
+        "matched topic: markdown",
+        "overlapped use_cases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "hoppscotch-api-client",
+      "query": "open source api client like postman",
+      "query_intent": {
+        "type": "alternative",
+        "specificity": 0.8,
+        "keywords": [
+          "client",
+          "like",
+          "postman"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "api",
+        "devtools",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "hoppscotch/hoppscotch",
+      "top_result_repo_id": "hoppscotch/hoppscotch",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "vscode-editor",
+      "query": "code editor from microsoft",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "code",
+          "editor",
+          "from",
+          "microsoft"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "editor",
+        "devtools",
+        "name"
+      ],
+      "abstained": false,
+      "expected_repo_id": "microsoft/vscode",
+      "top_result_repo_id": "microsoft/vscode",
+      "top_result_why": [
+        "matched topic: editor, microsoft",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "zed-editor",
+      "query": "fast collaborative code editor",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "code",
+          "collaborative",
+          "editor",
+          "fast"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "editor",
+        "devtools",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "zed-industries/zed",
+      "top_result_repo_id": "zed-industries/zed",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "terminal-windows",
+      "query": "modern terminal application from microsoft",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "from",
+          "microsoft",
+          "terminal"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "terminal",
+        "devtools",
+        "name"
+      ],
+      "abstained": false,
+      "expected_repo_id": "microsoft/terminal",
+      "top_result_repo_id": "microsoft/terminal",
+      "top_result_why": [
+        "matched topic: terminal",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "gemini-cli",
+      "query": "gemini command line ai assistant",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "assistant",
+          "command",
+          "gemini",
+          "line"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "cli",
+        "ai",
+        "name"
+      ],
+      "abstained": false,
+      "expected_repo_id": "google-gemini/gemini-cli",
+      "top_result_repo_id": "google-gemini/gemini-cli",
+      "top_result_why": [
+        "matched topic: gemini",
+        "overlapped search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "lazygit-terminal-ui",
+      "query": "terminal ui for git",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.45,
+        "keywords": [
+          "git",
+          "terminal"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "cli",
+        "git",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "jesseduffield/lazygit",
+      "top_result_repo_id": "jesseduffield/lazygit",
+      "top_result_why": [
+        "matched topic: git, terminal",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "thefuck-shell-corrections",
+      "query": "correct previous console command",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "command",
+          "console",
+          "correct",
+          "previous"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "cli",
+        "shell",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "nvbn/thefuck",
+      "top_result_repo_id": "nvbn/thefuck",
+      "top_result_why": [
+        "covered query terms across profile",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "ohmyzsh-shell-config",
+      "query": "zsh configuration framework",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.0,
+        "keywords": [],
+        "primary_language": "shell"
+      },
+      "tags": [
+        "shell",
+        "terminal",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "ohmyzsh/ohmyzsh",
+      "top_result_repo_id": "ohmyzsh/ohmyzsh",
+      "top_result_why": [
+        "matched language: Shell",
+        "matched search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "nvm-node-version",
+      "query": "node version manager",
+      "query_intent": {
+        "type": "exact_name",
+        "specificity": 0.8,
+        "keywords": [
+          "manager",
+          "node",
+          "version"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "javascript",
+        "cli",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "nvm-sh/nvm",
+      "top_result_repo_id": "nvm-sh/nvm",
+      "top_result_why": [
+        "matched topic: node",
+        "matched search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "powertoys-windows-utilities",
+      "query": "windows power user utilities",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "power",
+          "utilities",
+          "windows"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "desktop",
+        "windows",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "microsoft/PowerToys",
+      "top_result_repo_id": "microsoft/PowerToys",
+      "top_result_why": [
+        "matched topic: windows",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "scrcpy-android-screen",
+      "query": "control android device from desktop",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "android",
+          "control",
+          "desktop",
+          "device",
+          "from"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "desktop",
+        "android",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "Genymobile/scrcpy",
+      "top_result_repo_id": "Genymobile/scrcpy",
+      "top_result_why": [
+        "matched topic: android",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "uptime-kuma-monitoring",
+      "query": "self hosted uptime monitoring",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "hosted",
+          "monitoring",
+          "self",
+          "uptime"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "monitoring",
+        "self-hosted",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "louislam/uptime-kuma",
+      "top_result_repo_id": "louislam/uptime-kuma",
+      "top_result_why": [
+        "matched topic: monitoring, uptime",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "grafana-dashboards",
+      "query": "metrics dashboards and observability",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "dashboards",
+          "metrics",
+          "observability"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "monitoring",
+        "observability",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "grafana/grafana",
+      "top_result_repo_id": "grafana/grafana",
+      "top_result_why": [
+        "matched topic: metrics",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "netdata-monitoring",
+      "query": "real time infrastructure monitoring",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "infrastructure",
+          "monitoring",
+          "real",
+          "time"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "monitoring",
+        "observability",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "netdata/netdata",
+      "top_result_repo_id": "netdata/netdata",
+      "top_result_why": [
+        "matched topic: monitoring",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "kubernetes-container-orchestration",
+      "query": "container orchestration platform",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.45,
+        "keywords": [
+          "container",
+          "orchestration"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "infrastructure",
+        "containers",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "kubernetes/kubernetes",
+      "top_result_repo_id": "kubernetes/kubernetes",
+      "top_result_why": [
+        "matched search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "supabase-backend",
+      "query": "open source firebase alternative",
+      "query_intent": {
+        "type": "alternative",
+        "specificity": 0.25,
+        "keywords": [
+          "firebase"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "database",
+        "backend",
+        "alternative"
+      ],
+      "abstained": false,
+      "expected_repo_id": "supabase/supabase",
+      "top_result_repo_id": "supabase/supabase",
+      "top_result_why": [
+        "matched topic: firebase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "redis-in-memory-database",
+      "query": "in memory data structure store",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "memory",
+          "store",
+          "structure"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "database",
+        "cache",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "redis/redis",
+      "top_result_repo_id": "redis/redis",
+      "top_result_why": [
+        "metadata overlap",
+        "moderate semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "spring-boot-java",
+      "query": "java framework for production spring applications",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.65,
+        "keywords": [
+          "production",
+          "spring"
+        ],
+        "primary_language": "java"
+      },
+      "tags": [
+        "java",
+        "backend",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "spring-projects/spring-boot",
+      "top_result_repo_id": "spring-projects/spring-boot",
+      "top_result_why": [
+        "matched topic: spring",
+        "matched language: Java",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "gin-go-web-framework",
+      "query": "go web framework",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.0,
+        "keywords": [],
+        "primary_language": "go"
+      },
+      "tags": [
+        "go",
+        "web",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "gin-gonic/gin",
+      "top_result_repo_id": "gin-gonic/gin",
+      "top_result_why": [
+        "matched language: Go",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "hugo-static-site",
+      "query": "static site generator written in go",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "generator",
+          "site",
+          "static"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "go",
+        "static-site",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "gohugoio/hugo",
+      "top_result_repo_id": "gohugoio/hugo",
+      "top_result_why": [
+        "overlapped search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "frp-reverse-proxy",
+      "query": "fast reverse proxy for exposing local services",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 1.0,
+        "keywords": [
+          "exposing",
+          "fast",
+          "local",
+          "proxy",
+          "reverse",
+          "services"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "networking",
+        "proxy",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "fatedier/frp",
+      "top_result_repo_id": "fatedier/frp",
+      "top_result_why": [
+        "matched topic: proxy",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "react-native-mobile",
+      "query": "build native mobile apps with react",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "apps",
+          "mobile",
+          "native",
+          "react"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "mobile",
+        "frontend",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "react/react-native",
+      "top_result_repo_id": "react/react-native",
+      "top_result_why": [
+        "matched topic: mobile, react",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "electron-desktop-apps",
+      "query": "build cross platform desktop apps with javascript",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "apps",
+          "cross",
+          "desktop",
+          "javascript"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "desktop",
+        "javascript",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "electron/electron",
+      "top_result_repo_id": "electron/electron",
+      "top_result_why": [
+        "matched topic: javascript",
+        "overlapped description phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "tauri-desktop-apps",
+      "query": "rust based lightweight desktop app framework",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "app",
+          "based",
+          "desktop",
+          "lightweight"
+        ],
+        "primary_language": "rust"
+      },
+      "tags": [
+        "desktop",
+        "rust",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "tauri-apps/tauri",
+      "top_result_repo_id": "tauri-apps/tauri",
+      "top_result_why": [
+        "matched language: Rust",
+        "overlapped search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "rustdesk-remote-desktop",
+      "query": "open source remote desktop",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.45,
+        "keywords": [
+          "desktop",
+          "remote"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "desktop",
+        "remote",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "rustdesk/rustdesk",
+      "top_result_repo_id": "rustdesk/rustdesk",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "localsend-file-sharing",
+      "query": "local network file sharing app",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "app",
+          "file",
+          "local",
+          "network",
+          "sharing"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "desktop",
+        "mobile",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "localsend/localsend",
+      "top_result_repo_id": "localsend/localsend",
+      "top_result_why": [
+        "overlapped capabilities phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "immich-photo-backup",
+      "query": "self hosted photo and video backup",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "backup",
+          "hosted",
+          "photo",
+          "self",
+          "video"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "self-hosted",
+        "photos",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "immich-app/immich",
+      "top_result_repo_id": "immich-app/immich",
+      "top_result_why": [
+        "overlapped use_cases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "yt-dlp-download",
+      "query": "download videos from youtube and other sites",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "download",
+          "from",
+          "sites",
+          "videos",
+          "youtube"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "media",
+        "cli",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "yt-dlp/yt-dlp",
+      "top_result_repo_id": "ytdl-org/youtube-dl",
+      "top_result_why": [
+        "overlapped use_cases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": 2,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "stirling-pdf-tools",
+      "query": "self hosted pdf tools",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "hosted",
+          "pdf",
+          "self"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "documents",
+        "pdf",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "Stirling-Tools/Stirling-PDF",
+      "top_result_repo_id": "Stirling-Tools/Stirling-PDF",
+      "top_result_why": [
+        "matched topic: pdf",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "ventoy-boot-usb",
+      "query": "bootable usb solution for iso files",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 1.0,
+        "keywords": [
+          "bootable",
+          "files",
+          "iso",
+          "solution",
+          "usb"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "system",
+        "usb",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "ventoy/Ventoy",
+      "top_result_repo_id": "ventoy/Ventoy",
+      "top_result_why": [
+        "matched topic: usb",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "freecodecamp-learning",
+      "query": "learn to code curriculum",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.45,
+        "keywords": [
+          "code",
+          "curriculum"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "learning",
+        "programming",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "freeCodeCamp/freeCodeCamp",
+      "top_result_repo_id": "freeCodeCamp/freeCodeCamp",
+      "top_result_why": [
+        "matched topic: curriculum",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "free-programming-books",
+      "query": "free programming books",
+      "query_intent": {
+        "type": "exact_name",
+        "specificity": 0.8,
+        "keywords": [
+          "books",
+          "free",
+          "programming"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "learning",
+        "books",
+        "name"
+      ],
+      "abstained": false,
+      "expected_repo_id": "EbookFoundation/free-programming-books",
+      "top_result_repo_id": "EbookFoundation/free-programming-books",
+      "top_result_why": [
+        "matched topic: books",
+        "overlapped use_cases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "developer-roadmap",
+      "query": "developer roadmap guides",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.25,
+        "keywords": [
+          "roadmap"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "learning",
+        "roadmap",
+        "name"
+      ],
+      "abstained": false,
+      "expected_repo_id": "nilbuild/developer-roadmap",
+      "top_result_repo_id": "nilbuild/developer-roadmap",
+      "top_result_why": [
+        "matched topic: roadmap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "system-design-primer",
+      "query": "learn system design",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.25,
+        "keywords": [
+          "design"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "learning",
+        "system-design",
+        "name"
+      ],
+      "abstained": false,
+      "expected_repo_id": "donnemartin/system-design-primer",
+      "top_result_repo_id": "donnemartin/system-design-primer",
+      "top_result_why": [
+        "matched topic: design",
+        "matched search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "javascript-algorithms",
+      "query": "javascript algorithms and data structures",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.65,
+        "keywords": [
+          "algorithms",
+          "structures"
+        ],
+        "primary_language": "javascript"
+      },
+      "tags": [
+        "learning",
+        "algorithms",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "trekhleb/javascript-algorithms",
+      "top_result_repo_id": "trekhleb/javascript-algorithms",
+      "top_result_why": [
+        "matched topic: algorithms",
+        "matched language: JavaScript",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "hello-algo",
+      "query": "animated algorithm tutorial",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.45,
+        "keywords": [
+          "algorithm",
+          "animated"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "learning",
+        "algorithms",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "krahets/hello-algo",
+      "top_result_repo_id": "krahets/hello-algo",
+      "top_result_why": [
+        "matched topic: algorithm",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "tech-interview-handbook",
+      "query": "software engineering interview preparation",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "engineering",
+          "interview",
+          "preparation"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "learning",
+        "interview",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "yangshun/tech-interview-handbook",
+      "top_result_repo_id": "yangshun/tech-interview-handbook",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "java-guide",
+      "query": "java interview and learning guide",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.25,
+        "keywords": [
+          "interview"
+        ],
+        "primary_language": "java"
+      },
+      "tags": [
+        "learning",
+        "java",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "Snailclimb/JavaGuide",
+      "top_result_repo_id": "Snailclimb/JavaGuide",
+      "top_result_why": [
+        "matched topic: interview",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "computer-science-curriculum",
+      "query": "open source computer science curriculum",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "computer",
+          "curriculum",
+          "science"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "learning",
+        "cs",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "ossu/computer-science",
+      "top_result_repo_id": "ossu/computer-science",
+      "top_result_why": [
+        "matched topic: curriculum",
+        "overlapped search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "deep-learning-book-cn",
+      "query": "deep learning chinese textbook",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "chinese",
+          "deep",
+          "textbook"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "learning",
+        "ai",
+        "domain"
+      ],
+      "abstained": false,
+      "expected_repo_id": "d2l-ai/d2l-zh",
+      "top_result_repo_id": "d2l-ai/d2l-zh",
+      "top_result_why": [
+        "matched topic: chinese",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "llm-course",
+      "query": "large language model course",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "course",
+          "language",
+          "large",
+          "model"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "learning",
+        "ai",
+        "llm"
+      ],
+      "abstained": false,
+      "expected_repo_id": "mlabonne/llm-course",
+      "top_result_repo_id": "mlabonne/llm-course",
+      "top_result_why": [
+        "matched topic: course",
+        "overlapped description phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "sherlock-username-search",
+      "query": "hunt usernames across social networks",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "across",
+          "hunt",
+          "networks",
+          "social",
+          "usernames"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "security",
+        "osint",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "sherlock-project/sherlock",
+      "top_result_repo_id": "sherlock-project/sherlock",
+      "top_result_why": [
+        "overlapped description phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "payloads-all-the-things",
+      "query": "web security payloads and bypasses",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "bypasses",
+          "payloads",
+          "security"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "security",
+        "reference",
+        "name"
+      ],
+      "abstained": false,
+      "expected_repo_id": "swisskyrepo/PayloadsAllTheThings",
+      "top_result_repo_id": "swisskyrepo/PayloadsAllTheThings",
+      "top_result_why": [
+        "matched topic: payloads, security",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "hacking-toolkit",
+      "query": "all in one hacking tool",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "all",
+          "hacking",
+          "one"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "security",
+        "tools",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "Z4nzu/hackingtool",
+      "top_result_repo_id": "Z4nzu/hackingtool",
+      "top_result_why": [
+        "matched topic: hacking",
+        "overlapped description phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "godot-game-engine",
+      "query": "open source game engine",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.25,
+        "keywords": [
+          "game"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "game",
+        "engine",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "godotengine/godot",
+      "top_result_repo_id": "godotengine/godot",
+      "top_result_why": [
+        "matched search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "opencv-computer-vision",
+      "query": "computer vision library",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.45,
+        "keywords": [
+          "computer",
+          "vision"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "vision",
+        "graphics",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "opencv/opencv",
+      "top_result_repo_id": "opencv/opencv",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "d3-data-visualization",
+      "query": "javascript data visualization library",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.25,
+        "keywords": [
+          "visualization"
+        ],
+        "primary_language": "javascript"
+      },
+      "tags": [
+        "visualization",
+        "javascript",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "d3/d3",
+      "top_result_repo_id": "d3/d3",
+      "top_result_why": [
+        "matched topic: visualization",
+        "matched search_phrases phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "mermaid-diagrams",
+      "query": "markdown diagrams and flowcharts",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "diagrams",
+          "flowcharts",
+          "markdown"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "diagrams",
+        "markdown",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "mermaid-js/mermaid",
+      "top_result_repo_id": "mermaid-js/mermaid",
+      "top_result_why": [
+        "matched topic: diagrams",
+        "overlapped description phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "excalidraw-whiteboard",
+      "query": "virtual whiteboard for sketching diagrams",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "diagrams",
+          "sketching",
+          "virtual",
+          "whiteboard"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "diagrams",
+        "whiteboard",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "excalidraw/excalidraw",
+      "top_result_repo_id": "excalidraw/excalidraw",
+      "top_result_why": [
+        "matched topic: diagrams, whiteboard",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "home-assistant-automation",
+      "query": "open source home automation platform",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.25,
+        "keywords": [
+          "home"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "iot",
+        "automation",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "home-assistant/core",
+      "top_result_repo_id": "home-assistant/core",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "bitcoin-core",
+      "query": "bitcoin full node implementation",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "bitcoin",
+          "implementation",
+          "node"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "crypto",
+        "database",
+        "name"
+      ],
+      "abstained": false,
+      "expected_repo_id": "bitcoin/bitcoin",
+      "top_result_repo_id": "bitcoin/bitcoin",
+      "top_result_why": [
+        "matched topic: bitcoin",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "github-readme-stats",
+      "query": "dynamic github readme stats cards",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "cards",
+          "dynamic",
+          "github",
+          "readme",
+          "stats"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "github",
+        "readme",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "anuraghazra/github-readme-stats",
+      "top_result_repo_id": "anuraghazra/github-readme-stats",
+      "top_result_why": [
+        "matched topic: dynamic",
+        "overlapped capabilities phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "realworld-app-example",
+      "query": "example fullstack realworld app implementations",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "app",
+          "fullstack",
+          "implementations",
+          "realworld"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "examples",
+        "fullstack",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "realworld-apps/realworld",
+      "top_result_repo_id": "realworld-apps/realworld",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "ripgrep-fast-search",
+      "query": "fast command line search tool",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "command",
+          "fast",
+          "line"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "cli",
+        "tool",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "BurntSushi/ripgrep",
+      "top_result_repo_id": "BurntSushi/ripgrep",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "rust-language-compiler",
+      "query": "rust programming language compiler",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "compiler",
+          "language",
+          "programming"
+        ],
+        "primary_language": "rust"
+      },
+      "tags": [
+        "language",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "rust-lang/rust",
+      "top_result_repo_id": "rust-lang/rust",
+      "top_result_why": [
+        "matched topic: compiler, language",
+        "matched language: Rust",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "go-language-toolchain",
+      "query": "go programming language toolchain",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "language",
+          "programming",
+          "toolchain"
+        ],
+        "primary_language": "go"
+      },
+      "tags": [
+        "language",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "golang/go",
+      "top_result_repo_id": "golang/go",
+      "top_result_why": [
+        "matched topic: language",
+        "matched language: Go",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "grafana-observability-dashboard",
+      "query": "metrics dashboards for observability",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "dashboards",
+          "metrics",
+          "observability"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "observability",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "grafana/grafana",
+      "top_result_repo_id": "grafana/grafana",
+      "top_result_why": [
+        "matched topic: metrics",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "browser-use-automation",
+      "query": "browser automation using natural language",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "browser",
+          "language",
+          "natural"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "browser",
+        "ai",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "browser-use/browser-use",
+      "top_result_repo_id": "browser-use/browser-use",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "supabase-firebase-alternative",
+      "query": "firebase alternative with postgres auth storage",
+      "query_intent": {
+        "type": "alternative",
+        "specificity": 0.8,
+        "keywords": [
+          "auth",
+          "firebase",
+          "postgres",
+          "storage"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "database",
+        "alternative",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "supabase/supabase",
+      "top_result_repo_id": "supabase/supabase",
+      "top_result_why": [
+        "matched topic: auth, firebase, postgres",
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "firecrawl-markdown",
+      "query": "turn websites into llm ready markdown",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 1.0,
+        "keywords": [
+          "into",
+          "llm",
+          "markdown",
+          "ready",
+          "turn",
+          "websites"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "web",
+        "llm",
+        "weak-signal",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "firecrawl/firecrawl",
+      "top_result_repo_id": "unclecode/crawl4ai",
+      "top_result_why": [
+        "overlapped summary phrase",
+        "strong semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": 4,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "vllm-local-serving",
+      "query": "local llm server for serving models",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 1.0,
+        "keywords": [
+          "llm",
+          "local",
+          "models",
+          "server",
+          "serving"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "local-llm",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "vllm-project/vllm",
+      "top_result_repo_id": "ggml-org/llama.cpp",
+      "top_result_why": [
+        "metadata overlap",
+        "strong semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": true,
+      "exact_rank": 2,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "acceptable",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "tauri-desktop-framework",
+      "query": "rust desktop app framework",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.45,
+        "keywords": [
+          "app",
+          "desktop"
+        ],
+        "primary_language": "rust"
+      },
+      "tags": [
+        "desktop",
+        "rust",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "tauri-apps/tauri",
+      "top_result_repo_id": "tauri-apps/tauri",
+      "top_result_why": [
+        "matched language: Rust",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "zed-modern-editor",
+      "query": "modern rust based editor",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "based",
+          "editor",
+          "rust"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "editor",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "zed-industries/zed",
+      "top_result_repo_id": "rust-lang/rust",
+      "top_result_why": [
+        "matched topic: rust",
+        "moderate semantic match"
+      ],
+      "exact_match": false,
+      "acceptable_match": false,
+      "exact_rank": 2,
+      "acceptable_rank": 2,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "serious_mismatch",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "lazygit-git-tui-workflow",
+      "query": "git terminal interface for staging commits",
+      "query_intent": {
+        "type": "domain",
+        "specificity": 0.8,
+        "keywords": [
+          "commits",
+          "git",
+          "staging",
+          "terminal"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "cli",
+        "tool",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "jesseduffield/lazygit",
+      "top_result_repo_id": "jesseduffield/lazygit",
+      "top_result_why": [
+        "matched topic: git, terminal",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    },
+    {
+      "id": "playwright-browser-e2e-testing",
+      "query": "end to end browser testing automation",
+      "query_intent": {
+        "type": "functional",
+        "specificity": 0.8,
+        "keywords": [
+          "browser",
+          "end",
+          "testing"
+        ],
+        "primary_language": null
+      },
+      "tags": [
+        "browser",
+        "testing",
+        "function"
+      ],
+      "abstained": false,
+      "expected_repo_id": "microsoft/playwright",
+      "top_result_repo_id": "microsoft/playwright",
+      "top_result_why": [
+        "matched topic: testing",
+        "strong semantic match"
+      ],
+      "exact_match": true,
+      "acceptable_match": true,
+      "exact_rank": 1,
+      "acceptable_rank": 1,
+      "top_result_confidence": "high_confidence",
+      "top1_status": "exact",
+      "judge_ran": false,
+      "judge_verdict": null,
+      "judge_difference_size": null,
+      "judge_confidence": null,
+      "judge_reason_short": null,
+      "judge_query_specificity": null,
+      "judge_language_ecosystem_material": null,
+      "judge": null
+    }
+  ]
+}

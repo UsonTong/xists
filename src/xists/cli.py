@@ -521,11 +521,43 @@ def _check_payload(name: str, status: str, message: str, **extra: Any) -> dict[s
     return {"name": name, "status": status, "message": message, **extra}
 
 
+def _embedding_config_next_steps() -> list[str]:
+    return [
+        "Copy .env.example to .env if you have not configured the project yet.",
+        "Set EMBEDDING_API_KEY, EMBEDDING_BASE_URL, and EMBEDDING_MODEL.",
+        "Run xists doctor --check-endpoints after setting the embedding variables.",
+    ]
+
+
+def _llm_config_next_steps() -> list[str]:
+    return [
+        "Set LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL in .env or the environment.",
+        "LLM configuration is required for xists ingest github and optional eval --llm-judge runs.",
+    ]
+
+
+def _github_token_next_steps() -> list[str]:
+    return [
+        "Set GITHUB_TOKEN or GITHUB_TOKENS in .env, or pass --token-file.",
+        "GitHub tokens are required for xists ingest github but not for local search/eval on existing files.",
+    ]
+
+
+def _embedding_endpoint_next_steps() -> list[str]:
+    return [
+        "Start the embedding service referenced by EMBEDDING_BASE_URL.",
+        "Confirm the base URL is the API root, for example http://localhost:6597/v1 for OpenAI-compatible servers.",
+        "Run xists doctor --check-endpoints --strict before retrying index/search/eval commands.",
+    ]
+
+
 def _print_embedding_error(error: EmbeddingError, *, command: str) -> None:
+    next_steps = "\n".join(f"- {step}" for step in _embedding_endpoint_next_steps())
     print(
         f"xists {command} could not use the configured embedding endpoint.\n"
         f"{error}\n"
-        "Run 'xists doctor --check-endpoints --strict' to verify the endpoint before retrying.",
+        "Next steps:\n"
+        f"{next_steps}",
         file=sys.stderr,
     )
 
@@ -542,9 +574,24 @@ def doctor(args: argparse.Namespace) -> int:
     try:
         config = embedding_config_from_env()
         embedding_config = config
-        checks.append(_check_payload("embedding_config", "ok", "embedding endpoint is configured", model=config.model))
+        checks.append(
+            _check_payload(
+                "embedding_config",
+                "ok",
+                "embedding endpoint is configured",
+                model=config.model,
+                base_url=config.base_url,
+            )
+        )
     except EmbeddingNotConfiguredError as error:
-        checks.append(_check_payload("embedding_config", "error", str(error)))
+        checks.append(
+            _check_payload(
+                "embedding_config",
+                "error",
+                str(error),
+                next_steps=_embedding_config_next_steps(),
+            )
+        )
 
     check_endpoints = bool(getattr(args, "check_endpoints", False) or getattr(args, "strict", False))
     strict = bool(getattr(args, "strict", False))
@@ -571,23 +618,32 @@ def doctor(args: argparse.Namespace) -> int:
                     model=embedding_config.model,
                     base_url=embedding_config.base_url,
                     hint="Start the embedding service, fix EMBEDDING_BASE_URL, or rerun without --strict.",
+                    next_steps=_embedding_endpoint_next_steps(),
                 )
             )
 
     try:
         config = llm_config_from_env()
-        checks.append(_check_payload("llm_config", "ok", "LLM endpoint is configured", model=config.model))
+        checks.append(_check_payload("llm_config", "ok", "LLM endpoint is configured", model=config.model, base_url=config.base_url))
     except LLMNotConfiguredError as error:
-        checks.append(_check_payload("llm_config", "error", str(error)))
+        checks.append(_check_payload("llm_config", "error", str(error), next_steps=_llm_config_next_steps()))
 
     try:
         tokens = github_token_from_file(args.token_file) if args.token_file else github_token_from_env()
         if tokens:
             checks.append(_check_payload("github_token", "ok", "GitHub token is configured", token_count=len(tokens)))
         else:
-            checks.append(_check_payload("github_token", "warn", "GitHub token is not configured", token_count=0))
+            checks.append(
+                _check_payload(
+                    "github_token",
+                    "warn",
+                    "GitHub token is not configured",
+                    token_count=0,
+                    next_steps=_github_token_next_steps(),
+                )
+            )
     except Exception as error:
-        checks.append(_check_payload("github_token", "error", str(error)))
+        checks.append(_check_payload("github_token", "error", str(error), next_steps=_github_token_next_steps()))
 
     for name, path in (
         ("records_file", args.records),
@@ -597,7 +653,20 @@ def doctor(args: argparse.Namespace) -> int:
         if path.exists():
             checks.append(_check_payload(name, "ok", f"{path} exists", path=str(path)))
         else:
-            checks.append(_check_payload(name, "warn", f"{path} does not exist yet", path=str(path)))
+            command_hint = {
+                "records_file": "Run xists ingest github to create records.json, or pass --records to point at an existing records file.",
+                "index_file": "Run xists index build to create index.json, or pass --index to point at an existing index file.",
+                "eval_cases_file": "Pass --cases examples/eval-cases.json for the committed demo evaluation dataset.",
+            }[name]
+            checks.append(
+                _check_payload(
+                    name,
+                    "warn",
+                    f"{path} does not exist yet",
+                    path=str(path),
+                    next_steps=[command_hint],
+                )
+            )
 
     ok = all(check["status"] != "error" for check in checks)
     print(json.dumps({"ok": ok, "checks": checks}, ensure_ascii=False, indent=2))

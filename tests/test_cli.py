@@ -14,6 +14,7 @@ from xists.cli import (
     ingest_github,
     load_env_file,
     load_repo_ids,
+    search,
     records_inspect,
     version,
 )
@@ -178,6 +179,115 @@ def test_eval_run_parser_uses_default_paths():
     assert args.output == Path("eval-report.json")
     assert args.top_k == 10
     assert args.batch_size == 64
+
+
+def test_search_parser_uses_default_options():
+    args = build_parser().parse_args(["search", "python api framework"])
+
+    assert args.index == Path("index.json")
+    assert args.top_k == 10
+    assert args.format == "json"
+
+
+def test_search_defaults_to_json_output(tmp_path, monkeypatch, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "vectors": [
+                    {
+                        "repo_id": "fastapi/fastapi",
+                        "metadata": {
+                            "summary": "FastAPI summary",
+                            "description": "FastAPI description",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("EMBEDDING_API_KEY", "k")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "bge-m3")
+
+    args = build_parser().parse_args(["search", "python api framework", "--index", str(index_file)])
+
+    with patch(
+        "xists.cli.rank",
+        return_value={
+            "query": "python api framework",
+            "query_intent": {"type": "functional"},
+            "abstained": False,
+            "results": [
+                {
+                    "repo_id": "fastapi/fastapi",
+                    "confidence": "high_confidence",
+                    "score": 0.712345,
+                    "why": ["ranked by semantic similarity"],
+                    "score_breakdown": {"semantic": 0.61, "metadata": 0.102345, "final": 0.712345},
+                }
+            ],
+        },
+    ):
+        code = search(args)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["results"][0]["repo_id"] == "fastapi/fastapi"
+    assert payload["results"][0]["confidence"] == "high_confidence"
+
+
+def test_search_text_format_prints_readable_results(tmp_path, monkeypatch, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "vectors": [
+                    {
+                        "repo_id": "fastapi/fastapi",
+                        "metadata": {
+                            "summary": "A modern, fast web framework for building APIs with Python.",
+                        },
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("EMBEDDING_API_KEY", "k")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "bge-m3")
+
+    args = build_parser().parse_args(["search", "python api framework", "--index", str(index_file), "--format", "text"])
+
+    with patch(
+        "xists.cli.rank",
+        return_value={
+            "query": "python api framework",
+            "query_intent": {"type": "functional"},
+            "abstained": False,
+            "results": [
+                {
+                    "repo_id": "fastapi/fastapi",
+                    "confidence": "high_confidence",
+                    "score": 0.712345,
+                    "why": ["ranked by semantic similarity", "metadata overlap"],
+                    "matched_terms": ["python", "api", "framework"],
+                    "score_breakdown": {"semantic": 0.61, "metadata": 0.102345, "final": 0.712345},
+                }
+            ],
+        },
+    ):
+        code = search(args)
+
+    assert code == 0
+    output = capsys.readouterr().out
+    assert "repo: fastapi/fastapi" in output
+    assert "confidence: high_confidence" in output
+    assert "score: 0.712345" in output
+    assert "summary: A modern, fast web framework for building APIs with Python." in output
+    assert "why: ranked by semantic similarity; metadata overlap" in output
 
 
 def test_eval_run_writes_report(tmp_path, monkeypatch):

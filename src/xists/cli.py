@@ -513,8 +513,85 @@ def search(args: argparse.Namespace) -> int:
         _print_embedding_error(error, command="search")
         return 1
 
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if getattr(args, "format", "json") == "text":
+        print(_format_search_text(result, index))
+    else:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
+
+
+def _index_summaries_by_repo_id(index: dict[str, Any]) -> dict[str, str]:
+    summaries: dict[str, str] = {}
+    for item in index.get("vectors") or []:
+        if not isinstance(item, dict):
+            continue
+        repo_id = item.get("repo_id")
+        metadata = item.get("metadata")
+        if not isinstance(repo_id, str) or not isinstance(metadata, dict):
+            continue
+        summary = metadata.get("summary") or metadata.get("description") or ""
+        if isinstance(summary, str) and summary.strip():
+            summaries[repo_id] = summary.strip()
+    return summaries
+
+
+def _format_search_number(value: Any) -> str:
+    if isinstance(value, (int, float)):
+        return f"{value:.6f}"
+    return str(value) if value is not None else "n/a"
+
+
+def _format_search_text(result: dict[str, Any], index: dict[str, Any]) -> str:
+    summaries = _index_summaries_by_repo_id(index)
+    intent = result.get("query_intent") or {}
+    intent_type = intent.get("type") if isinstance(intent, dict) else None
+
+    lines = [
+        f"query: {result.get('query') or ''}",
+        f"intent: {intent_type or 'unknown'}",
+        f"abstained: {bool(result.get('abstained'))}",
+    ]
+    if result.get("abstained") and result.get("abstain_reason"):
+        lines.append(f"abstain_reason: {result['abstain_reason']}")
+
+    search_results = result.get("results") or []
+    if not search_results:
+        lines.append("results: none")
+        return "\n".join(lines)
+
+    lines.append("results:")
+    for position, item in enumerate(search_results, start=1):
+        if not isinstance(item, dict):
+            continue
+        repo_id = str(item.get("repo_id") or "<unknown>")
+        why = item.get("why") or []
+        if isinstance(why, list):
+            why_text = "; ".join(str(reason) for reason in why if str(reason).strip())
+        else:
+            why_text = str(why)
+
+        lines.extend(
+            [
+                f"{position}. repo: {repo_id}",
+                f"   confidence: {item.get('confidence') or 'unknown'}",
+                f"   score: {_format_search_number(item.get('score'))}",
+                f"   summary: {summaries.get(repo_id, '(none)')}",
+                f"   why: {why_text or '(none)'}",
+            ]
+        )
+
+        matched_terms = item.get("matched_terms") or []
+        if matched_terms:
+            lines.append(f"   matched_terms: {', '.join(str(term) for term in matched_terms)}")
+
+        breakdown = item.get("score_breakdown") or {}
+        if isinstance(breakdown, dict) and breakdown:
+            semantic = _format_search_number(breakdown.get("semantic"))
+            metadata = _format_search_number(breakdown.get("metadata"))
+            final = _format_search_number(breakdown.get("final"))
+            lines.append(f"   score_breakdown: semantic={semantic}, metadata={metadata}, final={final}")
+
+    return "\n".join(lines)
 
 
 def _check_payload(name: str, status: str, message: str, **extra: Any) -> dict[str, Any]:
@@ -952,6 +1029,12 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("query", help="Natural-language query")
     search_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to search")
     search_parser.add_argument("--top-k", type=int, default=10, help="Maximum number of results to return")
+    search_parser.add_argument(
+        "--format",
+        choices=("json", "text"),
+        default="json",
+        help="Output format: json (default) or text",
+    )
     search_parser.set_defaults(func=search)
 
     eval_parser = subparsers.add_parser("eval", help="Evaluate retrieval quality")

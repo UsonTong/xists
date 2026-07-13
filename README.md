@@ -78,13 +78,14 @@ xists index build \
 
 # 3. Search!
 xists search "open source firebase alternative" --index demo-index.json
+xists search "open source firebase alternative" --index demo-index.json --format text
 ```
 
 ---
 
 ## Search Result Example
 
-When you run a search, `xists` returns ranked repositories as JSON. A simplified result looks like this:
+When you run a search, `xists` returns ranked repositories as JSON by default. A simplified result looks like this:
 
 ```json
 {
@@ -98,7 +99,7 @@ When you run a search, `xists` returns ranked repositories as JSON. A simplified
 }
 ```
 
-`score` is the final ranking score; higher means a stronger match.
+`score` is the final ranking score; higher means a stronger match. Use `--format text` for a compact terminal view with repo, confidence, score, why, and summary.
 
 ---
 
@@ -129,6 +130,6 @@ The report groups results into pragmatic categories:
 - `xists doctor`: Check config and file status; add `--check-endpoints` or `--strict` to probe the embedding service.
 - `xists ingest github`: Fetch repo metadata and generate summaries.
 - `xists index build`: Build or incrementally update the local index.
-- `xists search "query"`: Query the local index.
+- `xists search "query"`: Query the local index; add `--format text` for readable terminal output.
 - `xists eval cases` / `xists eval run` / `xists eval inspect`: Validate the dataset and run/review ranking tests.
 - `xists records inspect` / `xists index stats`: Quickly view data without printing huge payloads to your terminal.

@@ -263,9 +263,11 @@ The output includes model, dimension, record/vector counts, skipped count, missi
 
 ```bash
 xists search "frontend UI library"
+xists search "frontend UI library" --format text
 ```
 
-Returns ranked results with confidence tiers:
+Returns ranked results with confidence tiers. JSON is the default output and is
+intended for scripts:
 
 ```json
 {
@@ -317,12 +319,28 @@ substring overlap.
 Weak semantic matches stay hidden unless metadata provides strong evidence,
 such as a repository/name match or a unique exact generated profile phrase.
 
+For terminal review, use `--format text`. It keeps the same ranking data but
+prints each result with the fields people usually inspect first:
+
+```text
+query: frontend UI library
+intent: functional
+abstained: False
+results:
+1. repo: react/react
+   confidence: high_confidence
+   score: 0.680000
+   summary: A JavaScript library for building user interfaces.
+   why: matched topic: frontend; matched phrase: UI library
+```
+
 #### Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--index` | `index.json` | Index file to search |
 | `--top-k` | `10` | Maximum results to return |
+| `--format` | `json` | Output format: `json` for compatible machine-readable output, or `text` for terminal review |
 
 ### Step 4: Evaluate retrieval quality
 

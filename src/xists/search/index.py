@@ -36,6 +36,8 @@ def entry_metadata(record: dict[str, Any]) -> dict[str, Any]:
     profile = record.get("llm_profile") or {}
     return {
         "name": record.get("name"),
+        "url": record.get("url"),
+        "aliases": _string_list(profile.get("aliases")),
         "description": github.get("description"),
         "topics": _string_list(github.get("topics")),
         "language": github.get("language"),

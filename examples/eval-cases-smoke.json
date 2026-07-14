@@ -1,0 +1,182 @@
+{
+  "schema_version": 1,
+  "dataset_name": "xists-smoke-24",
+  "families": {
+    "frontend-ui": ["react/react", "vuejs/vue", "angular/angular", "sveltejs/svelte"],
+    "python-web": ["fastapi/fastapi", "django/django", "pallets/flask"],
+    "llm-serving": ["ollama/ollama", "ggml-org/llama.cpp", "vllm-project/vllm"],
+    "browser-automation": ["browser-use/browser-use", "microsoft/playwright", "puppeteer/puppeteer", "firecrawl/firecrawl", "unclecode/crawl4ai"],
+    "ui-components": ["shadcn-ui/ui", "mui/material-ui", "ant-design/ant-design", "twbs/bootstrap"]
+  },
+  "cases": [
+    {
+      "id": "exact-vllm",
+      "query": "vllm",
+      "expected_repo_id": "vllm-project/vllm",
+      "acceptable_repo_ids": [],
+      "tags": ["smoke", "exact-name"]
+    },
+    {
+      "id": "exact-supabase",
+      "query": "supabase",
+      "expected_repo_id": "supabase/supabase",
+      "acceptable_repo_ids": [],
+      "tags": ["smoke", "exact-name"]
+    },
+    {
+      "id": "exact-ytdlp",
+      "query": "yt-dlp",
+      "expected_repo_id": "yt-dlp/yt-dlp",
+      "acceptable_repo_ids": ["ytdl-org/youtube-dl"],
+      "tags": ["smoke", "exact-name"]
+    },
+    {
+      "id": "exact-ripgrep",
+      "query": "ripgrep",
+      "expected_repo_id": "BurntSushi/ripgrep",
+      "acceptable_repo_ids": [],
+      "tags": ["smoke", "exact-name"]
+    },
+    {
+      "id": "firebase-alternative",
+      "query": "open source firebase alternative",
+      "expected_repo_id": "supabase/supabase",
+      "acceptable_repo_ids": ["strapi/strapi", "localstack/localstack"],
+      "tags": ["smoke", "functional", "alternative"]
+    },
+    {
+      "id": "local-llm-serving",
+      "query": "local llm serving runtime",
+      "expected_repo_id": "ollama/ollama",
+      "acceptable_families": ["llm-serving"],
+      "tags": ["smoke", "functional", "llm"]
+    },
+    {
+      "id": "browser-automation-agents",
+      "query": "browser automation for agents",
+      "expected_repo_id": "browser-use/browser-use",
+      "acceptable_families": ["browser-automation"],
+      "tags": ["smoke", "functional", "agent"]
+    },
+    {
+      "id": "python-web-framework",
+      "query": "python web framework",
+      "expected_repo_id": "fastapi/fastapi",
+      "acceptable_families": ["python-web"],
+      "tags": ["smoke", "language", "framework"]
+    },
+    {
+      "id": "go-web-framework",
+      "query": "go web framework",
+      "expected_repo_id": "gin-gonic/gin",
+      "acceptable_repo_ids": ["expressjs/express", "spring-projects/spring-boot", "nestjs/nest"],
+      "tags": ["smoke", "language", "framework"]
+    },
+    {
+      "id": "rust-code-editor",
+      "query": "rust code editor",
+      "expected_repo_id": "zed-industries/zed",
+      "acceptable_repo_ids": ["microsoft/vscode"],
+      "tags": ["smoke", "language", "editor"]
+    },
+    {
+      "id": "rust-compiler",
+      "query": "rust programming language compiler",
+      "expected_repo_id": "rust-lang/rust",
+      "acceptable_repo_ids": [],
+      "tags": ["smoke", "language"]
+    },
+    {
+      "id": "workflow-automation",
+      "query": "workflow automation integrations",
+      "expected_repo_id": "n8n-io/n8n",
+      "acceptable_repo_ids": ["bytedance/deer-flow", "ansible/ansible"],
+      "tags": ["smoke", "ambiguous", "functional"]
+    },
+    {
+      "id": "remote-desktop",
+      "query": "open source remote desktop self hosted",
+      "expected_repo_id": "rustdesk/rustdesk",
+      "acceptable_repo_ids": [],
+      "tags": ["smoke", "functional"]
+    },
+    {
+      "id": "photo-backup",
+      "query": "self hosted photo backup",
+      "expected_repo_id": "immich-app/immich",
+      "acceptable_repo_ids": ["home-assistant/core"],
+      "tags": ["smoke", "functional"]
+    },
+    {
+      "id": "rag-engine",
+      "query": "open source rag engine for documents",
+      "expected_repo_id": "infiniflow/ragflow",
+      "acceptable_repo_ids": ["opendatalab/MinerU", "PaddlePaddle/PaddleOCR"],
+      "tags": ["smoke", "functional", "llm"]
+    },
+    {
+      "id": "pdf-ocr",
+      "query": "pdf ocr document extraction",
+      "expected_repo_id": "PaddlePaddle/PaddleOCR",
+      "acceptable_repo_ids": ["opendatalab/MinerU", "Stirling-Tools/Stirling-PDF"],
+      "tags": ["smoke", "functional"]
+    },
+    {
+      "id": "api-client",
+      "query": "open source api testing client",
+      "expected_repo_id": "hoppscotch/hoppscotch",
+      "acceptable_repo_ids": ["public-apis/public-apis"],
+      "tags": ["smoke", "functional"]
+    },
+    {
+      "id": "ui-components",
+      "query": "react ui component library",
+      "expected_repo_id": "shadcn-ui/ui",
+      "acceptable_families": ["ui-components", "frontend-ui"],
+      "tags": ["smoke", "frontend", "ambiguous"]
+    },
+    {
+      "id": "terminal-emulator",
+      "query": "modern terminal emulator",
+      "expected_repo_id": "microsoft/terminal",
+      "acceptable_repo_ids": ["Eugeny/tabby", "microsoft/vscode"],
+      "tags": ["smoke", "functional"]
+    },
+    {
+      "id": "static-site-generator",
+      "query": "go static site generator",
+      "expected_repo_id": "gohugoio/hugo",
+      "acceptable_repo_ids": ["facebook/docusaurus"],
+      "tags": ["smoke", "language", "functional"]
+    },
+    {
+      "id": "local-cloud-emulator",
+      "query": "local aws cloud emulator",
+      "expected_repo_id": "localstack/localstack",
+      "acceptable_repo_ids": [],
+      "tags": ["smoke", "functional"]
+    },
+    {
+      "id": "git-cli-ui",
+      "query": "terminal ui for git",
+      "expected_repo_id": "jesseduffield/lazygit",
+      "acceptable_repo_ids": [],
+      "tags": ["smoke", "functional"]
+    },
+    {
+      "id": "observability-dashboard",
+      "query": "monitoring observability dashboard",
+      "expected_repo_id": "grafana/grafana",
+      "acceptable_repo_ids": ["netdata/netdata", "louislam/uptime-kuma"],
+      "tags": ["smoke", "ambiguous", "functional"]
+    },
+    {
+      "id": "weak-no-obvious-match",
+      "query": "quantum chemistry notebook for protein folding games",
+      "expected_repo_id": "labmlai/annotated_deep_learning_paper_implementations",
+      "acceptable_repo_ids": ["josephmisiti/awesome-machine-learning", "d2l-ai/d2l-zh"],
+      "tags": ["smoke", "weak", "no-obvious-match"],
+      "notes": "Weak exploratory query used to catch overconfident search behavior rather than assert a perfect semantic target."
+    }
+  ]
+}

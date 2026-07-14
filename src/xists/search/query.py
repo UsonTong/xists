@@ -9,7 +9,8 @@ from typing import Any
 
 import numpy as np
 
-from xists.search.embed import EmbeddingConfig, EmbeddingError, call_embeddings, embed_query
+from xists.records import RECORD_SCHEMA_VERSION
+from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingConfig, EmbeddingError, call_embeddings, embed_query
 
 HIGH_CONFIDENCE_THRESHOLD = 0.55
 EXPLORATORY_THRESHOLD = 0.35
@@ -268,11 +269,20 @@ def _exact_identity_match(query: str, entry: dict[str, Any]) -> bool:
 
 def _metadata_text(metadata: dict[str, Any]) -> str:
     parts: list[str] = []
-    for key in ("name", "description", "summary", "language"):
+    for key in ("name", "description", "summary", "language", "project_type", "search_text"):
         value = metadata.get(key)
         if isinstance(value, str) and value.strip():
             parts.append(value)
-    for key in ("aliases", "topics", "use_cases", "capabilities", "search_phrases"):
+    for key in (
+        "aliases",
+        "topics",
+        "use_cases",
+        "capabilities",
+        "ecosystem",
+        "replaces",
+        "related_projects",
+        "search_phrases",
+    ):
         parts.extend(_string_list(metadata.get(key)))
     return "\n".join(parts)
 
@@ -462,6 +472,20 @@ def ensure_index_matches_model(index: dict[str, Any], config: EmbeddingConfig) -
             f"Index was built with embedding model '{index_model}' but the "
             f"configured model is '{config.model}'. Rebuild the index "
             "(xists index build) or set EMBEDDING_MODEL to match."
+        )
+    input_version = index.get("embedding_input_version")
+    if input_version != EMBEDDING_INPUT_VERSION:
+        raise IndexMismatchError(
+            f"Index embedding_input_version is {input_version!r}, but xists expects "
+            f"{EMBEDDING_INPUT_VERSION}. Refresh profiles if needed, then rebuild "
+            "the index with xists index build."
+        )
+    record_schema_version = index.get("record_schema_version")
+    if record_schema_version != RECORD_SCHEMA_VERSION:
+        raise IndexMismatchError(
+            f"Index record_schema_version is {record_schema_version!r}, but xists expects "
+            f"{RECORD_SCHEMA_VERSION}. Run xists profile refresh for older records, "
+            "then rebuild the index."
         )
 
 

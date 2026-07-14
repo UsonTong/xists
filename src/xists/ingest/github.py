@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from xists import __version__
+from xists.records import RECORD_SCHEMA_VERSION
 
 GITHUB_API_BASE = "https://api.github.com"
 GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
@@ -528,7 +529,7 @@ def build_record(snapshot: GitHubSnapshot) -> dict[str, Any]:
         )
 
     return {
-        "schema_version": 1,
+        "schema_version": RECORD_SCHEMA_VERSION,
         "xists_version": __version__,
         "github_api_version": GITHUB_API_VERSION,
         "repo_id_requested": snapshot.requested_repo_id,

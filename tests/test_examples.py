@@ -45,3 +45,16 @@ def test_extended_eval_dataset_is_valid_and_matches_example_repos():
     for case in dataset["cases"]:
         assert case["expected_repo_id"] in example_repo_ids
         assert set(case["acceptable_set"]).issubset(example_repo_ids)
+
+
+def test_smoke_eval_dataset_is_valid_and_matches_example_repos():
+    dataset = load_dataset(ROOT / "examples" / "eval-cases-smoke.json")
+    example_repo_ids = set(load_repo_ids(ROOT / "repos.txt"))
+
+    assert dataset["dataset_name"] == "xists-smoke-24"
+    assert len(dataset["cases"]) == 24
+    assert set(dataset["families"]["llm-serving"]).issubset(example_repo_ids)
+
+    for case in dataset["cases"]:
+        assert case["expected_repo_id"] in example_repo_ids
+        assert set(case["acceptable_set"]).issubset(example_repo_ids)

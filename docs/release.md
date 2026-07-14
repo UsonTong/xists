@@ -46,7 +46,7 @@ xists eval inspect \
   --limit 20
 ```
 
-The expected v0.1.0 baseline has no serious mismatches on the committed 100-case evaluation set when run against the current local demo index. Use the extended 112-case file for broader local spot checks.
+The expected v0.2.0 baseline has no serious mismatches on the committed smoke evaluation set when run against the current local demo index. Use the 100-case and extended 112-case files for broader local spot checks.
 
 For a no-network artifact smoke test, run:
 
@@ -59,7 +59,7 @@ python scripts/smoke_check.py
 ```bash
 git status --short
 git add <intentional files>
-git commit -m "chore: prepare v0.1.0 release"
+git commit -m "chore: prepare v0.2.0 release"
 ```
 
 Skip this step if there are no pending changes.
@@ -67,14 +67,14 @@ Skip this step if there are no pending changes.
 ## 6. Tag the release
 
 ```bash
-git tag v0.1.0
+git tag v0.2.0
 ```
 
 To publish to the remote repository:
 
 ```bash
 git push origin main
-git push origin v0.1.0
+git push origin v0.2.0
 ```
 
 ## 7. After release

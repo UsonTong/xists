@@ -186,10 +186,10 @@ def test_search_parser_uses_default_options():
 
     assert args.index == Path("index.json")
     assert args.top_k == 10
-    assert args.format == "json"
+    assert args.format == "text"
 
 
-def test_search_defaults_to_json_output(tmp_path, monkeypatch, capsys):
+def test_search_defaults_to_text_output(tmp_path, monkeypatch, capsys):
     index_file = tmp_path / "index.json"
     index_file.write_text(
         json.dumps(
@@ -233,6 +233,55 @@ def test_search_defaults_to_json_output(tmp_path, monkeypatch, capsys):
         code = search(args)
 
     assert code == 0
+    output = capsys.readouterr().out
+    assert "results: 1" in output
+    assert "repo: fastapi/fastapi" in output
+    assert "confidence: high_confidence" in output
+
+
+def test_search_json_format_prints_machine_readable_results(tmp_path, monkeypatch, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "vectors": [
+                    {
+                        "repo_id": "fastapi/fastapi",
+                        "metadata": {"summary": "FastAPI summary"},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("EMBEDDING_API_KEY", "k")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "bge-m3")
+
+    args = build_parser().parse_args(
+        ["search", "python api framework", "--index", str(index_file), "--format", "json"]
+    )
+
+    with patch(
+        "xists.cli.rank",
+        return_value={
+            "query": "python api framework",
+            "query_intent": {"type": "functional"},
+            "abstained": False,
+            "results": [
+                {
+                    "repo_id": "fastapi/fastapi",
+                    "confidence": "high_confidence",
+                    "score": 0.712345,
+                    "why": ["ranked by semantic similarity"],
+                    "score_breakdown": {"semantic": 0.61, "metadata": 0.102345, "final": 0.712345},
+                }
+            ],
+        },
+    ):
+        code = search(args)
+
+    assert code == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["results"][0]["repo_id"] == "fastapi/fastapi"
     assert payload["results"][0]["confidence"] == "high_confidence"
@@ -247,6 +296,7 @@ def test_search_text_format_prints_readable_results(tmp_path, monkeypatch, capsy
                     {
                         "repo_id": "fastapi/fastapi",
                         "metadata": {
+                            "url": "https://github.com/fastapi/fastapi",
                             "summary": "A modern, fast web framework for building APIs with Python.",
                         },
                     }
@@ -270,6 +320,7 @@ def test_search_text_format_prints_readable_results(tmp_path, monkeypatch, capsy
             "results": [
                 {
                     "repo_id": "fastapi/fastapi",
+                    "url": "https://github.com/fastapi/fastapi",
                     "confidence": "high_confidence",
                     "score": 0.712345,
                     "why": ["ranked by semantic similarity", "metadata overlap"],
@@ -291,7 +342,9 @@ def test_search_text_format_prints_readable_results(tmp_path, monkeypatch, capsy
 
     assert code == 0
     output = capsys.readouterr().out
+    assert "results: 1" in output
     assert "repo: fastapi/fastapi" in output
+    assert "url: https://github.com/fastapi/fastapi" in output
     assert "confidence: high_confidence" in output
     assert "score: 0.712345" in output
     assert "summary: A modern, fast web framework for building APIs with Python." in output

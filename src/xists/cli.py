@@ -535,6 +535,18 @@ def _index_summaries_by_repo_id(index: dict[str, Any]) -> dict[str, str]:
     return summaries
 
 
+def _index_metadata_by_repo_id(index: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    metadata_by_repo: dict[str, dict[str, Any]] = {}
+    for item in index.get("vectors") or []:
+        if not isinstance(item, dict):
+            continue
+        repo_id = item.get("repo_id")
+        metadata = item.get("metadata")
+        if isinstance(repo_id, str) and isinstance(metadata, dict):
+            metadata_by_repo[repo_id] = metadata
+    return metadata_by_repo
+
+
 def _format_search_number(value: Any) -> str:
     if isinstance(value, (int, float)):
         return f"{value:.6f}"
@@ -549,27 +561,29 @@ def _format_search_list(values: Any) -> str:
 
 def _format_search_text(result: dict[str, Any], index: dict[str, Any]) -> str:
     summaries = _index_summaries_by_repo_id(index)
+    metadata_by_repo_id = _index_metadata_by_repo_id(index)
     intent = result.get("query_intent") or {}
     intent_type = intent.get("type") if isinstance(intent, dict) else None
+    search_results = result.get("results") or []
 
     lines = [
         f"query: {result.get('query') or ''}",
         f"intent: {intent_type or 'unknown'}",
         f"abstained: {bool(result.get('abstained'))}",
+        f"results: {len(search_results)}",
     ]
     if result.get("abstained") and result.get("abstain_reason"):
         lines.append(f"abstain_reason: {result['abstain_reason']}")
 
-    search_results = result.get("results") or []
     if not search_results:
-        lines.append("results: none")
         return "\n".join(lines)
 
-    lines.append("results:")
     for position, item in enumerate(search_results, start=1):
         if not isinstance(item, dict):
             continue
         repo_id = str(item.get("repo_id") or "<unknown>")
+        metadata = metadata_by_repo_id.get(repo_id, {})
+        url = item.get("url") or metadata.get("url") or "n/a"
         why = item.get("why") or []
         if isinstance(why, list):
             why_text = "; ".join(str(reason) for reason in why if str(reason).strip())
@@ -579,6 +593,7 @@ def _format_search_text(result: dict[str, Any], index: dict[str, Any]) -> str:
         lines.extend(
             [
                 f"{position}. repo: {repo_id}",
+                f"   url: {url}",
                 f"   confidence: {item.get('confidence') or 'unknown'}",
                 f"   score: {_format_search_number(item.get('score'))}",
                 f"   summary: {summaries.get(repo_id, '(none)')}",
@@ -597,13 +612,17 @@ def _format_search_text(result: dict[str, Any], index: dict[str, Any]) -> str:
                 ("topics", "topic_matches"),
                 ("capabilities", "capability_terms"),
                 ("types", "type_cue_matches"),
+                ("profile", "profile_matches"),
+                ("state", "repository_state"),
             ):
                 value = _format_search_list(diagnostics.get(key))
                 if value:
                     evidence_parts.append(f"{label}={value}")
             for label, key in (
                 ("entity", "entity_match"),
+                ("identity", "identity_match"),
                 ("language", "language_match"),
+                ("language_mismatch", "language_mismatch"),
                 ("phrase", "phrase_match"),
             ):
                 value = diagnostics.get(key)
@@ -1059,9 +1078,9 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--top-k", type=int, default=10, help="Maximum number of results to return")
     search_parser.add_argument(
         "--format",
-        choices=("json", "text"),
-        default="json",
-        help="Output format: json (default) or text",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
     )
     search_parser.set_defaults(func=search)
 

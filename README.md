@@ -78,14 +78,31 @@ xists index build \
 
 # 3. Search!
 xists search "open source firebase alternative" --index demo-index.json
-xists search "open source firebase alternative" --index demo-index.json --format text
+xists search "open source firebase alternative" --index demo-index.json --format json
 ```
 
 ---
 
 ## Search Result Example
 
-When you run a search, `xists` returns ranked repositories as JSON by default. A simplified result looks like this:
+When you run a search, `xists` returns a compact text view by default for terminal review. Add `--format json` for scripts and agent integrations. v0.2.0 keeps ranking simple: exact repo/name/alias matches are pinned first, then semantic similarity is adjusted by a few explainable metadata signals.
+
+Default text output looks like this:
+
+```text
+query: hermes ai agent
+intent: functional
+abstained: False
+results: 1
+1. repo: NousResearch/hermes-agent
+   url: https://github.com/NousResearch/hermes-agent
+   confidence: high_confidence
+   score: 0.680000
+   summary: An agent-oriented project for Hermes models.
+   why: matched metadata terms: agent
+```
+
+The JSON output keeps the same ranking evidence in a machine-readable shape:
 
 ```json
 {
@@ -93,13 +110,18 @@ When you run a search, `xists` returns ranked repositories as JSON by default. A
   "results": [
     {
       "repo_id": "NousResearch/hermes-agent",
-      "score": 0.68
+      "url": "https://github.com/NousResearch/hermes-agent",
+      "score": 0.68,
+      "semantic_score": 0.63,
+      "metadata_score": 0.05,
+      "confidence": "high_confidence",
+      "why": ["matched metadata terms: agent"]
     }
   ]
 }
 ```
 
-`score` is the final ranking score; higher means a stronger match. Use `--format text` for a compact terminal view with repo, confidence, score, why, and summary.
+`score` is the final ranking score; higher means a stronger match. Use `--format json` when another program or agent needs the structured payload.
 
 ---
 
@@ -130,6 +152,6 @@ The report groups results into pragmatic categories:
 - `xists doctor`: Check config and file status; add `--check-endpoints` or `--strict` to probe the embedding service.
 - `xists ingest github`: Fetch repo metadata and generate summaries.
 - `xists index build`: Build or incrementally update the local index.
-- `xists search "query"`: Query the local index; add `--format text` for readable terminal output.
+- `xists search "query"`: Query the local index with readable terminal output by default; add `--format json` for scripts and agents.
 - `xists eval cases` / `xists eval run` / `xists eval inspect`: Validate the dataset and run/review ranking tests.
 - `xists records inspect` / `xists index stats`: Quickly view data without printing huge payloads to your terminal.

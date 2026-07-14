@@ -35,6 +35,13 @@ from xists.profile.llm import (
     generate_llm_profile,
     llm_config_from_env,
 )
+from xists.records import (
+    RECORD_SCHEMA_VERSION,
+    profile_refresh_reason,
+    record_profile,
+    record_repo_id,
+    records_validation_report,
+)
 from xists.search.embed import (
     EMBEDDING_INPUT_VERSION,
     EmbeddingError,
@@ -338,6 +345,7 @@ def _index_write_checkpoint(
     output: Path,
     *,
     index_version: int,
+    record_schema_version: int,
     embedding_model: str,
     embedding_base_url: str,
     embedding_input_version: int,
@@ -350,6 +358,7 @@ def _index_write_checkpoint(
         output,
         {
             "index_version": index_version,
+            "record_schema_version": record_schema_version,
             "embedding_model": embedding_model,
             "embedding_base_url": embedding_base_url,
             "embedding_input_version": embedding_input_version,
@@ -374,6 +383,21 @@ def index_build(args: argparse.Namespace) -> int:
         return 2
 
     records = json.loads(args.records.read_text(encoding="utf-8"))
+    if not isinstance(records, list):
+        print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
+        return 1
+    validation = records_validation_report(records, expected_profile_prompt_version=PROFILE_PROMPT_VERSION)
+    if not validation["ok"]:
+        print(
+            f"Records schema/quality validation failed for {args.records}.\n"
+            f"Expected record schema_version {RECORD_SCHEMA_VERSION}; "
+            f"errors: {validation['errors']}.\n"
+            "Next steps:\n"
+            f"  1. Refresh profiles: xists profile refresh --records {args.records} --output records-v2.json\n"
+            "  2. Rebuild index: xists index build --records records-v2.json --output index.json",
+            file=sys.stderr,
+        )
+        return 1
     batch_size = 64
 
     # Load existing index for fingerprint-aware incremental update (skip with --force).
@@ -392,8 +416,17 @@ def index_build(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             return 1
-        dimension = existing_index.get("dimension")
-        reusable_vectors = {entry.get("repo_id"): entry for entry in existing_index.get("vectors", []) if entry.get("repo_id")}
+        reusable = (
+            existing_index.get("embedding_input_version") == EMBEDDING_INPUT_VERSION
+            and existing_index.get("record_schema_version") == RECORD_SCHEMA_VERSION
+        )
+        if reusable:
+            dimension = existing_index.get("dimension")
+            reusable_vectors = {
+                entry.get("repo_id"): entry
+                for entry in existing_index.get("vectors", [])
+                if entry.get("repo_id")
+            }
 
     # Prepare embeddable records and reuse unchanged vectors.
     embeddable: list[dict[str, Any]] = []
@@ -453,6 +486,7 @@ def index_build(args: argparse.Namespace) -> int:
         _index_write_checkpoint(
             args.output,
             index_version=INDEX_VERSION,
+            record_schema_version=RECORD_SCHEMA_VERSION,
             embedding_model=config.model,
             embedding_base_url=config.base_url,
             embedding_input_version=EMBEDDING_INPUT_VERSION,
@@ -466,6 +500,7 @@ def index_build(args: argparse.Namespace) -> int:
         _index_write_checkpoint(
             args.output,
             index_version=INDEX_VERSION,
+            record_schema_version=RECORD_SCHEMA_VERSION,
             embedding_model=config.model,
             embedding_base_url=config.base_url,
             embedding_input_version=EMBEDDING_INPUT_VERSION,
@@ -479,6 +514,7 @@ def index_build(args: argparse.Namespace) -> int:
         json.dumps(
             {
                 "index": str(args.output),
+                "record_schema_version": RECORD_SCHEMA_VERSION,
                 "embedding_model": config.model,
                 "dimension": dimension,
                 "record_count": len(vectors),
@@ -827,6 +863,7 @@ def index_stats(args: argparse.Namespace) -> int:
     payload = {
         "index": str(args.index),
         "index_version": index.get("index_version"),
+        "record_schema_version": index.get("record_schema_version"),
         "embedding_model": index.get("embedding_model"),
         "embedding_base_url": index.get("embedding_base_url"),
         "embedding_input_version": index.get("embedding_input_version"),
@@ -869,6 +906,7 @@ def records_inspect(args: argparse.Namespace) -> int:
         profile = record.get("llm_profile") or {}
         inspected.append(
             {
+                "schema_version": record.get("schema_version"),
                 "repo_id": record.get("repo_id") or record.get("repo_id_requested"),
                 "name": record.get("name"),
                 "url": record.get("url"),
@@ -878,6 +916,10 @@ def records_inspect(args: argparse.Namespace) -> int:
                 "profile_confidence": profile.get("confidence"),
                 "profile_abstained": bool(profile.get("abstained")),
                 "summary": profile.get("summary"),
+                "aliases": profile.get("aliases") or [],
+                "project_type": profile.get("project_type"),
+                "ecosystem": profile.get("ecosystem") or [],
+                "search_text_preview": (profile.get("search_text") or "")[:160],
             }
         )
 
@@ -891,6 +933,246 @@ def records_inspect(args: argparse.Namespace) -> int:
     }
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
+
+
+def _records_next_steps(records_path: Path) -> list[str]:
+    return [
+        f"Refresh profiles: xists profile refresh --records {records_path} --output records-v2.json",
+        "Rebuild the index: xists index build --records records-v2.json --output index.json",
+    ]
+
+
+def _format_records_validation_text(report: dict[str, Any], records_path: Path) -> str:
+    lines = [
+        f"records: {records_path}",
+        f"schema: expected {report['schema_version']}",
+        f"repos: {report['record_count']}",
+        f"ok: {str(report['ok']).lower()}",
+    ]
+    for label in ("errors", "warnings"):
+        items = report.get(label) or {}
+        lines.append(f"{label}:")
+        if items:
+            for key, value in sorted(items.items()):
+                lines.append(f"  {key}: {value}")
+        else:
+            lines.append("  none")
+    if not report.get("ok"):
+        lines.append("next steps:")
+        for step in _records_next_steps(records_path):
+            lines.append(f"  - {step}")
+    return "\n".join(lines)
+
+
+def records_validate(args: argparse.Namespace) -> int:
+    if not args.records.exists():
+        print(f"Records file not found: {args.records}. Run 'xists ingest github' first.", file=sys.stderr)
+        return 2
+    records = json.loads(args.records.read_text(encoding="utf-8"))
+    if not isinstance(records, list):
+        print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
+        return 1
+
+    report = records_validation_report(records, expected_profile_prompt_version=PROFILE_PROMPT_VERSION)
+    report["records"] = str(args.records)
+    report["next_steps"] = _records_next_steps(args.records) if not report["ok"] else []
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(_format_records_validation_text(report, args.records))
+    return 0 if report["ok"] else 1
+
+
+def profile_refresh(args: argparse.Namespace) -> int:
+    try:
+        config = llm_config_from_env()
+    except LLMNotConfiguredError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    if not args.records.exists():
+        print(f"Records file not found: {args.records}. Run 'xists ingest github' first.", file=sys.stderr)
+        return 2
+
+    records = json.loads(args.records.read_text(encoding="utf-8"))
+    if not isinstance(records, list):
+        print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
+        return 1
+
+    refreshed = 0
+    skipped = 0
+    failed: list[dict[str, Any]] = []
+    output_records: list[dict[str, Any]] = []
+    for record in records:
+        updated = dict(record)
+        repo_id = record_repo_id(updated) or "<unknown>"
+        reason = "force" if args.force else profile_refresh_reason(
+            updated,
+            only_missing_search_text=bool(args.only_missing_search_text),
+            expected_prompt_version=PROFILE_PROMPT_VERSION,
+        )
+        if reason is None:
+            updated["schema_version"] = RECORD_SCHEMA_VERSION
+            output_records.append(updated)
+            skipped += 1
+            continue
+        try:
+            profile = generate_llm_profile(updated, config)
+            attach_llm_profile(updated, profile)
+            updated["schema_version"] = RECORD_SCHEMA_VERSION
+            output_records.append(updated)
+            refreshed += 1
+        except LLMError as error:
+            failed.append({"repo_id": repo_id, "reason": str(error), "refresh_reason": reason})
+            output_records.append(updated)
+
+    write_json(args.output, output_records)
+    summary = {
+        "records": str(args.records),
+        "output": str(args.output),
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "profile_prompt_version": PROFILE_PROMPT_VERSION,
+        "input_count": len(records),
+        "refreshed_count": refreshed,
+        "skipped_count": skipped,
+        "failed_count": len(failed),
+        "failed": failed,
+    }
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(summary, ensure_ascii=False, indent=2))
+    else:
+        print(
+            "\n".join(
+                [
+                    f"records: {args.records}",
+                    f"output: {args.output}",
+                    f"schema: {RECORD_SCHEMA_VERSION}",
+                    f"profile_prompt_version: {PROFILE_PROMPT_VERSION}",
+                    f"refreshed: {refreshed}",
+                    f"skipped: {skipped}",
+                    f"failed: {len(failed)}",
+                ]
+            )
+        )
+    return 1 if failed else 0
+
+
+def _index_verify_report(records: list[dict[str, Any]], index: dict[str, Any]) -> dict[str, Any]:
+    record_validation = records_validation_report(records, expected_profile_prompt_version=PROFILE_PROMPT_VERSION)
+    errors: Counter[str] = Counter()
+    warnings: Counter[str] = Counter()
+    if not record_validation["ok"]:
+        errors["records_validation_failed"] = sum(record_validation["errors"].values())
+    if index.get("index_version") != INDEX_VERSION:
+        errors["index_version_mismatch"] += 1
+    if index.get("record_schema_version") != RECORD_SCHEMA_VERSION:
+        errors["record_schema_version_mismatch"] += 1
+    if index.get("embedding_input_version") != EMBEDDING_INPUT_VERSION:
+        errors["embedding_input_version_mismatch"] += 1
+
+    vectors = [entry for entry in index.get("vectors") or [] if isinstance(entry, dict)]
+    vector_by_id = {entry.get("repo_id"): entry for entry in vectors if entry.get("repo_id")}
+    dimension = index.get("dimension")
+    dimension_mismatches = [
+        entry.get("repo_id")
+        for entry in vectors
+        if isinstance(entry.get("vector"), list) and dimension is not None and len(entry["vector"]) != dimension
+    ]
+    if dimension_mismatches:
+        errors["dimension_mismatch"] = len(dimension_mismatches)
+
+    record_ids = {record_repo_id(record) for record in records if record_repo_id(record)}
+    missing_vectors: list[str] = []
+    stale_vectors: list[str] = []
+    skipped_expected: list[str] = []
+    for record in records:
+        repo_id = record_repo_id(record)
+        if not repo_id:
+            continue
+        fingerprint = embedding_input_fingerprint(record)
+        if fingerprint is None or not embedding_text_from_record(record):
+            skipped_expected.append(repo_id)
+            continue
+        entry = vector_by_id.get(repo_id)
+        if entry is None:
+            missing_vectors.append(repo_id)
+        elif entry.get("embedding_input_fingerprint") != fingerprint:
+            stale_vectors.append(repo_id)
+    extra_vectors = sorted(str(repo_id) for repo_id in vector_by_id if repo_id not in record_ids)
+    if missing_vectors:
+        errors["missing_vectors"] = len(missing_vectors)
+    if stale_vectors:
+        errors["stale_vectors"] = len(stale_vectors)
+    if extra_vectors:
+        warnings["extra_vectors"] = len(extra_vectors)
+
+    ok = not errors
+    return {
+        "ok": ok,
+        "index_version": index.get("index_version"),
+        "expected_index_version": INDEX_VERSION,
+        "record_schema_version": index.get("record_schema_version"),
+        "expected_record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_input_version": index.get("embedding_input_version"),
+        "expected_embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "record_count": len(records),
+        "vector_count": len(vectors),
+        "errors": dict(errors),
+        "warnings": dict(warnings),
+        "missing_vectors": missing_vectors,
+        "stale_vectors": stale_vectors,
+        "extra_vectors": extra_vectors,
+        "skipped_expected": skipped_expected,
+        "records_validation": record_validation,
+        "next_steps": [] if ok else [
+            "Refresh profiles if records are old: xists profile refresh --records records.json --output records-v2.json",
+            "Rebuild the index: xists index build --records records-v2.json --output index.json",
+        ],
+    }
+
+
+def _format_index_verify_text(report: dict[str, Any], records_path: Path, index_path: Path) -> str:
+    lines = [
+        f"records: {records_path}",
+        f"index: {index_path}",
+        f"ok: {str(report['ok']).lower()}",
+        f"records: {report['record_count']}",
+        f"vectors: {report['vector_count']}",
+    ]
+    for label in ("errors", "warnings"):
+        lines.append(f"{label}:")
+        items = report.get(label) or {}
+        if items:
+            for key, value in sorted(items.items()):
+                lines.append(f"  {key}: {value}")
+        else:
+            lines.append("  none")
+    if report.get("next_steps"):
+        lines.append("next steps:")
+        for step in report["next_steps"]:
+            lines.append(f"  - {step}")
+    return "\n".join(lines)
+
+
+def index_verify(args: argparse.Namespace) -> int:
+    if not args.records.exists():
+        print(f"Records file not found: {args.records}. Run 'xists ingest github' first.", file=sys.stderr)
+        return 2
+    if not args.index.exists():
+        print(f"Index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
+        return 2
+    records = json.loads(args.records.read_text(encoding="utf-8"))
+    if not isinstance(records, list):
+        print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
+        return 1
+    index = load_index(args.index)
+    report = _index_verify_report(records, index)
+    report["records"] = str(args.records)
+    report["index"] = str(args.index)
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(_format_index_verify_text(report, args.records, args.index))
+    return 0 if report["ok"] else 1
 
 
 def eval_run(args: argparse.Namespace) -> int:
@@ -1063,6 +1345,16 @@ def build_parser() -> argparse.ArgumentParser:
     index_stats_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to inspect")
     index_stats_parser.add_argument("--limit", type=int, default=10, help="Maximum languages/topics to print")
     index_stats_parser.set_defaults(func=index_stats)
+    index_verify_parser = index_subparsers.add_parser("verify", help="Check that records and index are in sync")
+    index_verify_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to compare")
+    index_verify_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to verify")
+    index_verify_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
+    index_verify_parser.set_defaults(func=index_verify)
 
     records = subparsers.add_parser("records", help="Inspect generated repository records")
     records_subparsers = records.add_subparsers(dest="records_command", required=True)
@@ -1071,6 +1363,34 @@ def build_parser() -> argparse.ArgumentParser:
     records_inspect_parser.add_argument("--repo", default=None, help="Only show records whose owner/repo contains this text")
     records_inspect_parser.add_argument("--limit", type=int, default=20, help="Maximum records to print")
     records_inspect_parser.set_defaults(func=records_inspect)
+    records_validate_parser = records_subparsers.add_parser("validate", help="Validate record schema and profile quality")
+    records_validate_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to validate")
+    records_validate_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
+    records_validate_parser.set_defaults(func=records_validate)
+
+    profile = subparsers.add_parser("profile", help="Refresh LLM profiles for records")
+    profile_subparsers = profile.add_subparsers(dest="profile_command", required=True)
+    profile_refresh_parser = profile_subparsers.add_parser("refresh", help="Regenerate LLM profiles and schema v2 fields")
+    profile_refresh_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to refresh")
+    profile_refresh_parser.add_argument("--output", type=Path, default=Path("records-v2.json"), help="Path to write refreshed records JSON")
+    profile_refresh_parser.add_argument("--force", action="store_true", help="Refresh every record instead of only outdated ones")
+    profile_refresh_parser.add_argument(
+        "--only-missing-search-text",
+        action="store_true",
+        help="Only refresh records whose profile is missing search_text",
+    )
+    profile_refresh_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
+    profile_refresh_parser.set_defaults(func=profile_refresh)
 
     search_parser = subparsers.add_parser("search", help="Search the embedding index")
     search_parser.add_argument("query", help="Natural-language query")

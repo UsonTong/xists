@@ -11,15 +11,21 @@ from xists.cli import (
     eval_run,
     index_build,
     index_stats,
+    index_verify,
     ingest_github,
     load_env_file,
     load_repo_ids,
+    profile_refresh,
     search,
     records_inspect,
+    records_validate,
     version,
 )
 from xists.ingest.github import GitHubAPIError
-from xists.search.embed import EmbeddingError
+from xists.profile.llm import PROFILE_PROMPT_VERSION
+from xists.records import RECORD_SCHEMA_VERSION
+from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingError, embedding_input_fingerprint
+from xists.search.index import INDEX_VERSION
 
 
 def test_load_env_file_loads_values(tmp_path, monkeypatch):
@@ -163,12 +169,37 @@ def test_index_stats_parser_uses_default_path():
     assert args.limit == 10
 
 
+def test_index_verify_parser_uses_default_paths():
+    args = build_parser().parse_args(["index", "verify"])
+
+    assert args.records == Path("records.json")
+    assert args.index == Path("index.json")
+    assert args.format == "text"
+
+
 def test_records_inspect_parser_uses_default_path():
     args = build_parser().parse_args(["records", "inspect"])
 
     assert args.records == Path("records.json")
     assert args.repo is None
     assert args.limit == 20
+
+
+def test_records_validate_parser_uses_default_path():
+    args = build_parser().parse_args(["records", "validate"])
+
+    assert args.records == Path("records.json")
+    assert args.format == "text"
+
+
+def test_profile_refresh_parser_uses_default_paths():
+    args = build_parser().parse_args(["profile", "refresh"])
+
+    assert args.records == Path("records.json")
+    assert args.output == Path("records-v2.json")
+    assert args.force is False
+    assert args.only_missing_search_text is False
+    assert args.format == "text"
 
 
 def test_eval_run_parser_uses_default_paths():
@@ -807,14 +838,166 @@ def test_records_inspect_filters_and_summarizes_records(tmp_path, capsys):
     assert payload["matching_count"] == 1
     assert payload["items"][0]["repo_id"] == "fastapi/fastapi"
     assert payload["items"][0]["summary"] == "fastapi/fastapi summary"
+    assert payload["items"][0]["schema_version"] == RECORD_SCHEMA_VERSION
+    assert payload["items"][0]["aliases"] == ["fastapi"]
+
+
+def test_records_validate_reports_schema_and_profile_gaps(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(
+        json.dumps(
+            [
+                {
+                    "schema_version": 1,
+                    "repo_id": "old/repo",
+                    "name": "repo",
+                    "url": "https://github.com/old/repo",
+                    "github": {"description": "Old repo", "topics": []},
+                    "llm_profile": {"summary": "Old repo summary", "confidence": "low", "abstained": False},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(["records", "validate", "--records", str(records_file), "--format", "json"])
+
+    code = records_validate(args)
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["errors"]["schema_version_mismatch"] == 1
+    assert payload["errors"]["missing_search_text"] == 1
+    assert "records-v2.json" in payload["next_steps"][0]
+
+
+def test_profile_refresh_writes_v2_records(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(
+        json.dumps(
+            [
+                {
+                    "schema_version": 1,
+                    "repo_id": "old/repo",
+                    "name": "repo",
+                    "url": "https://github.com/old/repo",
+                    "github": {"description": "Old repo", "topics": []},
+                    "llm_profile": {"summary": "Old repo summary", "confidence": "low", "abstained": False},
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output_file = tmp_path / "records-v2.json"
+
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+
+    refreshed_profile = {
+        "summary": "Old repo summary",
+        "use_cases": ["replacement"],
+        "capabilities": ["migration"],
+        "not_for": [],
+        "aliases": ["repo"],
+        "project_type": "tool",
+        "ecosystem": ["python"],
+        "replaces": [],
+        "related_projects": [],
+        "search_text": "old repo migration tool",
+        "confidence": "high",
+        "abstained": False,
+    }
+
+    args = build_parser().parse_args(
+        ["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--format", "json"]
+    )
+
+    with patch("xists.cli.generate_llm_profile", return_value=refreshed_profile):
+        code = profile_refresh(args)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["refreshed_count"] == 1
+    refreshed = json.loads(output_file.read_text(encoding="utf-8"))
+    assert refreshed[0]["schema_version"] == RECORD_SCHEMA_VERSION
+    assert refreshed[0]["llm_profile"]["search_text"] == "old repo migration tool"
+    assert refreshed[0]["github"] == {"description": "Old repo", "topics": []}
+    assert refreshed[0]["url"] == "https://github.com/old/repo"
+
+
+def test_index_verify_reports_stale_and_missing_vectors(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    record_a = _make_record("react/react")
+    record_b = _make_record("fastapi/fastapi")
+    records_file.write_text(json.dumps([record_a, record_b]), encoding="utf-8")
+
+    index_file = tmp_path / "index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "index_version": INDEX_VERSION,
+                "record_schema_version": RECORD_SCHEMA_VERSION,
+                "embedding_model": "BAAI/bge-m3",
+                "embedding_input_version": EMBEDDING_INPUT_VERSION,
+                "dimension": 2,
+                "vectors": [
+                    {
+                        "repo_id": "react/react",
+                        "embedding_input_fingerprint": "stale",
+                        "metadata": {"summary": "React summary"},
+                        "vector": [1.0, 0.0],
+                    },
+                    {
+                        "repo_id": "extra/repo",
+                        "embedding_input_fingerprint": "extra",
+                        "metadata": {},
+                        "vector": [0.0, 1.0],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(
+        ["index", "verify", "--records", str(records_file), "--index", str(index_file), "--format", "json"]
+    )
+
+    code = index_verify(args)
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["errors"]["stale_vectors"] == 1
+    assert payload["errors"]["missing_vectors"] == 1
+    assert payload["warnings"]["extra_vectors"] == 1
 
 
 def _make_record(repo_id: str) -> dict:
+    name = repo_id.split("/")[-1]
     return {
+        "schema_version": RECORD_SCHEMA_VERSION,
         "repo_id": repo_id,
+        "name": name,
         "url": f"https://github.com/{repo_id}",
         "github": {"description": f"{repo_id} description", "topics": [], "language": "Python"},
-        "llm_profile": {"summary": f"{repo_id} summary", "confidence": "high", "abstained": False},
+        "llm_profile": {
+            "summary": f"{repo_id} summary",
+            "use_cases": [f"{repo_id} use case"],
+            "capabilities": [f"{repo_id} capability"],
+            "not_for": [],
+            "aliases": [name],
+            "project_type": "tool",
+            "ecosystem": ["python"],
+            "replaces": [],
+            "related_projects": [],
+            "search_text": f"{repo_id} semantic search text",
+            "confidence": "high",
+            "abstained": False,
+            "prompt_version": PROFILE_PROMPT_VERSION,
+        },
     }
 
 
@@ -1035,7 +1218,7 @@ def test_ingest_github_skips_existing_records(tmp_path, monkeypatch):
     assert report["llm"] == {
         "provider": "openai_compatible",
         "model": "m",
-        "prompt_version": 1,
+        "prompt_version": PROFILE_PROMPT_VERSION,
     }
     serialized_report = json.dumps(report)
     assert "key" not in serialized_report
@@ -1073,10 +1256,7 @@ def test_index_build_rebuilds_legacy_vectors_without_fingerprints(tmp_path, monk
     monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 
     records_file = tmp_path / "records.json"
-    records_file.write_text(json.dumps([
-        {"repo_id": "a/b", "github": {"description": "A", "topics": []}, "llm_profile": {"summary": "A summary", "search_phrases": []}},
-        {"repo_id": "c/d", "github": {"description": "C", "topics": []}, "llm_profile": {"summary": "C summary", "search_phrases": []}},
-    ]), encoding="utf-8")
+    records_file.write_text(json.dumps([_make_record("a/b"), _make_record("c/d")]), encoding="utf-8")
 
     output_file = tmp_path / "index.json"
     output_file.write_text(json.dumps({
@@ -1116,8 +1296,10 @@ def test_index_build_refreshes_metadata_when_reusing_vector(tmp_path, monkeypatc
     monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 
     record = {
+        "schema_version": RECORD_SCHEMA_VERSION,
         "repo_id": "vuejs/core",
         "name": "core",
+        "url": "https://github.com/vuejs/core",
         "github": {
             "description": "Progressive JavaScript framework.",
             "topics": ["frontend", "vue"],
@@ -1128,18 +1310,27 @@ def test_index_build_refreshes_metadata_when_reusing_vector(tmp_path, monkeypatc
             "use_cases": ["building web interfaces"],
             "capabilities": ["reactive components"],
             "search_phrases": ["progressive framework for building modern web interfaces"],
+            "aliases": ["vue"],
+            "project_type": "framework",
+            "ecosystem": ["javascript", "web"],
+            "replaces": [],
+            "related_projects": [],
+            "search_text": "progressive javascript framework for building modern web interfaces",
+            "confidence": "high",
+            "abstained": False,
         },
     }
-    from xists.search.embed import embedding_input_fingerprint
 
     records_file = tmp_path / "records.json"
     records_file.write_text(json.dumps([record]), encoding="utf-8")
 
     output_file = tmp_path / "index.json"
     output_file.write_text(json.dumps({
-        "index_version": 1,
+        "index_version": INDEX_VERSION,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
         "embedding_model": "BAAI/bge-m3",
         "embedding_base_url": "http://localhost:6597/v1",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
         "dimension": 2,
         "built_at": "2026-01-01T00:00:00+00:00",
         "record_count": 1,
@@ -1180,9 +1371,7 @@ def test_index_build_rejects_model_mismatch(tmp_path, monkeypatch):
     monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 
     records_file = tmp_path / "records.json"
-    records_file.write_text(json.dumps([
-        {"repo_id": "a/b", "github": {"description": "A", "topics": []}, "llm_profile": {"summary": "A", "search_phrases": []}},
-    ]), encoding="utf-8")
+    records_file.write_text(json.dumps([_make_record("a/b")]), encoding="utf-8")
 
     output_file = tmp_path / "index.json"
     output_file.write_text(json.dumps({
@@ -1322,9 +1511,7 @@ def test_index_build_force_rebuilds_from_scratch(tmp_path, monkeypatch):
     monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 
     records_file = tmp_path / "records.json"
-    records_file.write_text(json.dumps([
-        {"repo_id": "a/b", "github": {"description": "A", "topics": []}, "llm_profile": {"summary": "A summary", "search_phrases": []}},
-    ]), encoding="utf-8")
+    records_file.write_text(json.dumps([_make_record("a/b")]), encoding="utf-8")
 
     output_file = tmp_path / "index.json"
     output_file.write_text(json.dumps({
@@ -1361,11 +1548,7 @@ def test_index_build_checkpoint_writes_after_each_batch(tmp_path, monkeypatch):
 
     records = []
     for i in range(3):
-        records.append({
-            "repo_id": f"r{i}/repo",
-            "github": {"description": f"Repo {i}", "topics": []},
-            "llm_profile": {"summary": f"Summary {i}", "search_phrases": []},
-        })
+        records.append(_make_record(f"r{i}/repo"))
 
     records_file = tmp_path / "records.json"
     records_file.write_text(json.dumps(records), encoding="utf-8")
@@ -1396,11 +1579,7 @@ def test_index_build_checkpoint_saves_partial_on_crash(tmp_path, monkeypatch):
     # Use 65 records to force 2 batches (batch_size=64).
     records = []
     for i in range(65):
-        records.append({
-            "repo_id": f"r{i}/repo",
-            "github": {"description": f"Repo {i}", "topics": []},
-            "llm_profile": {"summary": f"Summary {i}", "search_phrases": []},
-        })
+        records.append(_make_record(f"r{i}/repo"))
 
     records_file = tmp_path / "records.json"
     records_file.write_text(json.dumps(records), encoding="utf-8")

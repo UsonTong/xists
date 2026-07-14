@@ -515,7 +515,7 @@ xists index stats --index demo-index.json
 xists eval inspect --report demo-eval-report.json --status serious_mismatch
 ```
 
-Release readiness expectations for `0.1.0`:
+Release readiness expectations for `0.2.0`:
 
 - package version and `xists.__version__` are aligned
 - README remains the short project entry point unless intentionally changed

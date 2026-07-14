@@ -263,50 +263,64 @@ The output includes model, dimension, record/vector counts, skipped count, missi
 
 ```bash
 xists search "frontend UI library"
-xists search "frontend UI library" --format text
+xists search "frontend UI library" --format json
 ```
 
-Returns ranked results with confidence tiers. JSON is the default output and is
-intended for scripts:
+Returns ranked results with confidence tiers. Text is the default output for terminal review; `--format json` is intended for scripts and agent integrations. In v0.2.0 search is deliberately simple and explainable: exact repository/name/alias matches are pinned first, then remaining results are ranked by cosine similarity plus a small metadata adjustment from language, topics/profile overlap, repository state, and popularity.
+
+Default text output keeps the fields people usually inspect first:
+
+```text
+query: frontend UI library
+intent: functional
+abstained: False
+results: 1
+1. repo: react/react
+   url: https://github.com/react/react
+   confidence: high_confidence
+   score: 0.680000
+   summary: A JavaScript library for building user interfaces.
+   why: matched metadata terms: frontend, ui; matched topics: frontend, ui
+```
+
+JSON output exposes the same ranking data for automation:
 
 ```json
 {
   "query": "frontend UI library",
+  "query_intent": {"type": "functional"},
   "abstained": false,
   "results": [
     {
       "repo_id": "react/react",
+      "url": "https://github.com/react/react",
       "score": 0.68,
       "semantic_score": 0.62,
       "metadata_score": 0.06,
       "score_breakdown": {"semantic": 0.62, "metadata": 0.06, "final": 0.68},
-      "matched_terms": ["frontend"],
+      "matched_terms": ["frontend", "ui"],
+      "diagnostics": {
+        "identity_match": null,
+        "language_match": null,
+        "topic_matches": ["frontend", "ui"],
+        "profile_matches": ["frontend", "ui"]
+      },
       "confidence": "high_confidence",
-      "why": ["matched topic: frontend", "matched phrase: UI library"]
-    },
-    {
-      "repo_id": "vuejs/core",
-      "score": 0.61,
-      "semantic_score": 0.58,
-      "metadata_score": 0.03,
-      "confidence": "high_confidence"
+      "why": ["matched metadata terms: frontend, ui", "matched topics: frontend, ui"]
     }
   ],
   "considered": 8
 }
 ```
 
-`score` is the final ranking score. `semantic_score` is the cosine similarity
-from the embedding search, and `metadata_score` is the bounded reranking bonus
-from repository names, descriptions, topics, and generated profile phrases.
-Exact repository/name queries receive stronger metadata evidence than ordinary
-substring overlap.
+`score` is the final ranking score. `semantic_score` is the embedding cosine similarity, and `metadata_score` is a lightweight, bounded adjustment. Exact repository/name/alias queries are pinned to the top so entity lookup works even when the embedding score is not the highest.
 
 `query_intent` describes the detected query shape. Each result includes:
 
 - `score_breakdown`: rounded semantic, metadata, and final scores for easier debugging
 - `matched_terms`: non-generic query terms found in the candidate metadata/profile
-- `why`: short human-readable metadata/topic/name/phrase signals that affected the rank
+- `diagnostics`: compact structured evidence used by CLI/eval reports
+- `why`: short human-readable reasons from identity/language/topic/profile/state signals
 
 #### Confidence tiers
 
@@ -316,23 +330,7 @@ substring overlap.
 | `exploratory` | ≥ 0.35 | Worth investigating |
 | `abstain` | < 0.35 | Too weak, not shown |
 
-Weak semantic matches stay hidden unless metadata provides strong evidence,
-such as a repository/name match or a unique exact generated profile phrase.
-
-For terminal review, use `--format text`. It keeps the same ranking data but
-prints each result with the fields people usually inspect first:
-
-```text
-query: frontend UI library
-intent: functional
-abstained: False
-results:
-1. repo: react/react
-   confidence: high_confidence
-   score: 0.680000
-   summary: A JavaScript library for building user interfaces.
-   why: matched topic: frontend; matched phrase: UI library
-```
+Weak semantic matches stay hidden unless they are exact identity matches; metadata should help close calls, not replace semantic relevance.
 
 #### Options
 
@@ -340,13 +338,15 @@ results:
 |------|---------|-------------|
 | `--index` | `index.json` | Index file to search |
 | `--top-k` | `10` | Maximum results to return |
-| `--format` | `json` | Output format: `json` for compatible machine-readable output, or `text` for terminal review |
+| `--format` | `text` | Output format: `text` for terminal review, or `json` for scripts and agents |
 
 ### Step 4: Evaluate retrieval quality
 
 ```bash
 xists eval cases --cases examples/eval-cases.json
 xists eval cases --cases examples/eval-cases-extended.json
+xists eval cases --cases examples/eval-cases-smoke.json
+xists eval run --cases examples/eval-cases-smoke.json --index index.json --output eval-smoke-report.json
 xists eval run --cases examples/eval-cases.json --index index.json --output eval-report.json
 ```
 

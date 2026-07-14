@@ -78,14 +78,31 @@ xists index build \
 
 # 3. 开始搜索！
 xists search "open source firebase alternative" --index demo-index.json
-xists search "open source firebase alternative" --index demo-index.json --format text
+xists search "open source firebase alternative" --index demo-index.json --format json
 ```
 
 ---
 
 ## 检索结果示例
 
-每次搜索，`xists` 默认都会以 JSON 返回排序后的仓库。简化后的结果类似这样：
+每次搜索，`xists` 默认都会输出适合终端阅读的紧凑文本。脚本和 agent 集成可以加 `--format json` 获取结构化结果。v0.2.0 的排序刻意保持简单：先固定精确 repo/name/alias 命中，再用少量可解释 metadata 信号调整语义相似度。
+
+默认文本输出类似这样：
+
+```text
+query: hermes ai agent
+intent: functional
+abstained: False
+results: 1
+1. repo: NousResearch/hermes-agent
+   url: https://github.com/NousResearch/hermes-agent
+   confidence: high_confidence
+   score: 0.680000
+   summary: An agent-oriented project for Hermes models.
+   why: matched metadata terms: agent
+```
+
+JSON 输出保留相同的排序证据，适合机器读取：
 
 ```json
 {
@@ -93,13 +110,18 @@ xists search "open source firebase alternative" --index demo-index.json --format
   "results": [
     {
       "repo_id": "NousResearch/hermes-agent",
-      "score": 0.68
+      "url": "https://github.com/NousResearch/hermes-agent",
+      "score": 0.68,
+      "semantic_score": 0.63,
+      "metadata_score": 0.05,
+      "confidence": "high_confidence",
+      "why": ["matched metadata terms: agent"]
     }
   ]
 }
 ```
 
-`score` 是最终排序分数，越高代表匹配越强。使用 `--format text` 可获得更适合终端阅读的输出，包含 repo、confidence、score、why 和 summary。
+`score` 是最终排序分数，越高代表匹配越强。其他程序或 agent 需要结构化 payload 时使用 `--format json`。
 
 ---
 
@@ -131,6 +153,6 @@ xists eval inspect --report demo-eval-report.json --status serious_mismatch
 - `xists doctor`：检查本地配置和文件状态；加 `--check-endpoints` 或 `--strict` 可探测 embedding 服务。
 - `xists ingest github`：拉取仓库信息并生成短语摘要。
 - `xists index build`：构建或增量更新本地向量索引。
-- `xists search "query"`：执行搜索；加 `--format text` 可输出更易读的终端格式。
+- `xists search "query"`：执行搜索，默认输出适合终端阅读；加 `--format json` 可输出给脚本和 agent 使用的结构化结果。
 - `xists eval cases` / `xists eval run` / `xists eval inspect`：校验评测集并运行、检查检索评测。
 - `xists records inspect` / `xists index stats`：快速查看数据状态，避免终端被长 JSON 刷屏。

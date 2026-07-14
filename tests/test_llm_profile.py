@@ -87,6 +87,9 @@ def test_build_profile_messages_has_system_and_user():
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"
     assert "react/react" in messages[1]["content"]
+    assert "search_text" in messages[0]["content"]
+    assert "aliases" in messages[0]["content"]
+    assert "project_type" in messages[0]["content"]
 
 
 def test_parse_llm_profile_response_normalizes():
@@ -96,6 +99,12 @@ def test_parse_llm_profile_response_normalizes():
             "use_cases": ["building UIs", "", "  components  "],
             "capabilities": "not a list",
             "not_for": ["backend services"],
+            "aliases": ["reactjs", ""],
+            "project_type": " library ",
+            "ecosystem": ["javascript", "web"],
+            "replaces": [],
+            "related_projects": ["preactjs/preact"],
+            "search_text": " frontend UI library ",
             "search_phrases": ["frontend library"],
             "confidence": "HIGH",
             "abstained": False,
@@ -107,8 +116,25 @@ def test_parse_llm_profile_response_normalizes():
     assert profile["summary"] == "React is a UI library."
     assert profile["use_cases"] == ["building UIs", "components"]
     assert profile["capabilities"] == []
+    assert profile["aliases"] == ["reactjs"]
+    assert profile["project_type"] == "library"
+    assert profile["ecosystem"] == ["javascript", "web"]
+    assert profile["related_projects"] == ["preactjs/preact"]
+    assert profile["search_text"] == "frontend UI library"
     assert profile["confidence"] == "high"
     assert profile["abstained"] is False
+
+
+def test_parse_llm_profile_response_tolerates_missing_v2_fields():
+    profile = parse_llm_profile_response(json.dumps({"summary": "x", "confidence": "high"}))
+
+    assert profile["summary"] == "x"
+    assert profile["aliases"] == []
+    assert profile["project_type"] is None
+    assert profile["ecosystem"] == []
+    assert profile["replaces"] == []
+    assert profile["related_projects"] == []
+    assert profile["search_text"] is None
 
 
 def test_parse_llm_profile_response_strips_code_fence():
@@ -143,7 +169,12 @@ def test_generate_llm_profile_adds_provenance():
                 "use_cases": ["building UIs"],
                 "capabilities": ["declarative rendering"],
                 "not_for": ["backend services"],
-                "search_phrases": ["frontend library"],
+                "aliases": ["react"],
+                "project_type": "library",
+                "ecosystem": ["javascript", "web"],
+                "replaces": [],
+                "related_projects": [],
+                "search_text": "javascript frontend UI library",
                 "confidence": "high",
                 "abstained": False,
             }
@@ -166,6 +197,7 @@ def test_generate_llm_profile_adds_provenance():
         "structure_signals",
     ]
     assert profile["summary"] == "React is a UI library."
+    assert profile["search_text"] == "javascript frontend UI library"
 
 
 def test_generate_llm_profile_records_token_usage():

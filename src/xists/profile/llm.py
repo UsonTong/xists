@@ -19,9 +19,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from xists.records import normalize_llm_profile
+
 USER_AGENT = "xists-llm-profile"
 CONFIDENCE_VALUES = {"high", "medium", "low"}
-PROFILE_PROMPT_VERSION = 1
+PROFILE_PROMPT_VERSION = 2
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
 PROFILE_SYSTEM_PROMPT = (
@@ -37,11 +39,20 @@ PROFILE_SYSTEM_PROMPT = (
     "\"abstained\" to true, set \"confidence\" to \"low\", and keep the other "
     "fields empty.\n"
     "- Do not copy marketing language. Be concrete and neutral.\n"
-    "- search_phrases are natural-language queries a developer might type to "
-    "look for this kind of tool.\n"
+    "- aliases are alternate names or canonical short forms the project is "
+    "known by.\n"
+    "- project_type should be one of: library, tool, framework, platform, "
+    "runtime, service, app, dataset, collection, tutorial, documentation, "
+    "plugin, integration, or other.\n"
+    "- ecosystem should list the most relevant languages, runtimes, or "
+    "technical areas, such as python, rust, web, llm, devtools, or agents.\n"
+    "- replaces should name projects this one clearly replaces or supersedes.\n"
+    "- related_projects should name adjacent projects in the same space.\n"
+    "- search_text should be a compact, retrieval-friendly string for embedding "
+    "search and should include the phrases a developer might type.\n"
     "Respond with a single JSON object and nothing else, using exactly these "
-    "keys: summary, use_cases, capabilities, not_for, search_phrases, "
-    "confidence, abstained."
+    "keys: summary, use_cases, capabilities, not_for, aliases, project_type, "
+    "ecosystem, replaces, related_projects, search_text, confidence, abstained."
 )
 
 
@@ -179,18 +190,9 @@ def parse_llm_profile_response(content: str) -> dict[str, Any]:
     if confidence not in CONFIDENCE_VALUES:
         confidence = "low"
 
-    summary = data.get("summary")
-    summary = summary.strip() if isinstance(summary, str) and summary.strip() else None
-
-    return {
-        "summary": summary,
-        "use_cases": _coerce_str_list(data.get("use_cases")),
-        "capabilities": _coerce_str_list(data.get("capabilities")),
-        "not_for": _coerce_str_list(data.get("not_for")),
-        "search_phrases": _coerce_str_list(data.get("search_phrases")),
-        "confidence": confidence,
-        "abstained": bool(data.get("abstained", False)),
-    }
+    profile = normalize_llm_profile(data)
+    profile["confidence"] = confidence
+    return profile
 
 
 def call_llm(config: LLMConfig, messages: list[dict[str, str]], *, timeout: int = 60) -> LLMResponse:

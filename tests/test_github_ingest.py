@@ -3,6 +3,7 @@ import threading
 import pytest
 
 from xists import __version__
+from xists.records import RECORD_SCHEMA_VERSION
 from xists.ingest.github import (
     GITHUB_API_VERSION,
     GitHubSnapshot,
@@ -181,7 +182,7 @@ def test_build_record_creates_traceable_record():
 
     record = build_record(snapshot)
 
-    assert record["schema_version"] == 1
+    assert record["schema_version"] == RECORD_SCHEMA_VERSION
     assert record["xists_version"] == __version__
     assert record["github_api_version"] == GITHUB_API_VERSION
     assert record["repo_id_requested"] == "facebook/react"

@@ -14,6 +14,7 @@ from xists.search.embed import (
     embedding_text_from_record,
 )
 from xists.search.index import build_index
+from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.query import (
     IndexMismatchError,
     _query_intent,
@@ -28,6 +29,7 @@ CONFIG = EmbeddingConfig(api_key="k", base_url="http://localhost/v1", model="bge
 
 def make_record(repo_id="react/react"):
     return {
+        "schema_version": RECORD_SCHEMA_VERSION,
         "repo_id": repo_id,
         "name": "react",
         "url": "https://github.com/react/react",
@@ -43,12 +45,27 @@ def make_record(repo_id="react/react"):
             "not_for": ["backend-only services"],
             "search_phrases": ["frontend UI library"],
             "aliases": ["reactjs"],
+            "project_type": "library",
+            "ecosystem": ["javascript", "web"],
+            "replaces": [],
+            "related_projects": ["preact/preact"],
+            "search_text": "react javascript ui library frontend ui library web user interfaces",
+            "confidence": "high",
+            "abstained": False,
+            "prompt_version": 2,
         },
     }
 
 
 def make_index(vectors):
-    return {"embedding_model": "bge-m3", "dimension": 2, "vectors": vectors}
+    return {
+        "index_version": 1,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "bge-m3",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "dimension": 2,
+        "vectors": vectors,
+    }
 
 
 def vector_for_cosine(score):
@@ -73,10 +90,20 @@ def test_embedding_config_from_env_builds(monkeypatch):
 
 def test_embedding_text_excludes_not_for():
     text = embedding_text_from_record(make_record())
+    assert text.splitlines()[1].startswith("react javascript ui library")
     assert "JavaScript UI library" in text
     assert "frontend UI library" in text
     assert "JavaScript" in text
     assert "backend-only services" not in text
+
+
+def test_embedding_text_prioritizes_search_text():
+    record = make_record()
+    record["llm_profile"]["search_text"] = "dedicated embedding text for semantic search"
+
+    text = embedding_text_from_record(record)
+
+    assert text.splitlines()[1] == "dedicated embedding text for semantic search"
 
 
 def test_embedding_text_empty_when_no_signal():
@@ -136,10 +163,14 @@ def test_build_index_includes_search_metadata(monkeypatch):
     assert index["dimension"] == 3
     assert index["record_count"] == 2
     metadata = index["vectors"][0]["metadata"]
+    assert index["record_schema_version"] == RECORD_SCHEMA_VERSION
     assert metadata["language"] == "JavaScript"
     assert metadata["topics"] == ["frontend", "ui"]
     assert metadata["url"] == "https://github.com/react/react"
     assert metadata["aliases"] == ["reactjs"]
+    assert metadata["project_type"] == "library"
+    assert metadata["ecosystem"] == ["javascript", "web"]
+    assert metadata["search_text"].startswith("react javascript")
     assert index["vectors"][0]["embedding_input_fingerprint"] == embedding_input_fingerprint(records[0])
 
 
@@ -352,7 +383,13 @@ def test_rank_abstains_on_empty_index():
 
 
 def test_rank_rejects_model_mismatch():
-    index = {"embedding_model": "other-model", "dimension": 2, "vectors": []}
+    index = {
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "other-model",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "dimension": 2,
+        "vectors": [],
+    }
     with pytest.raises(IndexMismatchError):
         rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
 

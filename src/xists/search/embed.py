@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 USER_AGENT = "xists-embedding"
-EMBEDDING_INPUT_VERSION = 2
+EMBEDDING_INPUT_VERSION = 3
 
 
 class EmbeddingError(RuntimeError):
@@ -93,6 +93,9 @@ def embedding_text_from_record(record: dict[str, Any]) -> str:
     # Content parts carry the actual semantic signal. The repository name alone
     # is not enough to embed, so a record with no content here is skipped.
     content: list[str] = []
+    search_text = profile.get("search_text")
+    if isinstance(search_text, str) and search_text.strip():
+        content.append(search_text.strip())
     if github.get("description"):
         content.append(str(github["description"]))
     topics = github.get("topics") or []

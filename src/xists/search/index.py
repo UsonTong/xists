@@ -21,6 +21,7 @@ from xists.search.embed import (
     embedding_input_fingerprint,
     embedding_text_from_record,
 )
+from xists.records import RECORD_SCHEMA_VERSION
 
 INDEX_VERSION = 1
 
@@ -35,6 +36,7 @@ def entry_metadata(record: dict[str, Any]) -> dict[str, Any]:
     github = record.get("github") or {}
     profile = record.get("llm_profile") or {}
     return {
+        "schema_version": record.get("schema_version"),
         "name": record.get("name"),
         "url": record.get("url"),
         "aliases": _string_list(profile.get("aliases")),
@@ -49,6 +51,11 @@ def entry_metadata(record: dict[str, Any]) -> dict[str, Any]:
         "summary": profile.get("summary"),
         "use_cases": _string_list(profile.get("use_cases")),
         "capabilities": _string_list(profile.get("capabilities")),
+        "project_type": profile.get("project_type"),
+        "ecosystem": _string_list(profile.get("ecosystem")),
+        "replaces": _string_list(profile.get("replaces")),
+        "related_projects": _string_list(profile.get("related_projects")),
+        "search_text": profile.get("search_text"),
         "search_phrases": _string_list(profile.get("search_phrases")),
     }
 
@@ -109,6 +116,7 @@ def build_index(
 
     return {
         "index_version": INDEX_VERSION,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
         "embedding_model": config.model,
         "embedding_base_url": config.base_url,
         "embedding_input_version": EMBEDDING_INPUT_VERSION,

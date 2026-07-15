@@ -18,12 +18,12 @@ Records are used as the source data for future search, ranking, LLM profiling, a
 Each record includes:
 
 ```json
-"schema_version": 1
+"schema_version": 2
 ```
 
 `schema_version` is the integer version of the xists record schema.
 
-Current version: `1`.
+Current version: `2`.
 
 Increase this number only when the record structure changes in a way that older xists code may not understand correctly.
 
@@ -74,11 +74,11 @@ This field is useful for:
 
 ## Top-level fields
 
-A version 1 record currently has this shape:
+A version 2 record currently has this shape:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "xists_version": "0.0.0",
   "github_api_version": "2022-11-28",
   "repo_id_requested": "facebook/react",
@@ -311,13 +311,19 @@ Example:
     "use_cases": ["Building single-page web applications"],
     "capabilities": ["Declarative UI rendering", "Component-based architecture"],
     "not_for": ["Applications needing a full backend framework out of the box"],
+    "aliases": ["react", "reactjs"],
+    "project_type": "library",
+    "ecosystem": ["javascript", "web"],
+    "replaces": [],
+    "related_projects": ["preactjs/preact"],
+    "search_text": "JavaScript UI library for building component-based web interfaces, frontend framework, React UI components",
     "search_phrases": ["JavaScript UI library", "declarative frontend framework"],
     "confidence": "high",
     "abstained": false,
     "provider": "openai_compatible",
     "model": "gpt-4o-mini",
     "generated_at": "2026-06-19T14:36:25+00:00",
-    "prompt_version": 1,
+    "prompt_version": 2,
     "prompt_hash": "...",
     "duration_seconds": 1.234,
     "token_usage": {
@@ -340,8 +346,23 @@ Example:
 The LLM only produces these fields, based strictly on the provided evidence:
 
 - `summary`: one short factual description, or `null` if evidence is too thin.
-- `use_cases`, `capabilities`, `not_for`, `search_phrases`: arrays; empty when
-  there is no supporting evidence.
+- `use_cases`, `capabilities`, `not_for`: arrays; empty when there is no
+  supporting evidence.
+- `aliases`: alternate names, spelling variants, or canonical short forms that
+  help exact identity search.
+- `project_type`: a coarse project category such as `library`, `tool`,
+  `framework`, `platform`, `runtime`, `service`, `app`, `dataset`,
+  `collection`, `tutorial`, `documentation`, `plugin`, `integration`, or
+  `other`.
+- `ecosystem`: relevant languages, runtimes, or technical areas, such as
+  `python`, `rust`, `web`, `llm`, `devtools`, or `agents`.
+- `replaces`: projects this repository clearly replaces or supersedes.
+- `related_projects`: adjacent projects in the same space.
+- `search_text`: compact retrieval text for embeddings. It should include
+  natural phrases developers might type, and may be more redundant than the
+  human-facing summary.
+- `search_phrases`: legacy-compatible retrieval phrases; empty when there is no
+  supporting evidence.
 - `confidence`: one of `high`, `medium`, `low`.
 - `abstained`: `true` when evidence is insufficient to describe the repository.
   When abstaining, the other content fields stay empty and `confidence` is `low`.
@@ -375,13 +396,23 @@ fingerprint of the exact embedding input text used to generate the vector:
 ```json
 {
   "index_version": 1,
+  "record_schema_version": 2,
   "embedding_model": "BAAI/bge-m3",
-  "embedding_input_version": 1,
+  "embedding_input_version": 3,
   "dimension": 1024,
+  "record_count": 1,
+  "skipped": [],
   "vectors": [
     {
       "repo_id": "react/react",
       "embedding_input_fingerprint": "...",
+      "metadata": {
+        "summary": "React is a JavaScript library for building user interfaces...",
+        "aliases": ["react", "reactjs"],
+        "project_type": "library",
+        "ecosystem": ["javascript", "web"],
+        "search_text": "JavaScript UI library for building component-based web interfaces..."
+      },
       "vector": [0.01, -0.02]
     }
   ]

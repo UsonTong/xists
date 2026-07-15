@@ -7,6 +7,7 @@ from typing import Any
 
 RECORD_SCHEMA_VERSION = 2
 CONFIDENCE_VALUES = {"high", "medium", "low"}
+MIN_SEARCH_TEXT_CHARS = 24
 
 
 def _clean_str(value: Any) -> str | None:
@@ -117,12 +118,25 @@ def records_validation_report(
     low_confidence: list[str] = []
     abstained: list[str] = []
     prompt_versions: Counter[int | None] = Counter()
+    archived = 0
+    disabled = 0
+    missing_readme = 0
+    short_search_text: list[str] = []
+    valid_records = 0
 
     for record in records:
+        record_has_error = False
         repo_id = record_repo_id(record)
         schema_versions[record_schema_version(record)] += 1
         profile = record_profile(record)
         prompt_versions[profile.get("prompt_version") if isinstance(profile.get("prompt_version"), int) else None] += 1
+        github = record.get("github") if isinstance(record.get("github"), dict) else {}
+        if github.get("archived") is True:
+            archived += 1
+        if github.get("disabled") is True:
+            disabled += 1
+        if not record.get("readme"):
+            missing_readme += 1
         if repo_id is None:
             issues["errors"]["missing_repo_id"] += 1
             continue
@@ -134,20 +148,30 @@ def records_validation_report(
 
         if record_schema_version(record) != expected_schema_version:
             issues["errors"]["schema_version_mismatch"] += 1
+            record_has_error = True
 
         if not record.get("url"):
             issues["errors"]["missing_url"] += 1
+            record_has_error = True
         if not record.get("name"):
             issues["errors"]["missing_name"] += 1
+            record_has_error = True
 
         if not record.get("llm_profile"):
             issues["errors"]["missing_llm_profile"] += 1
+            record_has_error = True
             continue
 
         if profile.get("summary") is None:
             issues["errors"]["missing_summary"] += 1
-        if not profile.get("search_text"):
+            record_has_error = True
+        search_text = profile.get("search_text")
+        if not search_text:
             issues["errors"]["missing_search_text"] += 1
+            record_has_error = True
+        elif len(search_text) < MIN_SEARCH_TEXT_CHARS:
+            issues["warnings"]["search_text_too_short"] += 1
+            short_search_text.append(repo_id)
         if not profile.get("aliases"):
             issues["warnings"]["missing_aliases"] += 1
         if profile.get("project_type") is None:
@@ -158,21 +182,41 @@ def records_validation_report(
             issues["warnings"]["profile_prompt_version_mismatch"] += 1
         if profile.get("confidence") == "low":
             low_confidence.append(repo_id)
+            issues["warnings"]["low_confidence_profile"] += 1
         if profile.get("abstained"):
             abstained.append(repo_id)
+            issues["warnings"]["profile_abstained"] += 1
+        if not record_has_error:
+            valid_records += 1
 
     if duplicates:
         issues["errors"]["duplicate_repo_id"] = len(duplicates)
+        valid_records = max(valid_records - len(duplicates), 0)
+
+    quality = {
+        "ok": valid_records,
+        "missing_search_text": issues["errors"].get("missing_search_text", 0),
+        "missing_aliases": issues["warnings"].get("missing_aliases", 0),
+        "search_text_too_short": issues["warnings"].get("search_text_too_short", 0),
+        "profile_abstained": len(abstained),
+        "low_confidence": len(low_confidence),
+        "archived": archived,
+        "disabled": disabled,
+        "missing_readme": missing_readme,
+        "duplicates": len(duplicates),
+    }
 
     return {
         "schema_version": expected_schema_version,
         "record_count": len(records),
         "schema_versions": {str(key): value for key, value in schema_versions.items()},
         "prompt_versions": {str(key): value for key, value in prompt_versions.items()},
+        "quality": quality,
         "errors": dict(issues["errors"]),
         "warnings": dict(issues["warnings"]),
         "duplicates": duplicates,
         "low_confidence": low_confidence,
         "abstained": abstained,
+        "short_search_text": short_search_text,
         "ok": not issues["errors"],
     }

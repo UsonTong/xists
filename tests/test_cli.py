@@ -1045,7 +1045,7 @@ def test_profile_refresh_writes_v2_records(tmp_path, monkeypatch, capsys):
     assert refreshed[0]["url"] == "https://github.com/old/repo"
 
 
-def test_index_verify_reports_stale_and_missing_vectors(tmp_path, capsys):
+def test_index_verify_reports_stale_missing_and_fingerprint_gaps(tmp_path, capsys):
     records_file = tmp_path / "records.json"
     record_a = _make_record("react/react")
     record_b = _make_record("fastapi/fastapi")
@@ -1069,7 +1069,6 @@ def test_index_verify_reports_stale_and_missing_vectors(tmp_path, capsys):
                     },
                     {
                         "repo_id": "extra/repo",
-                        "embedding_input_fingerprint": "extra",
                         "metadata": {},
                         "vector": [0.0, 1.0],
                     },
@@ -1090,7 +1089,96 @@ def test_index_verify_reports_stale_and_missing_vectors(tmp_path, capsys):
     assert payload["ok"] is False
     assert payload["errors"]["stale_vectors"] == 1
     assert payload["errors"]["missing_vectors"] == 1
+    assert payload["errors"]["missing_fingerprints"] == 1
     assert payload["warnings"]["extra_vectors"] == 1
+    assert payload["status"] == "invalid"
+
+
+def test_index_verify_reports_version_and_dimension_mismatches(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    record = _make_record("fastapi/fastapi")
+    records_file.write_text(json.dumps([record]), encoding="utf-8")
+
+    index_file = tmp_path / "index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "index_version": 0,
+                "record_schema_version": 1,
+                "embedding_input_version": 0,
+                "dimension": 3,
+                "record_count": 3,
+                "vectors": [
+                    {
+                        "repo_id": "fastapi/fastapi",
+                        "embedding_input_fingerprint": embedding_input_fingerprint(record),
+                        "metadata": {},
+                        "vector": [1.0, 0.0],
+                    },
+                    {
+                        "repo_id": "broken/vector",
+                        "embedding_input_fingerprint": "abc",
+                        "metadata": {},
+                        "vector": None,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(
+        ["index", "verify", "--records", str(records_file), "--index", str(index_file), "--format", "json"]
+    )
+
+    code = index_verify(args)
+
+    assert code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["errors"]["index_version_mismatch"] == 1
+    assert payload["errors"]["record_schema_version_mismatch"] == 1
+    assert payload["errors"]["embedding_input_version_mismatch"] == 1
+    assert payload["errors"]["dimension_mismatch"] == 1
+    assert payload["errors"]["invalid_vectors"] == 1
+    assert payload["warnings"]["record_count_mismatch"] == 1
+    assert payload["status"] == "invalid"
+
+
+def test_index_verify_text_reports_status(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    record = _make_record("fastapi/fastapi")
+    records_file.write_text(json.dumps([record]), encoding="utf-8")
+
+    index_file = tmp_path / "index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "index_version": INDEX_VERSION,
+                "record_schema_version": RECORD_SCHEMA_VERSION,
+                "embedding_input_version": EMBEDDING_INPUT_VERSION,
+                "dimension": 2,
+                "record_count": 1,
+                "vectors": [
+                    {
+                        "repo_id": "fastapi/fastapi",
+                        "embedding_input_fingerprint": embedding_input_fingerprint(record),
+                        "metadata": {},
+                        "vector": [1.0, 0.0],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(["index", "verify", "--records", str(records_file), "--index", str(index_file)])
+
+    code = index_verify(args)
+
+    assert code == 0
+    output = capsys.readouterr().out
+    assert "status: ok" in output
+    assert "errors:\n  none" in output
 
 
 def _make_record(repo_id: str) -> dict:

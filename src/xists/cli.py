@@ -1215,13 +1215,23 @@ def _index_verify_report(records: list[dict[str, Any]], index: dict[str, Any]) -
     vectors = [entry for entry in index.get("vectors") or [] if isinstance(entry, dict)]
     vector_by_id = {entry.get("repo_id"): entry for entry in vectors if entry.get("repo_id")}
     dimension = index.get("dimension")
+    if not isinstance(dimension, int) or dimension <= 0:
+        errors["dimension_missing"] += 1
+    missing_fingerprints = [entry.get("repo_id") for entry in vectors if not entry.get("embedding_input_fingerprint")]
+    if missing_fingerprints:
+        errors["missing_fingerprints"] = len(missing_fingerprints)
     dimension_mismatches = [
         entry.get("repo_id")
         for entry in vectors
-        if isinstance(entry.get("vector"), list) and dimension is not None and len(entry["vector"]) != dimension
+        if isinstance(entry.get("vector"), list) and isinstance(dimension, int) and len(entry["vector"]) != dimension
     ]
+    invalid_vectors = [entry.get("repo_id") for entry in vectors if not isinstance(entry.get("vector"), list)]
     if dimension_mismatches:
         errors["dimension_mismatch"] = len(dimension_mismatches)
+    if invalid_vectors:
+        errors["invalid_vectors"] = len(invalid_vectors)
+    if isinstance(index.get("record_count"), int) and index.get("record_count") != len(vectors):
+        warnings["record_count_mismatch"] += 1
 
     record_ids = {record_repo_id(record) for record in records if record_repo_id(record)}
     missing_vectors: list[str] = []
@@ -1249,8 +1259,10 @@ def _index_verify_report(records: list[dict[str, Any]], index: dict[str, Any]) -
         warnings["extra_vectors"] = len(extra_vectors)
 
     ok = not errors
+    stale_only = set(errors).issubset({"missing_vectors", "stale_vectors"}) and (missing_vectors or stale_vectors or extra_vectors)
     return {
         "ok": ok,
+        "status": "ok" if ok else ("stale" if stale_only else "invalid"),
         "index_version": index.get("index_version"),
         "expected_index_version": INDEX_VERSION,
         "record_schema_version": index.get("record_schema_version"),
@@ -1261,6 +1273,9 @@ def _index_verify_report(records: list[dict[str, Any]], index: dict[str, Any]) -
         "vector_count": len(vectors),
         "errors": dict(errors),
         "warnings": dict(warnings),
+        "missing_fingerprints": missing_fingerprints,
+        "dimension_mismatches": dimension_mismatches,
+        "invalid_vectors": invalid_vectors,
         "missing_vectors": missing_vectors,
         "stale_vectors": stale_vectors,
         "extra_vectors": extra_vectors,
@@ -1277,6 +1292,7 @@ def _format_index_verify_text(report: dict[str, Any], records_path: Path, index_
     lines = [
         f"records: {records_path}",
         f"index: {index_path}",
+        f"status: {report['status']}",
         f"ok: {str(report['ok']).lower()}",
         f"records: {report['record_count']}",
         f"vectors: {report['vector_count']}",

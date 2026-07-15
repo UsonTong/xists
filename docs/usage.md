@@ -212,14 +212,16 @@ Performance example (10 repos):
 
 ### Inspect generated records
 
-Before building or rebuilding an index, inspect records to verify that ingestion and LLM profiling produced usable metadata:
+Before building or rebuilding an index, validate and inspect records to verify that ingestion and LLM profiling produced usable metadata:
 
 ```bash
+xists records validate --records demo-records.json
+xists records stats --records demo-records.json
 xists records inspect --records demo-records.json --limit 5
 xists records inspect --records demo-records.json --repo react --limit 2
 ```
 
-This prints a compact JSON summary with repo id, URL, language, topics, README presence, profile confidence, abstain state, and the generated summary. It intentionally omits large README/profile payloads.
+`records validate` reports schema/profile problems and actionable next steps. `records stats` summarizes data quality, confidence, languages, topics, project types, and ecosystems. `records inspect` prints compact per-repo details without large README/profile payloads.
 
 ### Step 2: Build the embedding index
 
@@ -255,9 +257,25 @@ Use `index stats` when you want to confirm what is inside an index without print
 
 ```bash
 xists index stats --index demo-index.json --limit 5
+xists index verify --records demo-records.json --index demo-index.json
 ```
 
-The output includes model, dimension, record/vector counts, skipped count, missing metadata/fingerprint counts, and the most common languages/topics. This is useful before evaluation because it catches stale or incomplete indexes quickly.
+`index stats` includes model, dimension, record/vector counts, skipped count, missing metadata/fingerprint counts, and the most common languages/topics. `index verify` compares records and index fingerprints to catch stale, missing, extra, or incompatible vectors before search/eval.
+
+### Maintain a data source
+
+Use this loop when updating or sharing a curated repository source:
+
+```bash
+xists records validate --records records.json
+xists records stats --records records.json
+xists profile refresh --records records.json --only-missing-search-text --output records.new.json
+xists index build --records records.new.json --output index.json
+xists index verify --records records.new.json --index index.json
+xists index stats --index index.json
+```
+
+The goal is to keep `records.json` reusable and understandable, then rebuild `index.json` whenever profile fields or embedding input fingerprints change.
 
 ### Step 3: Search
 
@@ -472,6 +490,14 @@ This is a semantic expansion from older reports, where `acceptable_top1_rate` on
 When `--llm-judge` is enabled, you must also provide `--records`. The judge compares only `top1` vs `expected_repo_id`; it does not change exact/acceptable metrics. It adds a separate `judge_summary` section and per-case judge fields so you can distinguish “wrong” from “close but acceptable substitute”.
 
 ## Output files
+
+xists uses three artifact layers:
+
+- `repos.txt`: a reviewable repository list with one repo id or GitHub URL per line.
+- `records.json`: reusable semantic data with source metadata, evidence, LLM profile fields, and search text.
+- `index.json`: a derived vector index tied to one embedding model and embedding input version.
+
+Share `repos.txt` when collaborators should regenerate everything, share `records.json` when they should reuse LLM/profile work and rebuild their own index, and share `index.json` only when they use the same embedding setup.
 
 ### `records.json`
 

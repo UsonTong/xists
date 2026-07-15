@@ -935,31 +935,60 @@ def records_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
-def _records_next_steps(records_path: Path) -> list[str]:
-    return [
-        f"Refresh profiles: xists profile refresh --records {records_path} --output records-v2.json",
-        "Rebuild the index: xists index build --records records-v2.json --output index.json",
-    ]
+def _records_next_steps(records_path: Path, report: dict[str, Any] | None = None) -> list[str]:
+    errors = (report or {}).get("errors") or {}
+    warnings = (report or {}).get("warnings") or {}
+    steps: list[str] = []
+    if any(key in errors for key in ("schema_version_mismatch", "missing_llm_profile", "missing_summary", "missing_search_text")):
+        steps.append(f"Refresh profiles: xists profile refresh --records {records_path} --output records-v2.json")
+    if errors.get("duplicate_repo_id"):
+        steps.append("Review duplicate repo_id entries and keep one canonical record per repository.")
+    if warnings.get("search_text_too_short") or warnings.get("missing_aliases"):
+        steps.append("Review weak profiles or refresh them with xists profile refresh.")
+    if warnings.get("profile_abstained") or warnings.get("low_confidence_profile"):
+        steps.append("Inspect low-confidence or abstained profiles before sharing this records file.")
+    if errors:
+        steps.append("Rebuild the index after records are fixed: xists index build --records records-v2.json --output index.json")
+    return steps or ["No required action; records passed validation."]
 
 
 def _format_records_validation_text(report: dict[str, Any], records_path: Path) -> str:
+    quality = report.get("quality") or {}
     lines = [
         f"records: {records_path}",
         f"schema: expected {report['schema_version']}",
         f"repos: {report['record_count']}",
         f"ok: {str(report['ok']).lower()}",
+        "",
+        "quality:",
     ]
+    for key in (
+        "ok",
+        "missing_search_text",
+        "missing_aliases",
+        "search_text_too_short",
+        "profile_abstained",
+        "low_confidence",
+        "archived",
+        "disabled",
+        "missing_readme",
+        "duplicates",
+    ):
+        lines.append(f"  {key}: {quality.get(key, 0)}")
     for label in ("errors", "warnings"):
         items = report.get(label) or {}
+        lines.append("")
         lines.append(f"{label}:")
         if items:
             for key, value in sorted(items.items()):
                 lines.append(f"  {key}: {value}")
         else:
             lines.append("  none")
-    if not report.get("ok"):
+    next_steps = report.get("next_steps") or []
+    if next_steps:
+        lines.append("")
         lines.append("next steps:")
-        for step in _records_next_steps(records_path):
+        for step in next_steps:
             lines.append(f"  - {step}")
     return "\n".join(lines)
 
@@ -975,7 +1004,7 @@ def records_validate(args: argparse.Namespace) -> int:
 
     report = records_validation_report(records, expected_profile_prompt_version=PROFILE_PROMPT_VERSION)
     report["records"] = str(args.records)
-    report["next_steps"] = _records_next_steps(args.records) if not report["ok"] else []
+    report["next_steps"] = [] if report["ok"] else _records_next_steps(args.records, report)
     if getattr(args, "format", "text") == "json":
         print(json.dumps(report, ensure_ascii=False, indent=2))
     else:

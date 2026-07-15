@@ -869,7 +869,59 @@ def test_records_validate_reports_schema_and_profile_gaps(tmp_path, capsys):
     assert payload["ok"] is False
     assert payload["errors"]["schema_version_mismatch"] == 1
     assert payload["errors"]["missing_search_text"] == 1
+    assert payload["quality"]["missing_search_text"] == 1
+    assert payload["quality"]["low_confidence"] == 1
+    assert payload["quality"]["missing_readme"] == 1
     assert "records-v2.json" in payload["next_steps"][0]
+
+
+def test_records_validate_reports_quality_warnings_in_text(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(
+        json.dumps(
+            [
+                {**_make_record("ok/repo"), "readme": {"excerpt": "Ok repo README"}},
+                {
+                    **_make_record("weak/repo"),
+                    "readme": None,
+                    "github": {"description": "Weak repo", "topics": [], "archived": True, "disabled": True},
+                    "llm_profile": {
+                        "summary": "Weak repo summary",
+                        "use_cases": [],
+                        "capabilities": [],
+                        "not_for": [],
+                        "aliases": [],
+                        "project_type": None,
+                        "ecosystem": [],
+                        "replaces": [],
+                        "related_projects": [],
+                        "search_text": "short text",
+                        "confidence": "low",
+                        "abstained": True,
+                        "prompt_version": PROFILE_PROMPT_VERSION,
+                    },
+                },
+                {**_make_record("ok/repo"), "readme": {"excerpt": "Duplicate README"}},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(["records", "validate", "--records", str(records_file)])
+
+    code = records_validate(args)
+
+    assert code == 1
+    output = capsys.readouterr().out
+    assert "quality:" in output
+    assert "search_text_too_short: 1" in output
+    assert "profile_abstained: 1" in output
+    assert "low_confidence: 1" in output
+    assert "archived: 1" in output
+    assert "disabled: 1" in output
+    assert "missing_readme: 1" in output
+    assert "duplicate_repo_id: 1" in output
+    assert "Review duplicate repo_id entries" in output
 
 
 def test_profile_refresh_writes_v2_records(tmp_path, monkeypatch, capsys):

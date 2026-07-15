@@ -935,6 +935,120 @@ def records_inspect(args: argparse.Namespace) -> int:
     return 0
 
 
+def _counter_items(counter: Counter[str], key_name: str, limit: int) -> list[dict[str, Any]]:
+    return [{key_name: key, "count": value} for key, value in counter.most_common(limit)]
+
+
+def _records_stats_report(records: list[dict[str, Any]], *, limit: int) -> dict[str, Any]:
+    validation = records_validation_report(records, expected_profile_prompt_version=PROFILE_PROMPT_VERSION)
+    languages: Counter[str] = Counter()
+    topics: Counter[str] = Counter()
+    project_types: Counter[str] = Counter()
+    ecosystems: Counter[str] = Counter()
+    confidence: Counter[str] = Counter()
+
+    for record in records:
+        github = record.get("github") if isinstance(record.get("github"), dict) else {}
+        language = github.get("language")
+        if isinstance(language, str) and language.strip():
+            languages[language] += 1
+        for topic in github.get("topics") or []:
+            if isinstance(topic, str) and topic.strip():
+                topics[topic] += 1
+
+        profile = record_profile(record)
+        if profile.get("project_type"):
+            project_types[str(profile["project_type"])] += 1
+        for ecosystem in profile.get("ecosystem") or []:
+            ecosystems[ecosystem] += 1
+        confidence[str(profile.get("confidence") or "low")] += 1
+
+    quality = validation.get("quality") or {}
+    return {
+        "record_count": len(records),
+        "schema_version": RECORD_SCHEMA_VERSION,
+        "schema_versions": validation.get("schema_versions") or {},
+        "profile_prompt_version": PROFILE_PROMPT_VERSION,
+        "prompt_versions": validation.get("prompt_versions") or {},
+        "quality": quality,
+        "confidence": dict(confidence),
+        "ratios": {
+            "abstained": _safe_divide(quality.get("profile_abstained", 0), len(records)),
+            "low_confidence": _safe_divide(quality.get("low_confidence", 0), len(records)),
+            "archived": _safe_divide(quality.get("archived", 0), len(records)),
+            "disabled": _safe_divide(quality.get("disabled", 0), len(records)),
+            "missing_readme": _safe_divide(quality.get("missing_readme", 0), len(records)),
+        },
+        "top_languages": _counter_items(languages, "language", limit),
+        "top_topics": _counter_items(topics, "topic", limit),
+        "top_project_types": _counter_items(project_types, "project_type", limit),
+        "top_ecosystems": _counter_items(ecosystems, "ecosystem", limit),
+    }
+
+
+def _safe_divide(numerator: Any, denominator: int) -> float:
+    if not denominator:
+        return 0.0
+    return round(float(numerator or 0) / denominator, 6)
+
+
+def _format_top_items(items: list[dict[str, Any]], key_name: str) -> str:
+    if not items:
+        return "none"
+    return ", ".join(f"{item[key_name]} ({item['count']})" for item in items)
+
+
+def _format_records_stats_text(report: dict[str, Any], records_path: Path) -> str:
+    quality = report.get("quality") or {}
+    ratios = report.get("ratios") or {}
+    lines = [
+        f"records: {records_path}",
+        f"schema: expected {report['schema_version']}",
+        f"repos: {report['record_count']}",
+        f"profile_prompt_version: {report['profile_prompt_version']}",
+        "",
+        "quality:",
+    ]
+    for key in ("missing_search_text", "missing_aliases", "search_text_too_short", "profile_abstained", "low_confidence", "archived", "disabled", "missing_readme", "duplicates"):
+        ratio = ratios.get("abstained" if key == "profile_abstained" else key)
+        suffix = f" ({ratio:.2%})" if isinstance(ratio, float) else ""
+        lines.append(f"  {key}: {quality.get(key, 0)}{suffix}")
+    lines.extend(
+        [
+            "",
+            "distribution:",
+            f"  confidence: {report.get('confidence') or {}}",
+            f"  schema_versions: {report.get('schema_versions') or {}}",
+            f"  prompt_versions: {report.get('prompt_versions') or {}}",
+            "",
+            "top:",
+            f"  languages: {_format_top_items(report.get('top_languages') or [], 'language')}",
+            f"  topics: {_format_top_items(report.get('top_topics') or [], 'topic')}",
+            f"  project_types: {_format_top_items(report.get('top_project_types') or [], 'project_type')}",
+            f"  ecosystems: {_format_top_items(report.get('top_ecosystems') or [], 'ecosystem')}",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def records_stats(args: argparse.Namespace) -> int:
+    if not args.records.exists():
+        print(f"Records file not found: {args.records}. Run 'xists ingest github' first.", file=sys.stderr)
+        return 2
+    records = json.loads(args.records.read_text(encoding="utf-8"))
+    if not isinstance(records, list):
+        print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
+        return 1
+
+    report = _records_stats_report(records, limit=args.limit)
+    report["records"] = str(args.records)
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    else:
+        print(_format_records_stats_text(report, args.records))
+    return 0
+
+
 def _records_next_steps(records_path: Path, report: dict[str, Any] | None = None) -> list[str]:
     errors = (report or {}).get("errors") or {}
     warnings = (report or {}).get("warnings") or {}
@@ -1392,6 +1506,16 @@ def build_parser() -> argparse.ArgumentParser:
     records_inspect_parser.add_argument("--repo", default=None, help="Only show records whose owner/repo contains this text")
     records_inspect_parser.add_argument("--limit", type=int, default=20, help="Maximum records to print")
     records_inspect_parser.set_defaults(func=records_inspect)
+    records_stats_parser = records_subparsers.add_parser("stats", help="Summarize records quality and metadata")
+    records_stats_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to summarize")
+    records_stats_parser.add_argument("--limit", type=int, default=10, help="Maximum languages/topics/project types to print")
+    records_stats_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
+    records_stats_parser.set_defaults(func=records_stats)
     records_validate_parser = records_subparsers.add_parser("validate", help="Validate record schema and profile quality")
     records_validate_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to validate")
     records_validate_parser.add_argument(

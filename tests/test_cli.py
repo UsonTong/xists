@@ -18,6 +18,7 @@ from xists.cli import (
     profile_refresh,
     search,
     records_inspect,
+    records_stats,
     records_validate,
     version,
 )
@@ -189,6 +190,14 @@ def test_records_validate_parser_uses_default_path():
     args = build_parser().parse_args(["records", "validate"])
 
     assert args.records == Path("records.json")
+    assert args.format == "text"
+
+
+def test_records_stats_parser_uses_default_path():
+    args = build_parser().parse_args(["records", "stats"])
+
+    assert args.records == Path("records.json")
+    assert args.limit == 10
     assert args.format == "text"
 
 
@@ -922,6 +931,63 @@ def test_records_validate_reports_quality_warnings_in_text(tmp_path, capsys):
     assert "missing_readme: 1" in output
     assert "duplicate_repo_id: 1" in output
     assert "Review duplicate repo_id entries" in output
+
+
+def test_records_stats_json_summarizes_quality_and_metadata(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(
+        json.dumps(
+            [
+                {**_make_record("fastapi/fastapi"), "readme": {"excerpt": "FastAPI README"}},
+                {
+                    **_make_record("react/react"),
+                    "github": {
+                        "description": "React description",
+                        "topics": ["frontend", "ui"],
+                        "language": "JavaScript",
+                    },
+                    "llm_profile": {
+                        **_make_record("react/react")["llm_profile"],
+                        "project_type": "library",
+                        "ecosystem": ["javascript", "web"],
+                        "confidence": "medium",
+                    },
+                    "readme": None,
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(["records", "stats", "--records", str(records_file), "--format", "json"])
+
+    code = records_stats(args)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["record_count"] == 2
+    assert payload["quality"]["missing_readme"] == 1
+    assert payload["confidence"] == {"high": 1, "medium": 1}
+    assert {item["language"] for item in payload["top_languages"]} == {"Python", "JavaScript"}
+    assert {item["project_type"] for item in payload["top_project_types"]} == {"tool", "library"}
+    assert payload["ratios"]["missing_readme"] == 0.5
+
+
+def test_records_stats_text_is_readable(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps([{**_make_record("fastapi/fastapi"), "readme": None}]), encoding="utf-8")
+
+    args = build_parser().parse_args(["records", "stats", "--records", str(records_file)])
+
+    code = records_stats(args)
+
+    assert code == 0
+    output = capsys.readouterr().out
+    assert "records:" in output
+    assert "quality:" in output
+    assert "distribution:" in output
+    assert "top:" in output
+    assert "languages: Python (1)" in output
 
 
 def test_profile_refresh_writes_v2_records(tmp_path, monkeypatch, capsys):

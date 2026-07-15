@@ -833,12 +833,7 @@ def doctor(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def index_stats(args: argparse.Namespace) -> int:
-    if not args.index.exists():
-        print(f"Index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
-        return 2
-
-    index = load_index(args.index)
+def _index_stats_report(index: dict[str, Any], *, index_path: Path, limit: int) -> dict[str, Any]:
     vectors = index.get("vectors") or []
     languages: Counter[str] = Counter()
     topics: Counter[str] = Counter()
@@ -861,7 +856,7 @@ def index_stats(args: argparse.Namespace) -> int:
                 topics[topic] += 1
 
     payload = {
-        "index": str(args.index),
+        "index": str(index_path),
         "index_version": index.get("index_version"),
         "record_schema_version": index.get("record_schema_version"),
         "embedding_model": index.get("embedding_model"),
@@ -874,10 +869,46 @@ def index_stats(args: argparse.Namespace) -> int:
         "skipped_count": len(index.get("skipped") or []),
         "missing_metadata_count": missing_metadata,
         "missing_fingerprint_count": missing_fingerprints,
-        "top_languages": [{"language": key, "count": value} for key, value in languages.most_common(args.limit)],
-        "top_topics": [{"topic": key, "count": value} for key, value in topics.most_common(args.limit)],
+        "top_languages": _counter_items(languages, "language", limit),
+        "top_topics": _counter_items(topics, "topic", limit),
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return payload
+
+
+def _format_index_stats_text(report: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            f"index: {report['index']}",
+            f"index_version: {report.get('index_version')}",
+            f"record_schema_version: {report.get('record_schema_version')}",
+            f"embedding_model: {report.get('embedding_model')}",
+            f"embedding_base_url: {report.get('embedding_base_url')}",
+            f"embedding_input_version: {report.get('embedding_input_version')}",
+            f"dimension: {report.get('dimension')}",
+            f"built_at: {report.get('built_at')}",
+            f"record_count: {report.get('record_count')}",
+            f"vector_count: {report.get('vector_count')}",
+            f"skipped_count: {report.get('skipped_count')}",
+            f"missing_metadata_count: {report.get('missing_metadata_count')}",
+            f"missing_fingerprint_count: {report.get('missing_fingerprint_count')}",
+            "top:",
+            f"  languages: {_format_top_items(report.get('top_languages') or [], 'language')}",
+            f"  topics: {_format_top_items(report.get('top_topics') or [], 'topic')}",
+        ]
+    )
+
+
+def index_stats(args: argparse.Namespace) -> int:
+    if not args.index.exists():
+        print(f"Index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
+        return 2
+
+    index = load_index(args.index)
+    payload = _index_stats_report(index, index_path=args.index, limit=args.limit)
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(_format_index_stats_text(payload))
     return 0
 
 
@@ -1503,6 +1534,12 @@ def build_parser() -> argparse.ArgumentParser:
     index_stats_parser = index_subparsers.add_parser("stats", help="Summarize an embedding index without printing vectors")
     index_stats_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to inspect")
     index_stats_parser.add_argument("--limit", type=int, default=10, help="Maximum languages/topics to print")
+    index_stats_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
     index_stats_parser.set_defaults(func=index_stats)
     index_verify_parser = index_subparsers.add_parser("verify", help="Check that records and index are in sync")
     index_verify_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to compare")

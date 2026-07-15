@@ -168,6 +168,7 @@ def test_index_stats_parser_uses_default_path():
 
     assert args.index == Path("index.json")
     assert args.limit == 10
+    assert args.format == "text"
 
 
 def test_index_verify_parser_uses_default_paths():
@@ -810,7 +811,7 @@ def test_index_stats_prints_compact_summary(tmp_path, capsys):
         encoding="utf-8",
     )
 
-    args = build_parser().parse_args(["index", "stats", "--index", str(index_file), "--limit", "1"])
+    args = build_parser().parse_args(["index", "stats", "--index", str(index_file), "--limit", "1", "--format", "json"])
 
     code = index_stats(args)
 
@@ -821,6 +822,45 @@ def test_index_stats_prints_compact_summary(tmp_path, capsys):
     assert payload["missing_fingerprint_count"] == 1
     assert payload["top_languages"] == [{"language": "JavaScript", "count": 1}]
     assert "vectors" not in payload
+
+
+def test_index_stats_text_is_readable(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "index_version": 1,
+                "record_schema_version": RECORD_SCHEMA_VERSION,
+                "embedding_model": "BAAI/bge-m3",
+                "embedding_base_url": "http://localhost:6597/v1",
+                "embedding_input_version": EMBEDDING_INPUT_VERSION,
+                "dimension": 2,
+                "built_at": "2026-01-01T00:00:00+00:00",
+                "record_count": 1,
+                "skipped": [],
+                "vectors": [
+                    {
+                        "repo_id": "fastapi/fastapi",
+                        "embedding_input_fingerprint": "abc",
+                        "metadata": {"language": "Python", "topics": ["api"]},
+                        "vector": [1.0, 0.0],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(["index", "stats", "--index", str(index_file)])
+
+    code = index_stats(args)
+
+    assert code == 0
+    output = capsys.readouterr().out
+    assert "index:" in output
+    assert "vector_count: 1" in output
+    assert "missing_fingerprint_count: 0" in output
+    assert "languages: Python (1)" in output
 
 
 def test_records_inspect_filters_and_summarizes_records(tmp_path, capsys):

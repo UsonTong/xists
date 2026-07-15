@@ -1221,6 +1221,65 @@ def test_index_verify_text_reports_status(tmp_path, capsys):
     assert "errors:\n  none" in output
 
 
+def test_data_quality_workflow_runs_on_local_files(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    record_a = {**_make_record("fastapi/fastapi"), "readme": {"excerpt": "FastAPI README"}}
+    record_b = {**_make_record("react/react"), "readme": {"excerpt": "React README"}}
+    records_file.write_text(json.dumps([record_a, record_b]), encoding="utf-8")
+
+    index_file = tmp_path / "index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "index_version": INDEX_VERSION,
+                "record_schema_version": RECORD_SCHEMA_VERSION,
+                "embedding_model": "BAAI/bge-m3",
+                "embedding_base_url": "http://localhost/v1",
+                "embedding_input_version": EMBEDDING_INPUT_VERSION,
+                "dimension": 2,
+                "built_at": "2026-01-01T00:00:00+00:00",
+                "record_count": 2,
+                "skipped": [],
+                "vectors": [
+                    {
+                        "repo_id": "fastapi/fastapi",
+                        "embedding_input_fingerprint": embedding_input_fingerprint(record_a),
+                        "metadata": {"language": "Python", "topics": ["api", "framework"]},
+                        "vector": [1.0, 0.0],
+                    },
+                    {
+                        "repo_id": "react/react",
+                        "embedding_input_fingerprint": embedding_input_fingerprint(record_b),
+                        "metadata": {"language": "Python", "topics": []},
+                        "vector": [0.0, 1.0],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    validate_args = build_parser().parse_args(["records", "validate", "--records", str(records_file)])
+    assert records_validate(validate_args) == 0
+    assert "ok: true" in capsys.readouterr().out
+
+    records_stats_args = build_parser().parse_args(["records", "stats", "--records", str(records_file), "--format", "json"])
+    assert records_stats(records_stats_args) == 0
+    records_stats_payload = json.loads(capsys.readouterr().out)
+    assert records_stats_payload["record_count"] == 2
+    assert records_stats_payload["quality"]["missing_search_text"] == 0
+
+    verify_args = build_parser().parse_args(["index", "verify", "--records", str(records_file), "--index", str(index_file)])
+    assert index_verify(verify_args) == 0
+    assert "status: ok" in capsys.readouterr().out
+
+    index_stats_args = build_parser().parse_args(["index", "stats", "--index", str(index_file), "--format", "json"])
+    assert index_stats(index_stats_args) == 0
+    index_stats_payload = json.loads(capsys.readouterr().out)
+    assert index_stats_payload["vector_count"] == 2
+    assert index_stats_payload["missing_fingerprint_count"] == 0
+
+
 def _make_record(repo_id: str) -> dict:
     name = repo_id.split("/")[-1]
     return {

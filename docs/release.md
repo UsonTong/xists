@@ -1,6 +1,6 @@
 # Release Checklist
 
-Use this checklist before tagging a xists release.
+Use this checklist before preparing or tagging a xists release.
 
 ## 1. Confirm the working tree
 
@@ -38,7 +38,10 @@ xists doctor \
 
 xists eval cases --cases examples/eval-cases.json
 xists eval cases --cases examples/eval-cases-extended.json
+xists records validate --records demo-records.json
+xists records stats --records demo-records.json
 xists index stats --index demo-index.json --limit 5
+xists index verify --records demo-records.json --index demo-index.json
 
 xists eval inspect \
   --report demo-eval-report.json \
@@ -46,7 +49,7 @@ xists eval inspect \
   --limit 20
 ```
 
-The expected v0.2.0 baseline has no serious mismatches on the committed smoke evaluation set when run against the current local demo index. Use the 100-case and extended 112-case files for broader local spot checks.
+The expected v0.4.0 local baseline should pass the data-quality workflow checks and have no serious mismatches on the committed smoke evaluation set when run against the current local demo index. Use the 100-case and extended 112-case files for broader local spot checks.
 
 For a no-network artifact smoke test, run:
 
@@ -59,22 +62,24 @@ python scripts/smoke_check.py
 ```bash
 git status --short
 git add <intentional files>
-git commit -m "chore: prepare v0.2.0 release"
+git commit -m "chore: prepare v0.4.0 version metadata"
 ```
 
 Skip this step if there are no pending changes.
 
-## 6. Tag the release
+## 6. Optional tag and publish
+
+Skip this section when only preparing v0.4.0 locally.
 
 ```bash
-git tag v0.2.0
+git tag v0.4.0
 ```
 
 To publish to the remote repository:
 
 ```bash
 git push origin main
-git push origin v0.2.0
+git push origin v0.4.0
 ```
 
 ## 7. After release

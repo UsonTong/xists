@@ -541,10 +541,10 @@ xists index stats --index demo-index.json
 xists eval inspect --report demo-eval-report.json --status serious_mismatch
 ```
 
-Release readiness expectations for `0.2.0`:
+Release readiness expectations for `0.4.0`:
 
 - package version and `xists.__version__` are aligned
 - README remains the short project entry point unless intentionally changed
-- docs cover the full local workflow and inspection commands
+- docs cover the full local workflow, data-quality commands, and artifact layers
 - generated records, indexes, reports, `.env`, and token files stay uncommitted
 - `pytest` and GitHub Actions CI pass

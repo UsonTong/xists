@@ -28,7 +28,21 @@ The CLI version, `src/xists/__init__.py`, and `pyproject.toml` should agree.
 
 ## 4. Run local workflow checks
 
-If the demo artifacts exist locally, run:
+The committed demo artifacts (`demo-records.json`, `demo-index.json`) predate
+record schema v2 and embedding input v3. Against them, `records validate`
+reports `ok: false`, `index verify` reports `status: invalid`, and `search`
+refuses to run — this is the expected, by-design behavior of the compatibility
+checks, not a release blocker.
+
+To run the full workflow checks against a passing baseline, first refresh the
+demo data (requires the local LLM and embedding endpoints):
+
+```bash
+xists profile refresh --records demo-records.json --output demo-records.json
+xists index build --records demo-records.json --output demo-index.json
+```
+
+Then run:
 
 ```bash
 xists doctor \
@@ -49,7 +63,10 @@ xists eval inspect \
   --limit 20
 ```
 
-The expected v0.4.0 local baseline should pass the data-quality workflow checks and have no serious mismatches on the committed smoke evaluation set when run against the current local demo index. Use the 100-case and extended 112-case files for broader local spot checks.
+The expected v0.4.0 local baseline passes the data-quality workflow checks and
+has no serious mismatches on the committed smoke evaluation set only after the
+demo artifacts have been refreshed and rebuilt as described above. Use the
+100-case and extended 112-case files for broader local spot checks.
 
 For a no-network artifact smoke test, run:
 

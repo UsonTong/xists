@@ -274,7 +274,7 @@ def ingest_github(args: argparse.Namespace) -> int:
                     skipped=len(skipped),
                 )
     elif workers > 1 and to_ingest:
-        # Multi-threaded: process repos concurrently, write checkpoint after all complete.
+        # Multi-threaded: process repos concurrently, checkpoint after each future completes.
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
                 executor.submit(_ingest_one, repo_id, token_pool, llm_config, github_api): repo_id

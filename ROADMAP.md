@@ -262,7 +262,7 @@ v0.3.0  Schema v2，把智能转移到数据层      [已完成]
          ↓
 v0.4.0  数据质量工具，让数据源可维护       [已完成]
          ↓
-v0.5.0  本地规模与 index 稳定
+v0.5.0  本地规模与 index 稳定              [已完成]
          ↓
 v0.6.0  规模化 ingest 与数据更新
          ↓
@@ -2031,6 +2031,8 @@ xists 的核心是：
 ## 10. 变更记录
 
 roadmap 是活文档。每次修订在此追加一条：日期、变更内容、原因。
+
+- **2026-07-17** — v0.5.0 完成，§3 标记 [已完成]。按 §11 执行：T1 四项兼容检查核实补全（model/dimension/input_version/schema_version 检查均已存在，新补"index 缺 embedding_model 字段静默通过"的报错与 4 个 mismatch 测试）；T2 `scripts/generate_synthetic_index.py`；T3 `docs/performance.md`（1k/10k 基线，AMD Ryzen 7 7735H）；T4 `index stats` 增加 `estimated_memory_mb`；T5 `tests/test_performance_smoke.py`。两项需维护者知悉：(1) T3 按其"重复工作"例外条款给 `query.py` 的 `_expanded_token` 加了 `lru_cache`（与 `_tokenize`/`_keyword_tokens` 同惯例，纯 memoization 零打分变化，全部测试不变通过），10k 核心搜索从 2.28s/1.62s 降至 1.56s/0.86s（rank/rank_many）；(2) **待决策**：`rank_many`（numpy 矩阵路径）10k 核心 0.86s 达标，但 CLI `search` 实际使用的单查询 `rank()` 用纯 Python cosine 循环打分，10k 时 1.56s 超过 §11 T3 的 1 秒线——非 O(n²)，是线性但常数大的标量实现。统一 `rank()` 到矩阵路径可解决，但 float32 矩阵与 float64 标量的分数差异约 1e-4，属打分行为变更，依 T3 规定不擅自优化，留待维护者裁决（详见 docs/performance.md）。
 
 - **2026-07-17** — 第四次修订（对照代码逐条核查）。(1) 修正 §12 现状盘点：多线程 ingest 实际已在每个 future 完成后写 checkpoint，早前"全部完成后才写"的判断源自 `cli.py` 一行过期注释而非代码行为（该注释已同步改正）；(2) §12 T4 第 5 点从"多线程 checkpoint 空洞二选一"改写为"ingest checkpoint 快照式 O(n²) 写入的 JSONL 追加式改造"，消除与本节禁止事项"禁止每条重写完整快照"的自相矛盾——第二次修订只治了 profile refresh，漏了写入量问题完全相同的 ingest，若不改，v0.6.0 将带着 O(n²) checkpoint 去实现"2 万级 corpus 生产"的目标；(3) §11 硬规则 3 明确 T1 涉及的兼容检查函数不在 query.py 只读范围内，消除可能让执行 agent 卡死的字面歧义；(4) §11 T4 内存估算从 float64（×8 字节）改为 float32（×4 字节），与 `_normalized_matrix` 实际 dtype 一致；(5) 本文档自维护者单机目录（~/Downloads）移入 xists 仓库根目录纳入版本控制，落实 §8"单人维护"条目对本文档自身的要求，§5.1/§6 中"roadmap 不在仓库中"的偏离上报流程同步更新为直接修改。原因：v0.5.0/v0.6.0 开工前按 §11/§12 自身规则逐条核实现状盘点，发现两处与代码不符（会触发 agent 依规停工）及一处未被任何任务覆盖的规模瓶颈。
 

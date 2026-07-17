@@ -467,7 +467,13 @@ def _rank_scored_entries(query: str, scored_entries: list[tuple[dict[str, Any], 
 
 def ensure_index_matches_model(index: dict[str, Any], config: EmbeddingConfig) -> None:
     index_model = index.get("embedding_model")
-    if index_model and index_model != config.model:
+    if not index_model:
+        raise IndexMismatchError(
+            f"Index does not record an embedding_model, but the configured "
+            f"model is '{config.model}'. Rebuild the index (xists index build) "
+            "so compatibility can be verified."
+        )
+    if index_model != config.model:
         raise IndexMismatchError(
             f"Index was built with embedding model '{index_model}' but the "
             f"configured model is '{config.model}'. Rebuild the index "
@@ -516,7 +522,10 @@ def rank_many(
     vectors = [entry["vector"] for entry in entries]
     dimension = index.get("dimension")
     if dimension is not None and any(len(vector) != dimension for vector in vectors):
-        raise IndexMismatchError("Index contains vectors that do not match its dimension")
+        raise IndexMismatchError(
+            f"Index contains vectors that do not match its dimension {dimension}. "
+            "Rebuild the index with xists index build."
+        )
 
     query_vectors: list[list[float]] = []
     for start in range(0, len(queries), batch_size):

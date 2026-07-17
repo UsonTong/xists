@@ -383,15 +383,37 @@ def test_rank_abstains_on_empty_index():
 
 
 def test_rank_rejects_model_mismatch():
-    index = {
-        "record_schema_version": RECORD_SCHEMA_VERSION,
-        "embedding_model": "other-model",
-        "embedding_input_version": EMBEDDING_INPUT_VERSION,
-        "dimension": 2,
-        "vectors": [],
-    }
-    with pytest.raises(IndexMismatchError):
+    index = make_index([])
+    index["embedding_model"] = "other-model"
+    with pytest.raises(IndexMismatchError, match=r"other-model.*bge-m3"):
         rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+
+def test_rank_rejects_missing_embedding_model():
+    index = make_index([])
+    del index["embedding_model"]
+    with pytest.raises(IndexMismatchError, match=r"embedding_model.*bge-m3"):
+        rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+
+def test_rank_rejects_input_version_mismatch():
+    index = make_index([])
+    index["embedding_input_version"] = EMBEDDING_INPUT_VERSION + 1
+    with pytest.raises(IndexMismatchError, match=r"embedding_input_version.*rebuild"):
+        rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+
+def test_rank_rejects_record_schema_version_mismatch():
+    index = make_index([])
+    index["record_schema_version"] = RECORD_SCHEMA_VERSION + 1
+    with pytest.raises(IndexMismatchError, match=r"record_schema_version.*profile refresh"):
+        rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+
+def test_rank_many_rejects_index_vectors_not_matching_declared_dimension():
+    index = make_index([{"repo_id": "react/react", "vector": [1.0, 0.0, 0.0], "metadata": {}}])
+    with pytest.raises(IndexMismatchError, match=r"dimension 2.*Rebuild"):
+        rank_many(["frontend ui"], index, CONFIG, embed_many=lambda config, queries: [[1.0, 0.0]])
 
 
 def test_rank_rejects_dimension_mismatch():

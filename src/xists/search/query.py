@@ -124,7 +124,8 @@ def _tokenize(text: str) -> tuple[str, ...]:
     return tuple(TOKEN_RE.findall(text.lower()))
 
 
-def _expanded_token(token: str) -> set[str]:
+@lru_cache(maxsize=65536)
+def _expanded_token(token: str) -> frozenset[str]:
     values = {token}
     values.update(part for part in re.split(r"[-._#]+", token) if part)
     for value in list(values):
@@ -132,7 +133,7 @@ def _expanded_token(token: str) -> set[str]:
             values.add(value[:-1])
         elif len(value) > 2:
             values.add(f"{value}s")
-    return values
+    return frozenset(values)
 
 
 def _expanded_token_set(tokens: set[str] | frozenset[str] | tuple[str, ...]) -> set[str]:

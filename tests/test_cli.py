@@ -859,8 +859,69 @@ def test_index_stats_text_is_readable(tmp_path, capsys):
     output = capsys.readouterr().out
     assert "index:" in output
     assert "vector_count: 1" in output
+    assert "estimated memory: 0.0 MB" in output
     assert "missing_fingerprint_count: 0" in output
     assert "languages: Python (1)" in output
+
+
+def test_index_stats_estimates_memory(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "index_version": 1,
+                "embedding_model": "BAAI/bge-m3",
+                "dimension": 1024,
+                "record_count": 1000,
+                "skipped": [],
+                "vectors": [
+                    {"repo_id": f"a/repo-{i}", "embedding_input_fingerprint": "abc", "metadata": {}, "vector": []}
+                    for i in range(1000)
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(["index", "stats", "--index", str(index_file), "--format", "json"])
+
+    code = index_stats(args)
+
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    # 1000 vectors x 1024 dims x 4 bytes (float32) = 3.9 MB
+    assert payload["estimated_memory_mb"] == 3.9
+
+
+def test_index_stats_memory_unknown_without_dimension(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "index_version": 1,
+                "embedding_model": "BAAI/bge-m3",
+                "record_count": 1,
+                "skipped": [],
+                "vectors": [
+                    {"repo_id": "a/b", "embedding_input_fingerprint": "abc", "metadata": {}, "vector": [1.0, 0.0]}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(["index", "stats", "--index", str(index_file)])
+
+    code = index_stats(args)
+
+    assert code == 0
+    output = capsys.readouterr().out
+    assert "estimated memory: unknown" in output
+
+    json_args = build_parser().parse_args(["index", "stats", "--index", str(index_file), "--format", "json"])
+    assert index_stats(json_args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["estimated_memory_mb"] is None
 
 
 def test_records_inspect_filters_and_summarizes_records(tmp_path, capsys):

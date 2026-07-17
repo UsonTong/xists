@@ -260,7 +260,7 @@ xists index stats --index demo-index.json --limit 5
 xists index verify --records demo-records.json --index demo-index.json
 ```
 
-`index stats` includes model, dimension, record/vector counts, skipped count, missing metadata/fingerprint counts, and the most common languages/topics. `index verify` compares records and index fingerprints to catch stale, missing, extra, or incompatible vectors before search/eval.
+`index stats` includes model, dimension, record/vector counts, an estimated in-memory size of the vector matrix (float32), skipped count, missing metadata/fingerprint counts, and the most common languages/topics. `index verify` compares records and index fingerprints to catch stale, missing, extra, or incompatible vectors before search/eval.
 
 ### Maintain a data source
 

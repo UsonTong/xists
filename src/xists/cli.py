@@ -855,6 +855,12 @@ def _index_stats_report(index: dict[str, Any], *, index_path: Path, limit: int) 
             if isinstance(topic, str) and topic.strip():
                 topics[topic] += 1
 
+    dimension = index.get("dimension")
+    estimated_memory_mb: float | None = None
+    if isinstance(dimension, int) and dimension > 0:
+        # Search materializes vectors as a float32 matrix (4 bytes per value).
+        estimated_memory_mb = round(len(vectors) * dimension * 4 / 1024 / 1024, 1)
+
     payload = {
         "index": str(index_path),
         "index_version": index.get("index_version"),
@@ -866,6 +872,7 @@ def _index_stats_report(index: dict[str, Any], *, index_path: Path, limit: int) 
         "built_at": index.get("built_at"),
         "record_count": index.get("record_count"),
         "vector_count": len(vectors),
+        "estimated_memory_mb": estimated_memory_mb,
         "skipped_count": len(index.get("skipped") or []),
         "missing_metadata_count": missing_metadata,
         "missing_fingerprint_count": missing_fingerprints,
@@ -888,6 +895,12 @@ def _format_index_stats_text(report: dict[str, Any]) -> str:
             f"built_at: {report.get('built_at')}",
             f"record_count: {report.get('record_count')}",
             f"vector_count: {report.get('vector_count')}",
+            "estimated memory: "
+            + (
+                f"{report['estimated_memory_mb']} MB"
+                if report.get("estimated_memory_mb") is not None
+                else "unknown"
+            ),
             f"skipped_count: {report.get('skipped_count')}",
             f"missing_metadata_count: {report.get('missing_metadata_count')}",
             f"missing_fingerprint_count: {report.get('missing_fingerprint_count')}",

@@ -146,6 +146,13 @@ def test_ingest_github_parser_accepts_custom_paths():
     assert args.report == Path("data/report.json")
 
 
+def test_ingest_github_parser_supports_dry_run_and_format():
+    args = build_parser().parse_args(["ingest", "github", "--dry-run", "--format", "json"])
+
+    assert args.dry_run is True
+    assert args.format == "json"
+
+
 def test_doctor_parser_uses_default_paths():
     args = build_parser().parse_args(["doctor"])
 
@@ -210,6 +217,8 @@ def test_profile_refresh_parser_uses_default_paths():
     assert args.force is False
     assert args.only_missing_search_text is False
     assert args.format == "text"
+    assert args.resume is False
+    assert args.dry_run is False
 
 
 def test_eval_run_parser_uses_default_paths():
@@ -1354,6 +1363,65 @@ def test_profile_refresh_resume_ignores_truncated_checkpoint_tail(tmp_path, monk
     refreshed = json.loads(output_file.read_text(encoding="utf-8"))
     assert [record["repo_id"] for record in refreshed] == ["one/repo", "two/repo"]
     assert not checkpoint_file.exists()
+
+
+def test_profile_refresh_dry_run_is_non_destructive(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(
+        json.dumps(
+            [
+                {
+                    "schema_version": 1,
+                    "repo_id": "one/repo",
+                    "name": "repo",
+                    "url": "https://github.com/one/repo",
+                    "github": {"description": "One repo", "topics": []},
+                    "llm_profile": {"summary": "One repo summary", "confidence": "low", "abstained": False},
+                },
+                _make_record("two/repo"),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output_file = tmp_path / "records-v2.json"
+
+    args = build_parser().parse_args(["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--dry-run", "--format", "json"])
+
+    with patch("xists.cli.generate_llm_profile") as generate:
+        code = profile_refresh(args)
+
+    assert code == 0
+    assert not output_file.exists()
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["total"] == 2
+    assert payload["to_process"] == 1
+    assert payload["to_skip"] == 1
+    assert payload["estimated_calls"] == 1
+    generate.assert_not_called()
+
+
+def test_ingest_github_dry_run_is_non_destructive(tmp_path, monkeypatch, capsys):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\nc/d\n", encoding="utf-8")
+    output_file = tmp_path / "records.json"
+    output_file.write_text(json.dumps([_make_record("a/b")]), encoding="utf-8")
+
+    args = build_parser().parse_args(
+        ["ingest", "github", "--repos", str(repos_file), "--output", str(output_file), "--dry-run", "--format", "json"]
+    )
+
+    with patch("xists.cli.llm_config_from_env") as llm_config, patch("xists.cli.collect_record") as collect:
+        code = ingest_github(args)
+
+    assert code == 0
+    assert json.loads(output_file.read_text(encoding="utf-8"))[0]["repo_id"] == "a/b"
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["total"] == 2
+    assert payload["to_process"] == 1
+    assert payload["to_skip"] == 1
+    assert payload["estimated_calls"] == 3
+    llm_config.assert_not_called()
+    collect.assert_not_called()
 
 
 def test_index_verify_reports_stale_missing_and_fingerprint_gaps(tmp_path, capsys):

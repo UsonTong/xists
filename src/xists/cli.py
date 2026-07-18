@@ -10,6 +10,7 @@ import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from math import ceil
 from pathlib import Path
 from typing import Any
 
@@ -127,6 +128,25 @@ def _append_profile_refresh_checkpoint(path: Path, record: dict[str, Any]) -> No
         handle.flush()
 
 
+def _format_dry_run_text(title: str, report: dict[str, Any]) -> str:
+    skip_reasons = report.get("skip_reasons") or {}
+    lines = [
+        f"{title} dry run",
+        "this was a dry run, nothing was written",
+        f"total: {report.get('total')}",
+        f"to_process: {report.get('to_process')}",
+        f"to_skip: {report.get('to_skip')}",
+        "skip_reasons:",
+    ]
+    if skip_reasons:
+        for reason, count in sorted(skip_reasons.items()):
+            lines.append(f"  {reason}: {count}")
+    else:
+        lines.append("  none: 0")
+    lines.append(f"estimated_calls: {report.get('estimated_calls')}")
+    return "\n".join(lines)
+
+
 def _collect_with_fallback(repo_id: str, token_pool: TokenPool, github_api: str) -> dict[str, Any]:
     if github_api == "graphql":
         try:
@@ -229,6 +249,37 @@ def _print_ingest_progress(*, processed: int, total: int, generated: int, failed
 def ingest_github(args: argparse.Namespace) -> int:
     started_at = datetime.now(timezone.utc)
     start_time = time.perf_counter()
+
+    if getattr(args, "dry_run", False):
+        repo_ids = load_repo_ids(args.repos)
+        existing: list[dict[str, Any]] = []
+        if not args.force and args.output.exists():
+            existing = json.loads(args.output.read_text(encoding="utf-8"))
+        existing_ids = {record.get("repo_id") for record in existing if isinstance(record, dict)}
+        skipped = [repo_id for repo_id in repo_ids if repo_id in existing_ids]
+        to_ingest = [repo_id for repo_id in repo_ids if repo_id not in existing_ids]
+        github_api = getattr(args, "github_api", "rest")
+        github_batch_size = getattr(args, "github_batch_size", 1) or 1
+        workers = getattr(args, "workers", 1) or 1
+        if github_api == "graphql" and github_batch_size > 1:
+            estimated_calls = ceil(len(to_ingest) / github_batch_size)
+        else:
+            estimated_calls = len(to_ingest) * 3
+        report = {
+            "total": len(repo_ids),
+            "to_process": len(to_ingest),
+            "to_skip": len(skipped),
+            "skip_reasons": {"already_exists": len(skipped)} if skipped else {},
+            "estimated_calls": estimated_calls,
+            "github_api": github_api,
+            "github_batch_size": github_batch_size,
+            "workers": workers,
+        }
+        if getattr(args, "format", "text") == "json":
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(_format_dry_run_text("ingest github", report))
+        return 0
 
     try:
         llm_config = llm_config_from_env()
@@ -1212,11 +1263,6 @@ def records_validate(args: argparse.Namespace) -> int:
 
 
 def profile_refresh(args: argparse.Namespace) -> int:
-    try:
-        config = llm_config_from_env()
-    except LLMNotConfiguredError as error:
-        print(str(error), file=sys.stderr)
-        return 2
     if not args.records.exists():
         print(f"Records file not found: {args.records}. Run 'xists ingest github' first.", file=sys.stderr)
         return 2
@@ -1225,6 +1271,41 @@ def profile_refresh(args: argparse.Namespace) -> int:
     if not isinstance(records, list):
         print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
         return 1
+
+    if getattr(args, "dry_run", False):
+        skipped_reasons: Counter[str] = Counter()
+        to_process = 0
+        to_skip = 0
+        for record in records:
+            repo_id = record_repo_id(record) or "<unknown>"
+            reason = "force" if args.force else profile_refresh_reason(
+                record,
+                only_missing_search_text=bool(args.only_missing_search_text),
+                expected_prompt_version=PROFILE_PROMPT_VERSION,
+            )
+            if reason is None:
+                to_skip += 1
+                continue
+            to_process += 1
+            skipped_reasons[reason] += 1
+        report = {
+            "total": len(records),
+            "to_process": to_process,
+            "to_skip": to_skip,
+            "skip_reasons": dict(skipped_reasons),
+            "estimated_calls": to_process,
+        }
+        if getattr(args, "format", "text") == "json":
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(_format_dry_run_text("profile refresh", report))
+        return 0
+
+    try:
+        config = llm_config_from_env()
+    except LLMNotConfiguredError as error:
+        print(str(error), file=sys.stderr)
+        return 2
 
     checkpoint_path = _profile_refresh_checkpoint_path(args.output)
     if checkpoint_path.exists() and not getattr(args, "resume", False):
@@ -1602,6 +1683,7 @@ def build_parser() -> argparse.ArgumentParser:
     github.add_argument("--report", type=Path, default=Path("report.json"), help="Path to write generation report JSON")
     github.add_argument("--token-file", type=Path, default=None, help="Optional file containing a GitHub token")
     github.add_argument("--force", action="store_true", help="Ignore existing records.json and reprocess all repos")
+    github.add_argument("--dry-run", action="store_true", help="Estimate ingest work without calling GitHub or writing files")
     github.add_argument("--workers", type=int, default=1, help="Number of concurrent workers (default: 1)")
     github.add_argument(
         "--github-api",
@@ -1614,6 +1696,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Repos per GraphQL request when --github-api=graphql (default: 1, recommended: 25-50)",
+    )
+    github.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format for dry-run reports: text (default) or json for scripts and agents",
     )
     github.set_defaults(func=ingest_github)
 
@@ -1679,6 +1767,7 @@ def build_parser() -> argparse.ArgumentParser:
     profile_refresh_parser.add_argument("--output", type=Path, default=Path("records-v2.json"), help="Path to write refreshed records JSON")
     profile_refresh_parser.add_argument("--force", action="store_true", help="Refresh every record instead of only outdated ones")
     profile_refresh_parser.add_argument("--resume", action="store_true", help="Resume from an existing partial JSONL checkpoint")
+    profile_refresh_parser.add_argument("--dry-run", action="store_true", help="Estimate refresh work without calling the LLM or writing files")
     profile_refresh_parser.add_argument(
         "--only-missing-search-text",
         action="store_true",

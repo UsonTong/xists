@@ -181,6 +181,8 @@ This fetches data from GitHub, generates LLM profiles, and writes `records.json`
 | `--report` | `report.json` | Output report file |
 | `--token-file` | (none) | File containing GitHub token(s), one per line |
 | `--force` | off | Ignore existing records.json and reprocess all repos |
+| `--dry-run` | off | Estimate work without calling GitHub or writing files |
+| `--format` | `text` | Output format for dry-run reports: text or json |
 | `--workers` | `1` | Number of concurrent workers |
 
 #### Incremental update
@@ -194,6 +196,16 @@ xists ingest github --force
 #### Checkpoint / resume
 
 Each record is written to disk as it completes. If the process is interrupted (Ctrl+C, crash, etc.), previously completed records are preserved. Simply run the command again to continue from where it left off.
+
+#### Dry run
+
+Use `--dry-run` to preview how many repos will be processed or skipped before starting a long ingest job. Dry runs do not call GitHub, do not require an LLM configuration, and never write output files.
+
+```bash
+xists ingest github --repos repos.txt --output records.json --dry-run
+```
+
+Add `--format json` when you want a machine-readable estimate.
 
 #### Multi-threaded ingest
 
@@ -238,6 +250,9 @@ This reads `records.json`, computes embeddings via the configured endpoint, and 
 | `--records` | `records.json` | Input records file |
 | `--output` | `index.json` | Output index file |
 | `--force` | off | Ignore existing index.json and rebuild from scratch |
+| `--resume` | off | Resume from an existing partial JSONL checkpoint |
+| `--dry-run` | off | Estimate refresh work without calling the LLM or writing files |
+| `--format` | `text` | Output format for dry-run reports: text or json |
 
 #### Incremental update
 
@@ -246,6 +261,16 @@ By default, `xists index build` is incremental. It reuses an existing vector onl
 #### Checkpoint / resume
 
 Each batch (64 records) is written to disk as it completes. If interrupted, completed batches are preserved.
+
+#### Dry run
+
+Use `--dry-run` to preview how many records will be refreshed versus skipped before regenerating profiles. Dry runs do not call the LLM and do not write output files.
+
+```bash
+xists profile refresh --records records.json --output records.new.json --dry-run
+```
+
+Add `--format json` when you want a machine-readable estimate.
 
 #### Model mismatch protection
 

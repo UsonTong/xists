@@ -1,6 +1,9 @@
 import json
+import threading
 from pathlib import Path
 from unittest.mock import patch
+
+import pytest
 
 from xists import __version__
 from xists.cli import (
@@ -2208,6 +2211,36 @@ def test_ingest_github_checkpoint_writes_after_each_record(tmp_path, monkeypatch
     saved = json.loads(output_file.read_text())
     assert len(saved) == 2
     assert [r["repo_id"] for r in saved] == ["a/b", "c/d"]
+
+
+def test_ingest_github_multithread_checkpoint_survives_midstream_interruption(tmp_path, monkeypatch):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\nc/d\n", encoding="utf-8")
+    output_file = tmp_path / "records.json"
+    first_completed = threading.Event()
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+
+    def fake_ingest_one(repo_id, token_pool, llm_config, github_api, max_rate_limit_wait):
+        if repo_id == "a/b":
+            first_completed.set()
+            return {"repo_id": repo_id, "record": _make_record(repo_id)}
+        assert first_completed.wait(timeout=1)
+        raise RuntimeError("simulated interruption")
+
+    args = build_parser().parse_args([
+        "ingest", "github", "--repos", str(repos_file), "--output", str(output_file),
+        "--report", str(tmp_path / "report.json"), "--workers", "2",
+    ])
+    with patch("xists.cli._ingest_one", side_effect=fake_ingest_one):
+        with pytest.raises(RuntimeError, match="simulated interruption"):
+            ingest_github(args)
+
+    saved = json.loads(output_file.read_text(encoding="utf-8"))
+    assert [record["repo_id"] for record in saved] == ["a/b"]
 
 
 def test_ingest_github_force_ignores_existing(tmp_path, monkeypatch):

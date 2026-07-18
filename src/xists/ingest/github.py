@@ -14,7 +14,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from xists import __version__
 from xists.records import RECORD_SCHEMA_VERSION
@@ -105,9 +105,16 @@ query($owner: String!, $name: String!) {
 
 
 class GitHubAPIError(RuntimeError):
-    def __init__(self, message: str, *, status: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        rate_limit_reset: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.status = status
+        self.rate_limit_reset = rate_limit_reset
 
 
 @dataclass(frozen=True)
@@ -122,19 +129,76 @@ class GitHubSnapshot:
 class TokenPool:
     """Round-robin token pool for distributing GitHub API requests across multiple tokens."""
 
-    def __init__(self, tokens: list[str]) -> None:
+    def __init__(
+        self,
+        tokens: list[str],
+        *,
+        clock: Callable[[], float] = time.time,
+        sleep: Callable[[float], None] = time.sleep,
+        progress: Callable[[str], None] | None = None,
+    ) -> None:
         self._tokens = tokens
         self._index = 0
         self._lock = threading.Lock()
+        self._rate_limited_until: dict[str, float] = {}
+        self._clock = clock
+        self._sleep = sleep
+        self._progress = progress
 
     def next_token(self) -> str | None:
-        """Return the next token in round-robin order, or None if the pool is empty."""
+        """Return an available token in round-robin order, or None if all are exhausted."""
         if not self._tokens:
             return None
         with self._lock:
-            token = self._tokens[self._index % len(self._tokens)]
-            self._index += 1
-            return token
+            now = self._clock()
+            for _ in range(len(self._tokens)):
+                token = self._tokens[self._index % len(self._tokens)]
+                self._index += 1
+                if self._rate_limited_until.get(token, 0.0) <= now:
+                    self._rate_limited_until.pop(token, None)
+                    return token
+            return None
+
+    def mark_rate_limited(self, token: str | None, reset_at: float) -> None:
+        if token is None:
+            return
+        with self._lock:
+            self._rate_limited_until[token] = reset_at
+
+    def wait_for_available_token(self, max_wait: float) -> None:
+        """Wait until the earliest exhausted token resets, bounded by max_wait."""
+        with self._lock:
+            reset_times = list(self._rate_limited_until.values())
+        if not reset_times:
+            raise GitHubAPIError("GitHub rate limit exhausted but no reset time was provided")
+
+        reset_at = min(reset_times)
+        wait_seconds = max(0.0, reset_at - self._clock()) + 5.0
+        reset_text = datetime.fromtimestamp(reset_at, timezone.utc).isoformat()
+        if wait_seconds > max_wait:
+            raise GitHubAPIError(
+                f"GitHub rate limit resets at {reset_text}; waiting {wait_seconds:.0f}s exceeds "
+                f"--max-rate-limit-wait {max_wait:.0f}s. Increase --max-rate-limit-wait or retry after reset."
+            )
+
+        remaining = wait_seconds
+        while remaining > 0:
+            if self._progress:
+                self._progress(f"rate limited, resuming at {reset_text}")
+            interval = min(60.0, remaining)
+            self._sleep(interval)
+            remaining -= interval
+
+
+def _rate_limit_reset_from_headers(headers: Any) -> float | None:
+    remaining = headers.get("x-ratelimit-remaining") if headers else None
+    reset = headers.get("x-ratelimit-reset") if headers else None
+    if str(remaining) != "0" or not reset:
+        return None
+    try:
+        return float(reset)
+    except (TypeError, ValueError):
+        return None
 
 
 def parse_github_repo(value: str) -> str:
@@ -179,7 +243,10 @@ def request_json(path: str, token: str | None = None) -> dict[str, Any]:
                 message = payload.get("message") or str(error)
             except Exception:
                 message = str(error)
-            last_error = GitHubAPIError(message, status=error.code)
+            rate_limit_reset = _rate_limit_reset_from_headers(error.headers)
+            last_error = GitHubAPIError(message, status=error.code, rate_limit_reset=rate_limit_reset)
+            if rate_limit_reset is not None and error.code in {403, 429}:
+                raise last_error from error
             if error.code not in RETRYABLE_HTTP_STATUSES or attempt == 2:
                 raise last_error from error
             time.sleep(2**attempt)
@@ -219,7 +286,10 @@ def request_graphql(query: str, variables: dict[str, Any], token: str | None = N
                 message = payload.get("message") or str(error)
             except Exception:
                 message = str(error)
-            last_error = GitHubAPIError(message, status=error.code)
+            rate_limit_reset = _rate_limit_reset_from_headers(error.headers)
+            last_error = GitHubAPIError(message, status=error.code, rate_limit_reset=rate_limit_reset)
+            if rate_limit_reset is not None and error.code in {403, 429}:
+                raise last_error from error
             if error.code not in RETRYABLE_HTTP_STATUSES or attempt == 2:
                 raise last_error from error
             time.sleep(2**attempt)
@@ -234,7 +304,13 @@ def request_graphql(query: str, variables: dict[str, Any], token: str | None = N
     errors = payload.get("errors") or []
     if errors:
         message = "; ".join(err.get("message", "GraphQL error") for err in errors)
-        raise GitHubAPIError(message)
+        rate_limit = (payload.get("data") or {}).get("rateLimit") or {}
+        reset_at = rate_limit.get("resetAt")
+        try:
+            rate_limit_reset = datetime.fromisoformat(str(reset_at).replace("Z", "+00:00")).timestamp()
+        except (TypeError, ValueError):
+            rate_limit_reset = None
+        raise GitHubAPIError(message, rate_limit_reset=rate_limit_reset)
     return payload
 
 

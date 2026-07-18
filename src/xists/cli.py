@@ -86,6 +86,47 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+def write_json_atomic(path: Path, data: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _profile_refresh_checkpoint_path(output: Path) -> Path:
+    return Path(f"{output}.partial.jsonl")
+
+
+def _load_profile_refresh_checkpoint(path: Path) -> dict[str, dict[str, Any]]:
+    refreshed: dict[str, dict[str, Any]] = {}
+    if not path.exists():
+        return refreshed
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        text = line.strip()
+        if not text:
+            continue
+        try:
+            record = json.loads(text)
+        except json.JSONDecodeError:
+            if all(not candidate.strip() for candidate in lines[index + 1 :]):
+                break
+            raise
+        if isinstance(record, dict):
+            repo_id = record_repo_id(record)
+            if repo_id:
+                refreshed[repo_id] = record
+    return refreshed
+
+
+def _append_profile_refresh_checkpoint(path: Path, record: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        handle.flush()
+
+
 def _collect_with_fallback(repo_id: str, token_pool: TokenPool, github_api: str) -> dict[str, Any]:
     if github_api == "graphql":
         try:
@@ -1185,34 +1226,71 @@ def profile_refresh(args: argparse.Namespace) -> int:
         print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
         return 1
 
+    checkpoint_path = _profile_refresh_checkpoint_path(args.output)
+    if checkpoint_path.exists() and not getattr(args, "resume", False):
+        print(
+            f"Checkpoint file already exists: {checkpoint_path}\n"
+            "Next steps:\n"
+            f"  1. Re-run with --resume to continue from the checkpoint\n"
+            f"  2. Delete {checkpoint_path} if you want to restart from scratch",
+            file=sys.stderr,
+        )
+        return 1
+
+    resumed_records = _load_profile_refresh_checkpoint(checkpoint_path) if getattr(args, "resume", False) else {}
+
     refreshed = 0
+    resumed = 0
     skipped = 0
     failed: list[dict[str, Any]] = []
     output_records: list[dict[str, Any]] = []
-    for record in records:
-        updated = dict(record)
-        repo_id = record_repo_id(updated) or "<unknown>"
-        reason = "force" if args.force else profile_refresh_reason(
-            updated,
-            only_missing_search_text=bool(args.only_missing_search_text),
-            expected_prompt_version=PROFILE_PROMPT_VERSION,
-        )
-        if reason is None:
-            updated["schema_version"] = RECORD_SCHEMA_VERSION
-            output_records.append(updated)
-            skipped += 1
-            continue
-        try:
-            profile = generate_llm_profile(updated, config)
-            attach_llm_profile(updated, profile)
-            updated["schema_version"] = RECORD_SCHEMA_VERSION
-            output_records.append(updated)
-            refreshed += 1
-        except LLMError as error:
-            failed.append({"repo_id": repo_id, "reason": str(error), "refresh_reason": reason})
-            output_records.append(updated)
+    processed = 0
+    total = len(records)
 
-    write_json(args.output, output_records)
+    try:
+        for record in records:
+            updated = dict(record)
+            repo_id = record_repo_id(updated) or "<unknown>"
+            reason = "force" if args.force else profile_refresh_reason(
+                updated,
+                only_missing_search_text=bool(args.only_missing_search_text),
+                expected_prompt_version=PROFILE_PROMPT_VERSION,
+            )
+
+            if repo_id in resumed_records:
+                output_records.append(dict(resumed_records[repo_id]))
+                resumed += 1
+            elif reason is None:
+                updated["schema_version"] = RECORD_SCHEMA_VERSION
+                output_records.append(updated)
+                skipped += 1
+            else:
+                try:
+                    profile = generate_llm_profile(updated, config)
+                    attach_llm_profile(updated, profile)
+                    updated["schema_version"] = RECORD_SCHEMA_VERSION
+                    _append_profile_refresh_checkpoint(checkpoint_path, updated)
+                    output_records.append(updated)
+                    refreshed += 1
+                except LLMError as error:
+                    failed.append({"repo_id": repo_id, "reason": str(error), "refresh_reason": reason})
+                    output_records.append(updated)
+
+            processed += 1
+            if processed % 10 == 0 or processed == total:
+                print(
+                    f"profile refresh progress: {processed}/{total} processed "
+                    f"({refreshed} refreshed, {resumed} resumed, {len(failed)} failed, {skipped} skipped)",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+        write_json_atomic(args.output, output_records)
+        if checkpoint_path.exists():
+            checkpoint_path.unlink()
+    except Exception as error:
+        print(f"profile refresh failed: {error}", file=sys.stderr)
+        return 1
     summary = {
         "records": str(args.records),
         "output": str(args.output),
@@ -1220,6 +1298,7 @@ def profile_refresh(args: argparse.Namespace) -> int:
         "profile_prompt_version": PROFILE_PROMPT_VERSION,
         "input_count": len(records),
         "refreshed_count": refreshed,
+        "resumed_count": resumed,
         "skipped_count": skipped,
         "failed_count": len(failed),
         "failed": failed,
@@ -1235,6 +1314,7 @@ def profile_refresh(args: argparse.Namespace) -> int:
                     f"schema: {RECORD_SCHEMA_VERSION}",
                     f"profile_prompt_version: {PROFILE_PROMPT_VERSION}",
                     f"refreshed: {refreshed}",
+                    f"resumed: {resumed}",
                     f"skipped: {skipped}",
                     f"failed: {len(failed)}",
                 ]
@@ -1598,6 +1678,7 @@ def build_parser() -> argparse.ArgumentParser:
     profile_refresh_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to refresh")
     profile_refresh_parser.add_argument("--output", type=Path, default=Path("records-v2.json"), help="Path to write refreshed records JSON")
     profile_refresh_parser.add_argument("--force", action="store_true", help="Refresh every record instead of only outdated ones")
+    profile_refresh_parser.add_argument("--resume", action="store_true", help="Resume from an existing partial JSONL checkpoint")
     profile_refresh_parser.add_argument(
         "--only-missing-search-text",
         action="store_true",

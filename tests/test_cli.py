@@ -1146,6 +1146,216 @@ def test_profile_refresh_writes_v2_records(tmp_path, monkeypatch, capsys):
     assert refreshed[0]["url"] == "https://github.com/old/repo"
 
 
+def test_profile_refresh_resume_reuses_partial_checkpoint(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(
+        json.dumps(
+            [
+                {
+                    "schema_version": 1,
+                    "repo_id": "one/repo",
+                    "name": "repo",
+                    "url": "https://github.com/one/repo",
+                    "github": {"description": "One repo", "topics": []},
+                    "llm_profile": {"summary": "One repo summary", "confidence": "low", "abstained": False},
+                },
+                {
+                    "schema_version": 1,
+                    "repo_id": "two/repo",
+                    "name": "repo",
+                    "url": "https://github.com/two/repo",
+                    "github": {"description": "Two repo", "topics": []},
+                    "llm_profile": {"summary": "Two repo summary", "confidence": "low", "abstained": False},
+                },
+                {
+                    "schema_version": 1,
+                    "repo_id": "three/repo",
+                    "name": "repo",
+                    "url": "https://github.com/three/repo",
+                    "github": {"description": "Three repo", "topics": []},
+                    "llm_profile": {"summary": "Three repo summary", "confidence": "low", "abstained": False},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output_file = tmp_path / "records-v2.json"
+    checkpoint_file = tmp_path / "records-v2.json.partial.jsonl"
+
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+
+    refreshed_profiles = [
+        {
+            "summary": "One repo summary",
+            "use_cases": ["use one"],
+            "capabilities": ["cap one"],
+            "not_for": [],
+            "aliases": ["repo"],
+            "project_type": "tool",
+            "ecosystem": ["python"],
+            "replaces": [],
+            "related_projects": [],
+            "search_text": "one repo search text",
+            "confidence": "high",
+            "abstained": False,
+        },
+        {
+            "summary": "Two repo summary",
+            "use_cases": ["use two"],
+            "capabilities": ["cap two"],
+            "not_for": [],
+            "aliases": ["repo"],
+            "project_type": "tool",
+            "ecosystem": ["python"],
+            "replaces": [],
+            "related_projects": [],
+            "search_text": "two repo search text",
+            "confidence": "high",
+            "abstained": False,
+        },
+        {
+            "summary": "Three repo summary",
+            "use_cases": ["use three"],
+            "capabilities": ["cap three"],
+            "not_for": [],
+            "aliases": ["repo"],
+            "project_type": "tool",
+            "ecosystem": ["python"],
+            "replaces": [],
+            "related_projects": [],
+            "search_text": "three repo search text",
+            "confidence": "high",
+            "abstained": False,
+        },
+    ]
+
+    args = build_parser().parse_args(
+        ["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--resume", "--format", "json"]
+    )
+
+    call_count = 0
+
+    def fake_generate(record, config, *, caller=None):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 3:
+            raise Exception("simulated crash")
+        return refreshed_profiles[call_count - 1]
+
+    with patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+        code = profile_refresh(args)
+
+    assert code == 1
+    assert checkpoint_file.exists()
+    checkpoint_lines = checkpoint_file.read_text(encoding="utf-8").splitlines()
+    assert len(checkpoint_lines) == 2
+    assert [json.loads(line)["repo_id"] for line in checkpoint_lines] == ["one/repo", "two/repo"]
+
+    resumed_args = build_parser().parse_args(
+        ["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--resume", "--format", "json"]
+    )
+
+    resumed_call_count = 0
+
+    def fake_generate_resume(record, config, *, caller=None):
+        nonlocal resumed_call_count
+        resumed_call_count += 1
+        return refreshed_profiles[resumed_call_count + 1]
+
+    with patch("xists.cli.generate_llm_profile", side_effect=fake_generate_resume):
+        resumed_code = profile_refresh(resumed_args)
+
+    assert resumed_code == 0
+    assert resumed_call_count == 1
+    assert not checkpoint_file.exists()
+    refreshed = json.loads(output_file.read_text(encoding="utf-8"))
+    assert [record["repo_id"] for record in refreshed] == ["one/repo", "two/repo", "three/repo"]
+    assert refreshed[0]["llm_profile"]["search_text"] == "one repo search text"
+    assert refreshed[2]["llm_profile"]["search_text"] == "three repo search text"
+
+
+def test_profile_refresh_rejects_existing_checkpoint_without_resume(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps([{**_make_record("a/b"), "schema_version": 1}]), encoding="utf-8")
+    output_file = tmp_path / "records-v2.json"
+    checkpoint_file = tmp_path / "records-v2.json.partial.jsonl"
+    checkpoint_file.write_text(json.dumps(_make_record("a/b")) + "\n", encoding="utf-8")
+
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+
+    args = build_parser().parse_args(["profile", "refresh", "--records", str(records_file), "--output", str(output_file)])
+
+    code = profile_refresh(args)
+
+    assert code == 1
+    output = capsys.readouterr().err
+    assert "--resume" in output
+    assert "Delete" in output or "delete" in output
+
+
+def test_profile_refresh_resume_ignores_truncated_checkpoint_tail(tmp_path, monkeypatch):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(
+        json.dumps(
+            [
+                {
+                    "schema_version": 1,
+                    "repo_id": "one/repo",
+                    "name": "repo",
+                    "url": "https://github.com/one/repo",
+                    "github": {"description": "One repo", "topics": []},
+                    "llm_profile": {"summary": "One repo summary", "confidence": "low", "abstained": False},
+                },
+                {
+                    "schema_version": 1,
+                    "repo_id": "two/repo",
+                    "name": "repo",
+                    "url": "https://github.com/two/repo",
+                    "github": {"description": "Two repo", "topics": []},
+                    "llm_profile": {"summary": "Two repo summary", "confidence": "low", "abstained": False},
+                },
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output_file = tmp_path / "records-v2.json"
+    checkpoint_file = tmp_path / "records-v2.json.partial.jsonl"
+    checkpoint_file.write_text(json.dumps({"repo_id": "one/repo"}) + "\n{", encoding="utf-8")
+
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_BASE_URL", "http://localhost/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+
+    refreshed_profile = {
+        "summary": "Two repo summary",
+        "use_cases": ["use two"],
+        "capabilities": ["cap two"],
+        "not_for": [],
+        "aliases": ["repo"],
+        "project_type": "tool",
+        "ecosystem": ["python"],
+        "replaces": [],
+        "related_projects": [],
+        "search_text": "two repo search text",
+        "confidence": "high",
+        "abstained": False,
+    }
+
+    args = build_parser().parse_args(["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--resume"])
+
+    with patch("xists.cli.generate_llm_profile", return_value=refreshed_profile):
+        code = profile_refresh(args)
+
+    assert code == 0
+    refreshed = json.loads(output_file.read_text(encoding="utf-8"))
+    assert [record["repo_id"] for record in refreshed] == ["one/repo", "two/repo"]
+    assert not checkpoint_file.exists()
+
+
 def test_index_verify_reports_stale_missing_and_fingerprint_gaps(tmp_path, capsys):
     records_file = tmp_path / "records.json"
     record_a = _make_record("react/react")

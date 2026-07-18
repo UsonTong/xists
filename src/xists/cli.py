@@ -201,13 +201,46 @@ def _profile_refresh_report_payload(
     }
 
 
-def _collect_with_fallback(repo_id: str, token_pool: TokenPool, github_api: str) -> dict[str, Any]:
+def _collect_with_rate_limit(
+    token_pool: TokenPool,
+    operation: Any,
+    *,
+    max_rate_limit_wait: float,
+) -> dict[str, Any]:
+    while True:
+        token = token_pool.next_token()
+        if token is None:
+            token_pool.wait_for_available_token(max_rate_limit_wait)
+            continue
+        try:
+            return operation(token)
+        except GitHubAPIError as error:
+            if error.rate_limit_reset is None:
+                raise
+            token_pool.mark_rate_limited(token, error.rate_limit_reset)
+
+
+def _collect_with_fallback(
+    repo_id: str,
+    token_pool: TokenPool,
+    github_api: str,
+    *,
+    max_rate_limit_wait: float,
+) -> dict[str, Any]:
     if github_api == "graphql":
         try:
-            return collect_record_graphql(repo_id, token=token_pool.next_token())
+            return _collect_with_rate_limit(
+                token_pool,
+                lambda token: collect_record_graphql(repo_id, token=token),
+                max_rate_limit_wait=max_rate_limit_wait,
+            )
         except GitHubAPIError as graph_error:
             try:
-                return collect_record(repo_id, token=token_pool.next_token())
+                return _collect_with_rate_limit(
+                    token_pool,
+                    lambda token: collect_record(repo_id, token=token),
+                    max_rate_limit_wait=max_rate_limit_wait,
+                )
             except GitHubAPIError as rest_error:
                 raise GitHubAPIError(
                     f"GraphQL failed: {graph_error}; REST fallback failed: {rest_error}",
@@ -215,10 +248,18 @@ def _collect_with_fallback(repo_id: str, token_pool: TokenPool, github_api: str)
                 ) from rest_error
 
     try:
-        return collect_record(repo_id, token=token_pool.next_token())
+        return _collect_with_rate_limit(
+            token_pool,
+            lambda token: collect_record(repo_id, token=token),
+            max_rate_limit_wait=max_rate_limit_wait,
+        )
     except GitHubAPIError as rest_error:
         try:
-            return collect_record_graphql(repo_id, token=token_pool.next_token())
+            return _collect_with_rate_limit(
+                token_pool,
+                lambda token: collect_record_graphql(repo_id, token=token),
+                max_rate_limit_wait=max_rate_limit_wait,
+            )
         except GitHubAPIError as graph_error:
             raise GitHubAPIError(
                 f"REST failed: {rest_error}; GraphQL fallback failed: {graph_error}",
@@ -226,10 +267,21 @@ def _collect_with_fallback(repo_id: str, token_pool: TokenPool, github_api: str)
             ) from graph_error
 
 
-def _ingest_one(repo_id: str, token_pool: TokenPool, llm_config: Any, github_api: str = "rest") -> dict[str, Any]:
+def _ingest_one(
+    repo_id: str,
+    token_pool: TokenPool,
+    llm_config: Any,
+    github_api: str = "rest",
+    max_rate_limit_wait: float = 3600,
+) -> dict[str, Any]:
     """Ingest a single repo. Returns a result dict with either 'record' or 'error'."""
     try:
-        record = _collect_with_fallback(repo_id, token_pool, github_api)
+        record = _collect_with_fallback(
+            repo_id,
+            token_pool,
+            github_api,
+            max_rate_limit_wait=max_rate_limit_wait,
+        )
         profile = generate_llm_profile(record, llm_config)
         attach_llm_profile(record, profile)
         return {"repo_id": repo_id, "record": record}
@@ -241,10 +293,19 @@ def _ingest_one(repo_id: str, token_pool: TokenPool, llm_config: Any, github_api
         return {"repo_id": repo_id, "error": _failure_entry(repo_id, str(error), status=None)}
 
 
-def _ingest_graphql_batch(repo_ids: list[str], token_pool: TokenPool, llm_config: Any) -> list[dict[str, Any]]:
+def _ingest_graphql_batch(
+    repo_ids: list[str],
+    token_pool: TokenPool,
+    llm_config: Any,
+    max_rate_limit_wait: float = 3600,
+) -> list[dict[str, Any]]:
     """Fetch multiple repos in one GraphQL request, then generate LLM profiles per record."""
     try:
-        records = collect_records_graphql(repo_ids, token=token_pool.next_token())
+        records = _collect_with_rate_limit(
+            token_pool,
+            lambda token: collect_records_graphql(repo_ids, token=token),
+            max_rate_limit_wait=max_rate_limit_wait,
+        )
     except GitHubAPIError as error:
         if len(repo_ids) == 1:
             return [
@@ -252,7 +313,7 @@ def _ingest_graphql_batch(repo_ids: list[str], token_pool: TokenPool, llm_config
             ]
         results: list[dict[str, Any]] = []
         for repo_id in repo_ids:
-            results.append(_ingest_one(repo_id, token_pool, llm_config, github_api="graphql"))
+            results.append(_ingest_one(repo_id, token_pool, llm_config, github_api="graphql", max_rate_limit_wait=max_rate_limit_wait))
         return results
     except Exception as error:
         if len(repo_ids) == 1:
@@ -261,7 +322,7 @@ def _ingest_graphql_batch(repo_ids: list[str], token_pool: TokenPool, llm_config
             ]
         results = []
         for repo_id in repo_ids:
-            results.append(_ingest_one(repo_id, token_pool, llm_config, github_api="graphql"))
+            results.append(_ingest_one(repo_id, token_pool, llm_config, github_api="graphql", max_rate_limit_wait=max_rate_limit_wait))
         return results
 
     results: list[dict[str, Any]] = []
@@ -355,7 +416,10 @@ def ingest_github(args: argparse.Namespace) -> int:
 
     repo_ids = load_repo_ids(args.repos)
     tokens = github_token_from_file(args.token_file) if args.token_file else github_token_from_env()
-    token_pool = TokenPool(tokens)
+    token_pool = TokenPool(
+        tokens,
+        progress=lambda message: print(message, file=sys.stderr, flush=True),
+    )
 
     # Load existing records for incremental update (skip with --force).
     existing: list[dict[str, Any]] = []
@@ -380,6 +444,10 @@ def ingest_github(args: argparse.Namespace) -> int:
     workers = getattr(args, "workers", 1) or 1
     github_api = getattr(args, "github_api", "rest")
     github_batch_size = getattr(args, "github_batch_size", 1) or 1
+    max_rate_limit_wait = getattr(args, "max_rate_limit_wait", 3600)
+    if max_rate_limit_wait < 0:
+        print("--max-rate-limit-wait must be zero or greater", file=sys.stderr)
+        return 2
     total_to_process = len(to_ingest)
 
     print(
@@ -411,7 +479,7 @@ def ingest_github(args: argparse.Namespace) -> int:
         if workers > 1:
             with ThreadPoolExecutor(max_workers=workers) as executor:
                 futures = {
-                    executor.submit(_ingest_graphql_batch, batch, token_pool, llm_config): batch
+                    executor.submit(_ingest_graphql_batch, batch, token_pool, llm_config, max_rate_limit_wait): batch
                     for batch in batches
                 }
                 for future in as_completed(futures):
@@ -427,7 +495,7 @@ def ingest_github(args: argparse.Namespace) -> int:
                     )
         else:
             for batch in batches:
-                for result in _ingest_graphql_batch(batch, token_pool, llm_config):
+                for result in _ingest_graphql_batch(batch, token_pool, llm_config, max_rate_limit_wait):
                     process_result(result)
                 write_json(args.output, merged)
                 _print_ingest_progress(
@@ -441,7 +509,7 @@ def ingest_github(args: argparse.Namespace) -> int:
         # Multi-threaded: process repos concurrently, checkpoint after each future completes.
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {
-                executor.submit(_ingest_one, repo_id, token_pool, llm_config, github_api): repo_id
+                executor.submit(_ingest_one, repo_id, token_pool, llm_config, github_api, max_rate_limit_wait): repo_id
                 for repo_id in to_ingest
             }
             for future in as_completed(futures):
@@ -458,7 +526,7 @@ def ingest_github(args: argparse.Namespace) -> int:
     else:
         # Single-threaded: process one by one with checkpoint after each.
         for repo_id in to_ingest:
-            process_result(_ingest_one(repo_id, token_pool, llm_config, github_api))
+            process_result(_ingest_one(repo_id, token_pool, llm_config, github_api, max_rate_limit_wait))
             write_json(args.output, merged)
             _print_ingest_progress(
                 processed=generated + len(failed),
@@ -1819,6 +1887,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format for dry-run reports: text (default) or json for scripts and agents",
     )
     github.add_argument("--retry-failed", type=Path, default=None, help="Only process repos listed in a failure report JSON")
+    github.add_argument(
+        "--max-rate-limit-wait",
+        type=float,
+        default=3600,
+        help="Maximum seconds to wait for exhausted GitHub rate limits (default: 3600)",
+    )
     github.set_defaults(func=ingest_github)
 
     index = subparsers.add_parser("index", help="Build the embedding index")

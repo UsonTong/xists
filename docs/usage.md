@@ -185,6 +185,7 @@ This fetches data from GitHub, generates LLM profiles, and writes `records.json`
 | `--format` | `text` | Output format for dry-run reports: text or json |
 | `--workers` | `1` | Number of concurrent workers |
 | `--retry-failed` | (none) | Retry only repository ids listed in a previous failure report |
+| `--max-rate-limit-wait` | `3600` | Maximum seconds to wait for exhausted GitHub API quota |
 
 #### Incremental update
 
@@ -217,6 +218,8 @@ xists ingest github --repos repos.txt --output records.json --retry-failed repor
 ```
 
 An ingest that finishes its batch with some individual failures exits `0` and writes their details to the report; a job that cannot process any selected repository exits nonzero. Failed entries are summarized on stderr.
+
+When GitHub returns `403` or `429` with an exhausted quota, xists first rotates to another configured token. If every token is exhausted, it reports the reset time on stderr and waits until reset plus five seconds. Set `--max-rate-limit-wait` to bound that wait; when the limit is exceeded, completed checkpoints remain on disk and the command exits nonzero.
 
 #### Multi-threaded ingest
 

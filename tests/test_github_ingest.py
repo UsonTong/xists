@@ -1,4 +1,6 @@
+import io
 import threading
+import urllib.error
 
 import pytest
 
@@ -17,6 +19,7 @@ from xists.ingest.github import (
     github_token_from_env,
     github_token_from_file,
     parse_github_repo,
+    request_json,
     structure_signals,
     tree_paths,
 )
@@ -251,6 +254,49 @@ def test_token_pool_thread_safety():
 
     assert len(results) == 400
     assert all(t in ("tok_a", "tok_b", "tok_c") for t in results)
+
+
+def test_rate_limited_response_waits_until_reset_plus_buffer(monkeypatch):
+    reset_at = 1_030
+    error = urllib.error.HTTPError(
+        "https://api.github.com/repos/a/b",
+        429,
+        "rate limited",
+        {"x-ratelimit-remaining": "0", "x-ratelimit-reset": str(reset_at)},
+        io.BytesIO(b'{"message": "API rate limit exceeded"}'),
+    )
+
+    def raise_rate_limit(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr("xists.ingest.github.urllib.request.urlopen", raise_rate_limit)
+    with pytest.raises(Exception) as caught:
+        request_json("repos/a/b", token="tok")
+
+    rate_error = caught.value
+    assert rate_error.rate_limit_reset == reset_at
+    sleeps: list[float] = []
+    pool = TokenPool(["tok"], clock=lambda: 1_000, sleep=sleeps.append)
+    pool.mark_rate_limited("tok", rate_error.rate_limit_reset)
+    pool.wait_for_available_token(max_wait=60)
+    assert sleeps == [35.0]
+
+
+def test_token_pool_uses_another_token_before_waiting():
+    sleeps: list[float] = []
+    pool = TokenPool(["first", "second"], clock=lambda: 1_000, sleep=sleeps.append)
+    pool.mark_rate_limited("first", 2_000)
+
+    assert pool.next_token() == "second"
+    assert sleeps == []
+
+
+def test_token_pool_rejects_wait_beyond_configured_limit():
+    pool = TokenPool(["tok"], clock=lambda: 1_000, sleep=lambda _: None)
+    pool.mark_rate_limited("tok", 2_000)
+
+    with pytest.raises(Exception, match="--max-rate-limit-wait.*retry after reset"):
+        pool.wait_for_available_token(max_wait=30)
 
 
 # --- github_token_from_env tests ---

@@ -184,6 +184,7 @@ This fetches data from GitHub, generates LLM profiles, and writes `records.json`
 | `--dry-run` | off | Estimate work without calling GitHub or writing files |
 | `--format` | `text` | Output format for dry-run reports: text or json |
 | `--workers` | `1` | Number of concurrent workers |
+| `--retry-failed` | (none) | Retry only repository ids listed in a previous failure report |
 
 #### Incremental update
 
@@ -206,6 +207,16 @@ xists ingest github --repos repos.txt --output records.json --dry-run
 ```
 
 Add `--format json` when you want a machine-readable estimate.
+
+#### Retry failures
+
+Failure reports contain retryable `repo_id` entries. Retry only those entries with:
+
+```bash
+xists ingest github --repos repos.txt --output records.json --retry-failed report.json
+```
+
+An ingest that finishes its batch with some individual failures exits `0` and writes their details to the report; a job that cannot process any selected repository exits nonzero. Failed entries are summarized on stderr.
 
 #### Multi-threaded ingest
 
@@ -301,6 +312,18 @@ xists index stats --index index.json
 ```
 
 The goal is to keep `records.json` reusable and understandable, then rebuild `index.json` whenever profile fields or embedding input fingerprints change.
+
+#### Refresh profiles safely
+
+`profile refresh` appends each successfully refreshed record to `<output>.partial.jsonl`. Re-run with `--resume` after an interruption; a normal completion atomically writes the JSON output and removes the partial file.
+
+```bash
+xists profile refresh --records records.json --output records.new.json --dry-run
+xists profile refresh --records records.json --output records.new.json --report refresh-report.json
+xists profile refresh --records records.json --output records.new.json --retry-failed refresh-report.json
+```
+
+The refresh failure report includes `repo_id`, `error`, and `attempted_at`. A completed batch with individual failures exits `0`, preserves each failed record's old profile, and writes a stderr summary. A run that cannot refresh any selected record exits nonzero so endpoint or configuration failures remain actionable.
 
 ### Step 3: Search
 

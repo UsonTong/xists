@@ -23,7 +23,7 @@ from xists.cli import (
     version,
 )
 from xists.ingest.github import GitHubAPIError
-from xists.profile.llm import PROFILE_PROMPT_VERSION
+from xists.profile.llm import LLMError, PROFILE_PROMPT_VERSION
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingError, embedding_input_fingerprint
 from xists.search.index import INDEX_VERSION
@@ -219,6 +219,8 @@ def test_profile_refresh_parser_uses_default_paths():
     assert args.format == "text"
     assert args.resume is False
     assert args.dry_run is False
+    assert args.report is None
+    assert args.retry_failed is None
 
 
 def test_eval_run_parser_uses_default_paths():
@@ -1731,6 +1733,103 @@ def test_ingest_github_graphql_batch_reports_errors(tmp_path, monkeypatch):
     assert report["failed_count"] == 2
     assert {e["repo_id"] for e in report["failed"]} == {"a/b", "c/d"}
     assert all("single repo failed" in e["reason"] for e in report["failed"])
+    assert all(e["attempted_at"].endswith("+00:00") for e in report["failed"])
+
+
+def test_profile_refresh_isolates_llm_failure_and_writes_report(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    records = [_make_record("a/b"), _make_record("c/d"), _make_record("e/f")]
+    records[1]["llm_profile"]["summary"] = "keep this old profile"
+    records_file.write_text(json.dumps(records), encoding="utf-8")
+    output_file = tmp_path / "records-v2.json"
+    report_file = tmp_path / "refresh-report.json"
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+
+    def fake_generate(record, config, *, caller=None):
+        if record["repo_id"] == "c/d":
+            raise LLMError("temporary endpoint error")
+        return record["llm_profile"]
+
+    args = build_parser().parse_args([
+        "profile", "refresh", "--records", str(records_file), "--output", str(output_file),
+        "--report", str(report_file), "--force",
+    ])
+    with patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+        code = profile_refresh(args)
+
+    assert code == 0
+    saved = json.loads(output_file.read_text(encoding="utf-8"))
+    assert [record["repo_id"] for record in saved] == ["a/b", "c/d", "e/f"]
+    assert saved[1]["llm_profile"]["summary"] == "keep this old profile"
+    report = json.loads(report_file.read_text(encoding="utf-8"))
+    assert report["failed_count"] == 1
+    assert report["failed"][0]["repo_id"] == "c/d"
+    assert report["failed"][0]["error"] == "temporary endpoint error"
+    assert report["failed"][0]["attempted_at"].endswith("+00:00")
+    assert "1 failed records" in capsys.readouterr().err
+
+
+def test_profile_refresh_retry_failed_processes_current_profile(tmp_path, monkeypatch):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps([_make_record("a/b"), _make_record("c/d")]), encoding="utf-8")
+    output_file = tmp_path / "records-v2.json"
+    report_file = tmp_path / "refresh-report.json"
+    report_file.write_text(json.dumps({"failed": [{"repo_id": "a/b"}]}), encoding="utf-8")
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    refreshed = []
+
+    def fake_generate(record, config, *, caller=None):
+        refreshed.append(record["repo_id"])
+        return record["llm_profile"]
+
+    args = build_parser().parse_args([
+        "profile", "refresh", "--records", str(records_file), "--output", str(output_file),
+        "--retry-failed", str(report_file),
+    ])
+    with patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+        assert profile_refresh(args) == 0
+
+    assert refreshed == ["a/b"]
+
+
+def test_ingest_github_retry_failed_replaces_existing_record(tmp_path, monkeypatch):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\nc/d\ne/f\n", encoding="utf-8")
+    output_file = tmp_path / "records.json"
+    output_file.write_text(json.dumps([_make_record("c/d")]), encoding="utf-8")
+    retry_report = tmp_path / "report.json"
+    retry_report.write_text(json.dumps({"failed": [{"repo_id": "c/d"}]}), encoding="utf-8")
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    collected = []
+
+    def fake_collect(repo_id, *, token=None):
+        collected.append(repo_id)
+        record = _make_record(repo_id)
+        record["llm_profile"]["summary"] = "retried"
+        return record
+
+    args = build_parser().parse_args([
+        "ingest", "github", "--repos", str(repos_file), "--output", str(output_file),
+        "--report", str(tmp_path / "new-report.json"), "--retry-failed", str(retry_report),
+    ])
+    with patch("xists.cli.collect_record", side_effect=fake_collect), \
+         patch("xists.cli.generate_llm_profile", side_effect=lambda record, config, **_: record["llm_profile"]):
+        assert ingest_github(args) == 0
+
+    assert collected == ["c/d"]
+    saved = json.loads(output_file.read_text(encoding="utf-8"))
+    assert [record["repo_id"] for record in saved] == ["c/d"]
+    assert saved[0]["llm_profile"]["summary"] == "retried"
 
 
 def test_ingest_github_graphql_batch_falls_back_to_single_repo(tmp_path, monkeypatch):
@@ -2105,7 +2204,7 @@ def test_ingest_github_checkpoint_writes_after_each_record(tmp_path, monkeypatch
         code = ingest_github(args)
 
     # Third repo crashed, but first two should be saved.
-    assert code == 1
+    assert code == 0
     saved = json.loads(output_file.read_text())
     assert len(saved) == 2
     assert [r["repo_id"] for r in saved] == ["a/b", "c/d"]

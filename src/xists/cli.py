@@ -147,6 +147,60 @@ def _format_dry_run_text(title: str, report: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _failed_repo_ids_from_report(path: Path) -> set[str]:
+    try:
+        report = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise ValueError(f"Failure report not found: {path}") from error
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Failure report is not valid JSON: {error}") from error
+    failed = report.get("failed") if isinstance(report, dict) else None
+    if not isinstance(failed, list):
+        raise ValueError(f"Failure report must contain a failed list: {path}")
+    repo_ids = {
+        item.get("repo_id")
+        for item in failed
+        if isinstance(item, dict) and isinstance(item.get("repo_id"), str) and item.get("repo_id").strip()
+    }
+    return {repo_id for repo_id in repo_ids if repo_id}
+
+
+def _failure_entry(repo_id: str, reason: str, **extra: Any) -> dict[str, Any]:
+    return {
+        "repo_id": repo_id,
+        "reason": reason,
+        "error": reason,
+        "attempted_at": datetime.now(timezone.utc).isoformat(),
+        **extra,
+    }
+
+
+def _profile_refresh_report_payload(
+    *,
+    args: argparse.Namespace,
+    records: list[dict[str, Any]],
+    output_records: list[dict[str, Any]],
+    refreshed: int,
+    resumed: int,
+    skipped: int,
+    failed: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "records": str(args.records),
+        "output": str(args.output),
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "profile_prompt_version": PROFILE_PROMPT_VERSION,
+        "input_count": len(records),
+        "refreshed_count": refreshed,
+        "resumed_count": resumed,
+        "skipped_count": skipped,
+        "failed_count": len(failed),
+        "failed": failed,
+        "attempted_at": datetime.now(timezone.utc).isoformat(),
+        "output_count": len(output_records),
+    }
+
+
 def _collect_with_fallback(repo_id: str, token_pool: TokenPool, github_api: str) -> dict[str, Any]:
     if github_api == "graphql":
         try:
@@ -180,11 +234,11 @@ def _ingest_one(repo_id: str, token_pool: TokenPool, llm_config: Any, github_api
         attach_llm_profile(record, profile)
         return {"repo_id": repo_id, "record": record}
     except GitHubAPIError as error:
-        return {"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": error.status}}
+        return {"repo_id": repo_id, "error": _failure_entry(repo_id, str(error), status=error.status)}
     except LLMError as error:
-        return {"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": None}}
+        return {"repo_id": repo_id, "error": _failure_entry(repo_id, str(error), status=None)}
     except Exception as error:
-        return {"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": None}}
+        return {"repo_id": repo_id, "error": _failure_entry(repo_id, str(error), status=None)}
 
 
 def _ingest_graphql_batch(repo_ids: list[str], token_pool: TokenPool, llm_config: Any) -> list[dict[str, Any]]:
@@ -194,7 +248,7 @@ def _ingest_graphql_batch(repo_ids: list[str], token_pool: TokenPool, llm_config
     except GitHubAPIError as error:
         if len(repo_ids) == 1:
             return [
-                {"repo_id": repo_ids[0], "error": {"repo_id": repo_ids[0], "reason": str(error), "status": error.status}}
+                {"repo_id": repo_ids[0], "error": _failure_entry(repo_ids[0], str(error), status=error.status)}
             ]
         results: list[dict[str, Any]] = []
         for repo_id in repo_ids:
@@ -203,7 +257,7 @@ def _ingest_graphql_batch(repo_ids: list[str], token_pool: TokenPool, llm_config
     except Exception as error:
         if len(repo_ids) == 1:
             return [
-                {"repo_id": repo_ids[0], "error": {"repo_id": repo_ids[0], "reason": str(error), "status": None}}
+                {"repo_id": repo_ids[0], "error": _failure_entry(repo_ids[0], str(error), status=None)}
             ]
         results = []
         for repo_id in repo_ids:
@@ -217,9 +271,9 @@ def _ingest_graphql_batch(repo_ids: list[str], token_pool: TokenPool, llm_config
             attach_llm_profile(record, profile)
             results.append({"repo_id": repo_id, "record": record})
         except LLMError as error:
-            results.append({"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": None}})
+            results.append({"repo_id": repo_id, "error": _failure_entry(repo_id, str(error), status=None)})
         except Exception as error:
-            results.append({"repo_id": repo_id, "error": {"repo_id": repo_id, "reason": str(error), "status": None}})
+            results.append({"repo_id": repo_id, "error": _failure_entry(repo_id, str(error), status=None)})
     return results
 
 
@@ -250,14 +304,26 @@ def ingest_github(args: argparse.Namespace) -> int:
     started_at = datetime.now(timezone.utc)
     start_time = time.perf_counter()
 
+    retry_failed: set[str] | None = None
+    if getattr(args, "retry_failed", None):
+        try:
+            retry_failed = _failed_repo_ids_from_report(args.retry_failed)
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
+            return 1
+
     if getattr(args, "dry_run", False):
         repo_ids = load_repo_ids(args.repos)
         existing: list[dict[str, Any]] = []
         if not args.force and args.output.exists():
             existing = json.loads(args.output.read_text(encoding="utf-8"))
         existing_ids = {record.get("repo_id") for record in existing if isinstance(record, dict)}
-        skipped = [repo_id for repo_id in repo_ids if repo_id in existing_ids]
-        to_ingest = [repo_id for repo_id in repo_ids if repo_id not in existing_ids]
+        if retry_failed is None:
+            skipped = [repo_id for repo_id in repo_ids if repo_id in existing_ids]
+            to_ingest = [repo_id for repo_id in repo_ids if repo_id not in existing_ids]
+        else:
+            skipped = [repo_id for repo_id in repo_ids if repo_id not in retry_failed]
+            to_ingest = [repo_id for repo_id in repo_ids if repo_id in retry_failed]
         github_api = getattr(args, "github_api", "rest")
         github_batch_size = getattr(args, "github_batch_size", 1) or 1
         workers = getattr(args, "workers", 1) or 1
@@ -269,7 +335,7 @@ def ingest_github(args: argparse.Namespace) -> int:
             "total": len(repo_ids),
             "to_process": len(to_ingest),
             "to_skip": len(skipped),
-            "skip_reasons": {"already_exists": len(skipped)} if skipped else {},
+            "skip_reasons": ({"already_exists": len(skipped)} if retry_failed is None else {"not_in_failure_report": len(skipped)}) if skipped else {},
             "estimated_calls": estimated_calls,
             "github_api": github_api,
             "github_batch_size": github_batch_size,
@@ -296,8 +362,14 @@ def ingest_github(args: argparse.Namespace) -> int:
     if not args.force and args.output.exists():
         existing = json.loads(args.output.read_text(encoding="utf-8"))
     existing_ids = {record.get("repo_id") for record in existing}
-    skipped = [repo_id for repo_id in repo_ids if repo_id in existing_ids]
-    to_ingest = [repo_id for repo_id in repo_ids if repo_id not in existing_ids]
+    if retry_failed is None:
+        skipped = [repo_id for repo_id in repo_ids if repo_id in existing_ids]
+        to_ingest = [repo_id for repo_id in repo_ids if repo_id not in existing_ids]
+    else:
+        skipped = [repo_id for repo_id in repo_ids if repo_id not in retry_failed]
+        to_ingest = [repo_id for repo_id in repo_ids if repo_id in retry_failed]
+        # Retry results replace any stale record with the same repository id.
+        existing = [record for record in existing if record.get("repo_id") not in retry_failed]
 
     merged: list[dict[str, Any]] = list(existing)
     failed: list[dict[str, Any]] = []
@@ -430,7 +502,13 @@ def ingest_github(args: argparse.Namespace) -> int:
         ensure_ascii=False,
         indent=2,
     ))
-    return 1 if failed else 0
+    if failed:
+        print(
+            f"ingest finished with {len(failed)} failed repos; report written to {args.report or 'stdout'}",
+            file=sys.stderr,
+            flush=True,
+        )
+    return 1 if failed and generated == 0 and total_to_process > 0 else 0
 
 
 def _index_write_checkpoint(
@@ -1272,6 +1350,14 @@ def profile_refresh(args: argparse.Namespace) -> int:
         print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
         return 1
 
+    retry_failed: set[str] | None = None
+    if getattr(args, "retry_failed", None):
+        try:
+            retry_failed = _failed_repo_ids_from_report(args.retry_failed)
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
+            return 1
+
     if getattr(args, "dry_run", False):
         skipped_reasons: Counter[str] = Counter()
         to_process = 0
@@ -1283,6 +1369,8 @@ def profile_refresh(args: argparse.Namespace) -> int:
                 only_missing_search_text=bool(args.only_missing_search_text),
                 expected_prompt_version=PROFILE_PROMPT_VERSION,
             )
+            if retry_failed is not None:
+                reason = "retry_failed" if repo_id in retry_failed else None
             if reason is None:
                 to_skip += 1
                 continue
@@ -1337,6 +1425,8 @@ def profile_refresh(args: argparse.Namespace) -> int:
                 only_missing_search_text=bool(args.only_missing_search_text),
                 expected_prompt_version=PROFILE_PROMPT_VERSION,
             )
+            if retry_failed is not None:
+                reason = "retry_failed" if repo_id in retry_failed else None
 
             if repo_id in resumed_records:
                 output_records.append(dict(resumed_records[repo_id]))
@@ -1354,7 +1444,7 @@ def profile_refresh(args: argparse.Namespace) -> int:
                     output_records.append(updated)
                     refreshed += 1
                 except LLMError as error:
-                    failed.append({"repo_id": repo_id, "reason": str(error), "refresh_reason": reason})
+                    failed.append(_failure_entry(repo_id, str(error), refresh_reason=reason))
                     output_records.append(updated)
 
             processed += 1
@@ -1370,20 +1460,39 @@ def profile_refresh(args: argparse.Namespace) -> int:
         if checkpoint_path.exists():
             checkpoint_path.unlink()
     except Exception as error:
+        if args.report:
+            write_json(
+                args.report,
+                _profile_refresh_report_payload(
+                    args=args,
+                    records=records,
+                    output_records=output_records,
+                    refreshed=refreshed,
+                    resumed=resumed,
+                    skipped=skipped,
+                    failed=[
+                        *failed,
+                        _failure_entry(
+                            record_repo_id(records[processed]) if processed < len(records) else "<unknown>",
+                            str(error),
+                            refresh_reason="interrupted",
+                        ),
+                    ],
+                ),
+            )
         print(f"profile refresh failed: {error}", file=sys.stderr)
         return 1
-    summary = {
-        "records": str(args.records),
-        "output": str(args.output),
-        "record_schema_version": RECORD_SCHEMA_VERSION,
-        "profile_prompt_version": PROFILE_PROMPT_VERSION,
-        "input_count": len(records),
-        "refreshed_count": refreshed,
-        "resumed_count": resumed,
-        "skipped_count": skipped,
-        "failed_count": len(failed),
-        "failed": failed,
-    }
+    summary = _profile_refresh_report_payload(
+        args=args,
+        records=records,
+        output_records=output_records,
+        refreshed=refreshed,
+        resumed=resumed,
+        skipped=skipped,
+        failed=failed,
+    )
+    if args.report:
+        write_json(args.report, summary)
     if getattr(args, "format", "text") == "json":
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     else:
@@ -1401,7 +1510,13 @@ def profile_refresh(args: argparse.Namespace) -> int:
                 ]
             )
         )
-    return 1 if failed else 0
+    if failed:
+        print(
+            f"profile refresh finished with {len(failed)} failed records; report written to {args.report or 'stdout'}",
+            file=sys.stderr,
+            flush=True,
+        )
+    return 1 if failed and refreshed == 0 and total > 0 else 0
 
 
 def _index_verify_report(records: list[dict[str, Any]], index: dict[str, Any]) -> dict[str, Any]:
@@ -1703,6 +1818,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="text",
         help="Output format for dry-run reports: text (default) or json for scripts and agents",
     )
+    github.add_argument("--retry-failed", type=Path, default=None, help="Only process repos listed in a failure report JSON")
     github.set_defaults(func=ingest_github)
 
     index = subparsers.add_parser("index", help="Build the embedding index")
@@ -1768,6 +1884,8 @@ def build_parser() -> argparse.ArgumentParser:
     profile_refresh_parser.add_argument("--force", action="store_true", help="Refresh every record instead of only outdated ones")
     profile_refresh_parser.add_argument("--resume", action="store_true", help="Resume from an existing partial JSONL checkpoint")
     profile_refresh_parser.add_argument("--dry-run", action="store_true", help="Estimate refresh work without calling the LLM or writing files")
+    profile_refresh_parser.add_argument("--report", type=Path, default=None, help="Path to write a refresh failure report JSON")
+    profile_refresh_parser.add_argument("--retry-failed", type=Path, default=None, help="Only process repos listed in a failure report JSON")
     profile_refresh_parser.add_argument(
         "--only-missing-search-text",
         action="store_true",

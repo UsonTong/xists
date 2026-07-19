@@ -387,7 +387,7 @@ JSON output exposes the same ranking data for automation:
 
 | Tier | Final score | Meaning |
 |------|-------------|---------|
-| `high_confidence` | ≥ 0.55 | Strong match, likely relevant |
+| `high_confidence` | ≥ 0.60 | Strong match, likely relevant |
 | `exploratory` | ≥ 0.35 | Worth investigating |
 | `abstain` | < 0.35 | Too weak, not shown |
 

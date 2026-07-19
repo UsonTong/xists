@@ -273,6 +273,12 @@ def _exact_identity_match(query: str, entry: dict[str, Any]) -> bool:
         return True
     # ASCII tokenization cannot safely represent mixed CJK natural-language queries.
     if any(0x3400 <= ord(char) <= 0x9FFF for char in query):
+        metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+        values = [str(metadata.get("name") or ""), *_string_list(metadata.get("aliases"))]
+        for value in values:
+            normalized = value.strip().lower()
+            if len(normalized) >= 3 and normalized not in LANGUAGE_TERMS and normalized in raw_query:
+                return True
         return False
     return bool(_query_variants(query) & _identity_variants(entry))
 

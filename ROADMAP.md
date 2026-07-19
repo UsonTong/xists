@@ -2032,6 +2032,8 @@ xists 的核心是：
 
 roadmap 是活文档。每次修订在此追加一条：日期、变更内容、原因。
 
+- **2026-07-19** — 2k 实验复测完成：恢复已有的 BAAI/bge-m3 TEI 容器并通过 strict doctor 后，最终结果为 recall@1 78.6%（基线 42.9%）、recall@5 78.6%（基线 64.3%）、wrong high-confidence 由 7 降至 1；两个 no-result case 均为 exploratory。初次 CJK identity 防护过宽造成 Kubernetes/CPython regression，已收窄为只允许候选的 distinct name/alias，语言 alias 不再触发 identity。剩余三项 serious mismatch 已归因，2k 的爬升门槛满足；允许准备 10k，但本次未开始 ingest。完整记录见 `docs/scale-2k-diagnosis.md`。
+
 - **2026-07-19** — 2k 实验诊断后续：将 LangChain/LlamaIndex、agent framework、关系型数据库和 data store 四个过窄的评测预期改为有理由的 acceptable alternatives；修复完整 `owner/repo` 嵌入自然语言时 identity 漏检、混合中文查询误把 ASCII 短名称当 identity，以及 no-result 分数被标为 high confidence 的通用行为。未添加任何项目/case 特判。诊断记录见 `docs/scale-2k-diagnosis.md`。配置的 embedding endpoint 当前不可用，因此新的 2k 报告尚未实测；10k 实验保持阻塞，直到该报告完成并审阅。
 
 - **2026-07-19** — v0.6.0 完成，§3 标记 [已完成]。T1 为 profile refresh 增加 JSONL checkpoint 和 `--resume`；T2 增加 ingest/profile dry-run；T3 为两者补齐失败隔离、报告和 `--retry-failed`；T4 增加 GitHub rate-limit reset 等待，并将 ingest checkpoint 从逐条重写完整 JSON 快照改为追加式 JSONL（含 resume 和截断尾行恢复）；T5 增加 recall@1/@5；T6 增加规模实验手册。运行时依赖未增加，schema/version 常量未变，`query.py` 在 v0.6 提交和验收改动中均为零行变化。完整验收证据见 `docs/v0.6.0-completion.md`；2k 实验结果属于后续 v1.0 发布前证据，不以其排名分数作为本版本收版条件。

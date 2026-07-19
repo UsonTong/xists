@@ -40,24 +40,43 @@ than attempting to make an unrelated result pass.
 Unit tests cover each generic behavior and the revised dataset validates with
 `xists eval cases`.
 
+## Verified Result
+
+The first re-run exposed an over-broad CJK identity guard: it stopped an
+explicit Kubernetes name from pinning, then treated CPython's `Python` alias as
+an identity match for a Chinese FastAPI query. The final rule only permits a
+distinct candidate name or alias in mixed CJK text; language aliases remain
+language evidence rather than project identity. Regression tests cover the
+repo-id, short-fragment, name, owner, and language-alias boundaries.
+
+With the existing `tei-embed` BAAI/bge-m3 container restored and strict doctor
+passing, the final 14-case run produced the following comparison. The generated
+report remains a local artifact at `/tmp/xists-scale-2k-eval-final.json`.
+
+| Metric | Baseline | Final |
+| --- | ---: | ---: |
+| recall@1 | 42.9% (6/14) | 78.6% (11/14) |
+| recall@5 | 64.3% (9/14) | 78.6% (11/14) |
+| acceptable top-1 | 42.9% (6/14) | 78.6% (11/14) |
+| serious top-1 | 57.1% (8/14) | 21.4% (3/14) |
+| wrong high-confidence | 7 | 1 |
+
+Both no-result cases now return exploratory, rather than high-confidence,
+candidates. The remaining serious cases are fully attributed:
+
+- `ambiguous-ui-chinese` returns `microsoft/fast`, a framework-agnostic Web
+  Components library rather than one of the declared frontend frameworks. This
+  is a multilingual intent/project-type data-quality issue; it is deliberately
+  not marked acceptable merely to improve the metric.
+- The two no-result cases remain serious according to the evaluator because
+  they return an exploratory candidate instead of abstaining. This is expected
+  evidence for a future generic abstention design, not a high-confidence false
+  claim.
+
 ## Promotion Gate
 
-The post-change 2k evaluation has not been recorded because the configured
-embedding endpoint at `http://localhost:6597/v1` refused connections on
-2026-07-19. The index is valid, but evaluation needs query embeddings and
-cannot be reconstructed from stored candidate vectors alone.
-
-Before any 10k ingest, start or configure the BAAI/bge-m3 endpoint, then run:
-
-```bash
-xists doctor --check-endpoints --strict
-xists eval run --cases data/scale-2k-eval-cases.json \
-  --index data/scale-2k-index.json \
-  --output /tmp/scale-2k-eval-after.json --top-k 10
-xists eval inspect --report /tmp/scale-2k-eval-after.json --limit 50
-```
-
-Promotion remains blocked until that report is reviewed. The required evidence
-is: no high-confidence no-result result, no systematic category regression,
-and a documented attribution for every remaining mismatch. Do not change
-`query.py` merely to improve an individual case.
+The 2k gate is satisfied: ingestion and profile refresh had zero failures,
+there is no systemic retrieval regression, every remaining mismatch is
+attributed, and no no-result query is high confidence. The 10k experiment may
+now be prepared using `docs/scaling-experiment.md`, but it has not been started
+by this change. Do not change `query.py` merely to improve an individual case.

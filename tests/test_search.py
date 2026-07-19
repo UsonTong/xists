@@ -269,6 +269,50 @@ def test_cjk_context_does_not_pin_an_ascii_name_fragment():
     assert result["results"][0]["diagnostics"]["identity_match"] is None
 
 
+def test_cjk_context_pins_a_distinct_ascii_name():
+    index = make_index(
+        [
+            {"repo_id": "kubernetes/kubernetes", "vector": [0.0, 1.0], "metadata": {"name": "kubernetes"}},
+            {"repo_id": "semantic/winner", "vector": [1.0, 0.0], "metadata": {"name": "winner"}},
+        ]
+    )
+
+    result = rank(
+        "Kubernetes 云原生容器编排平台",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+    )
+
+    assert result["results"][0]["repo_id"] == "kubernetes/kubernetes"
+    assert result["results"][0]["diagnostics"]["identity_match"] == "exact"
+
+
+def test_cjk_context_does_not_pin_a_repo_owner_fragment():
+    index = make_index(
+        [
+            {
+                "repo_id": "python/cpython",
+                "vector": [0.0, 1.0],
+                "metadata": {"name": "cpython", "aliases": ["Python"]},
+            },
+            {"repo_id": "fastapi/fastapi", "vector": [1.0, 0.0], "metadata": {"name": "fastapi"}},
+        ]
+    )
+
+    result = rank(
+        "Python 异步 Web API 框架",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+    )
+
+    assert result["results"][0]["repo_id"] == "fastapi/fastapi"
+    assert result["results"][0]["diagnostics"]["identity_match"] is None
+
+
 def test_unsupported_semantic_match_is_exploratory_not_high_confidence():
     index = make_index(
         [{"repo_id": "unrelated/repo", "vector": vector_for_cosine(0.58), "metadata": {}}]

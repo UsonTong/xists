@@ -11,3 +11,9 @@ demo-index.json
 demo-report.json
 demo-eval-report.json
 eval-report.json
+repos-top10k.txt
+data/scale-*-records*.json
+data/scale-*-profiled-records*.json
+data/scale-*-index.json
+data/scale-*-report.json
+data/scale-*-result.json

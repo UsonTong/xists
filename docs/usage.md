@@ -314,6 +314,7 @@ The goal is to keep `records.json` reusable and understandable, then rebuild `in
 xists profile refresh --records records.json --output records.new.json --dry-run
 xists profile refresh --records records.json --output records.new.json --report refresh-report.json
 xists profile refresh --records records.json --output records.new.json --retry-failed refresh-report.json
+xists profile refresh --records records.json --only-missing-summary --output records.new.json
 ```
 
 Use `--dry-run` to preview refresh work without calling the LLM or writing files; add `--format json` for a machine-readable estimate. Profile generation allows up to 600 seconds for an individual OpenAI-compatible LLM response, which accommodates local or heavily loaded models during long refreshes.

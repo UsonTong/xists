@@ -81,10 +81,13 @@ def profile_refresh_reason(
     record: dict[str, Any],
     *,
     only_missing_search_text: bool = False,
+    only_missing_summary: bool = False,
     expected_prompt_version: int | None = None,
 ) -> str | None:
     profile = record_profile(record)
     schema_version = record_schema_version(record)
+    if only_missing_summary:
+        return None if profile.get("summary") else "missing_summary"
     if only_missing_search_text:
         return None if profile.get("search_text") else "missing_search_text"
     if schema_version != RECORD_SCHEMA_VERSION:
@@ -162,13 +165,20 @@ def records_validation_report(
             record_has_error = True
             continue
 
+        profile_abstained = bool(profile.get("abstained"))
         if profile.get("summary") is None:
-            issues["errors"]["missing_summary"] += 1
-            record_has_error = True
+            if profile_abstained:
+                issues["warnings"]["abstained_missing_summary"] += 1
+            else:
+                issues["errors"]["missing_summary"] += 1
+                record_has_error = True
         search_text = profile.get("search_text")
         if not search_text:
-            issues["errors"]["missing_search_text"] += 1
-            record_has_error = True
+            if profile_abstained:
+                issues["warnings"]["abstained_missing_search_text"] += 1
+            else:
+                issues["errors"]["missing_search_text"] += 1
+                record_has_error = True
         elif len(search_text) < MIN_SEARCH_TEXT_CHARS:
             issues["warnings"]["search_text_too_short"] += 1
             short_search_text.append(repo_id)
@@ -183,7 +193,7 @@ def records_validation_report(
         if profile.get("confidence") == "low":
             low_confidence.append(repo_id)
             issues["warnings"]["low_confidence_profile"] += 1
-        if profile.get("abstained"):
+        if profile_abstained:
             abstained.append(repo_id)
             issues["warnings"]["profile_abstained"] += 1
         if not record_has_error:

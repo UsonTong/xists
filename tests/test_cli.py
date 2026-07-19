@@ -220,6 +220,7 @@ def test_profile_refresh_parser_uses_default_paths():
     assert args.output == Path("records-v2.json")
     assert args.force is False
     assert args.only_missing_search_text is False
+    assert args.only_missing_summary is False
     assert args.format == "text"
     assert args.resume is False
     assert args.dry_run is False
@@ -1000,6 +1001,28 @@ def test_records_validate_reports_schema_and_profile_gaps(tmp_path, capsys):
     assert "records-v2.json" in payload["next_steps"][0]
 
 
+def test_records_validate_allows_empty_profile_fields_for_abstained_record(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    record = _make_record("abstained/repo")
+    record["llm_profile"] = {
+        "summary": None,
+        "search_text": None,
+        "confidence": "low",
+        "abstained": True,
+    }
+    records_file.write_text(json.dumps([record]), encoding="utf-8")
+
+    args = build_parser().parse_args(["records", "validate", "--records", str(records_file), "--format", "json"])
+
+    assert records_validate(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is True
+    assert "missing_summary" not in payload["errors"]
+    assert "missing_search_text" not in payload["errors"]
+    assert payload["warnings"]["abstained_missing_summary"] == 1
+    assert payload["warnings"]["abstained_missing_search_text"] == 1
+
+
 def test_records_validate_reports_quality_warnings_in_text(tmp_path, capsys):
     records_file = tmp_path / "records.json"
     records_file.write_text(
@@ -1199,6 +1222,45 @@ def test_profile_refresh_workers_runs_profiles_concurrently_and_preserves_order(
     saved = json.loads(output_file.read_text(encoding="utf-8"))
     assert [record["repo_id"] for record in saved] == ["one/repo", "two/repo", "three/repo"]
     assert not (tmp_path / "records-v2.json.partial.jsonl").exists()
+
+
+def test_profile_refresh_only_missing_summary_limits_selected_records(tmp_path, monkeypatch):
+    records_file = tmp_path / "records.json"
+    missing_summary = _make_record("missing/summary")
+    missing_summary["llm_profile"]["summary"] = ""
+    complete = _make_record("complete/record")
+    records_file.write_text(json.dumps([missing_summary, complete]), encoding="utf-8")
+    output_file = tmp_path / "records-v2.json"
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    refreshed_ids = []
+
+    def fake_generate(record, config, *, caller=None):
+        refreshed_ids.append(record["repo_id"])
+        profile = dict(record["llm_profile"])
+        profile["summary"] = "Repaired summary"
+        return profile
+
+    args = build_parser().parse_args(
+        [
+            "profile",
+            "refresh",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--only-missing-summary",
+        ]
+    )
+    with patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+        assert profile_refresh(args) == 0
+
+    assert refreshed_ids == ["missing/summary"]
+    saved = json.loads(output_file.read_text(encoding="utf-8"))
+    assert saved[0]["llm_profile"]["summary"] == "Repaired summary"
+    assert saved[1] == complete
 
 
 def test_profile_refresh_resume_reuses_partial_checkpoint(tmp_path, monkeypatch, capsys):

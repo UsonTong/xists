@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "dataset_name": "xists-scale-10k-full-candidate",
+  "cases": [
+    {"id":"exact-react","query":"react/react","expected_repo_id":"react/react","tags":["exact-name","web"]},
+    {"id":"exact-react-chinese","query":"查找 React 前端库 react/react","expected_repo_id":"react/react","tags":["exact-name","web","chinese"]},
+    {"id":"exact-vscode","query":"microsoft/vscode","expected_repo_id":"microsoft/vscode","tags":["exact-name","devtools"]},
+    {"id":"functional-fastapi-chinese","query":"Python 异步 Web API 框架","expected_repo_id":"fastapi/fastapi","tags":["functional","web","chinese"]},
+    {"id":"functional-local-llm","query":"run large language models locally","expected_repo_id":"ollama/ollama","tags":["functional","ai-llm"]},
+    {"id":"functional-postgres","query":"open source relational database","expected_repo_id":"postgres/postgres","acceptable":["MariaDB/server"],"tags":["functional","data"]},
+    {"id":"ecosystem-kubernetes-chinese","query":"Kubernetes 云原生容器编排平台","expected_repo_id":"kubernetes/kubernetes","tags":["ecosystem","infra","chinese"]},
+    {"id":"ecosystem-rust-async","query":"Rust asynchronous runtime","expected_repo_id":"tokio-rs/tokio","tags":["ecosystem","devtools"]},
+    {"id":"ecosystem-langchain","query":"Python LLM application framework","expected_repo_id":"langchain-ai/langchain","acceptable":["run-llama/llama_index"],"tags":["ecosystem","ai-llm"]},
+    {"id":"ambiguous-ui-chinese","query":"现代前端 UI 框架","expected_repo_id":"react/react","acceptable":["vuejs/vue","sveltejs/svelte"],"tags":["ambiguous","web","chinese"]},
+    {"id":"ambiguous-ai-agent","query":"LLM application and agent framework","expected_repo_id":"langchain-ai/langchain","acceptable":["ollama/ollama","microsoft/semantic-kernel","run-llama/llama_index"],"tags":["ambiguous","ai-llm"]},
+    {"id":"ambiguous-database","query":"reliable open source data store","expected_repo_id":"postgres/postgres","acceptable":["valkey-io/valkey"],"tags":["ambiguous","data"]},
+    {"id":"no-result-mars-chinese","query":"管理火星殖民地量子财务的专用开源系统","expected_repo_id":"xists/no-such-mars-quantum-finance","tags":["no-result","chinese"]},
+    {"id":"no-result-impossible","query":"software for telepathic interstellar payroll compliance","expected_repo_id":"xists/no-such-telepathic-payroll","tags":["no-result"]}
+  ]
+}

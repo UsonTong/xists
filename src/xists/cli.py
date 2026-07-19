@@ -1481,6 +1481,7 @@ def profile_refresh(args: argparse.Namespace) -> int:
             reason = "force" if args.force else profile_refresh_reason(
                 record,
                 only_missing_search_text=bool(args.only_missing_search_text),
+                only_missing_summary=bool(getattr(args, "only_missing_summary", False)),
                 expected_prompt_version=PROFILE_PROMPT_VERSION,
             )
             if retry_failed is not None:
@@ -1541,6 +1542,7 @@ def profile_refresh(args: argparse.Namespace) -> int:
         reason = "force" if args.force else profile_refresh_reason(
             updated,
             only_missing_search_text=bool(args.only_missing_search_text),
+            only_missing_summary=bool(getattr(args, "only_missing_summary", False)),
             expected_prompt_version=PROFILE_PROMPT_VERSION,
         )
         if retry_failed is not None:
@@ -2070,6 +2072,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--only-missing-search-text",
         action="store_true",
         help="Only refresh records whose profile is missing search_text",
+    )
+    profile_refresh_parser.add_argument(
+        "--only-missing-summary",
+        action="store_true",
+        help="Only refresh records whose profile is missing a summary",
     )
     profile_refresh_parser.add_argument(
         "--format",

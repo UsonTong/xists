@@ -53,6 +53,9 @@
       "id": "functional-postgres",
       "query": "open source relational database",
       "expected_repo_id": "postgres/postgres",
+      "acceptable": [
+        "MariaDB/server"
+      ],
       "tags": [
         "functional",
         "data"
@@ -81,6 +84,9 @@
       "id": "ecosystem-langchain",
       "query": "Python LLM application framework",
       "expected_repo_id": "langchain-ai/langchain",
+      "acceptable": [
+        "run-llama/llama_index"
+      ],
       "tags": [
         "ecosystem",
         "ai-llm"
@@ -105,7 +111,9 @@
       "query": "LLM application and agent framework",
       "expected_repo_id": "langchain-ai/langchain",
       "acceptable": [
-        "ollama/ollama"
+        "ollama/ollama",
+        "microsoft/semantic-kernel",
+        "run-llama/llama_index"
       ],
       "tags": [
         "ambiguous",
@@ -116,6 +124,9 @@
       "id": "ambiguous-database",
       "query": "reliable open source data store",
       "expected_repo_id": "postgres/postgres",
+      "acceptable": [
+        "valkey-io/valkey"
+      ],
       "tags": [
         "ambiguous",
         "data"

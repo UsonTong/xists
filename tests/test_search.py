@@ -146,6 +146,8 @@ def test_cosine_similarity_and_confidence_bucket():
     assert cosine_similarity([1, 0], [0, 1]) == pytest.approx(0.0)
     assert cosine_similarity([0, 0], [1, 1]) == 0.0
     assert confidence_bucket(0.9) == "high_confidence"
+    assert confidence_bucket(0.599) == "exploratory"
+    assert confidence_bucket(0.6) == "high_confidence"
     assert confidence_bucket(0.4) == "exploratory"
     assert confidence_bucket(0.1) == "abstain"
 
@@ -225,6 +227,56 @@ def test_exact_identity_is_pinned_even_when_embedding_is_weaker():
     assert result["results"][0]["confidence"] == "high_confidence"
     assert result["results"][0]["diagnostics"]["identity_match"] == "exact"
     assert "matched exact repository identity" in result["results"][0]["why"]
+
+
+def test_repo_id_identity_is_pinned_inside_natural_language_query():
+    index = make_index(
+        [
+            {"repo_id": "react/react", "vector": [0.0, 1.0], "metadata": {"name": "react"}},
+            {"repo_id": "semantic/winner", "vector": [1.0, 0.0], "metadata": {"name": "winner"}},
+        ]
+    )
+
+    result = rank(
+        "查找 React 前端库 react/react",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+    )
+
+    assert result["results"][0]["repo_id"] == "react/react"
+    assert result["results"][0]["diagnostics"]["identity_match"] == "exact"
+
+
+def test_cjk_context_does_not_pin_an_ascii_name_fragment():
+    index = make_index(
+        [
+            {"repo_id": "shadcn-ui/ui", "vector": [0.0, 1.0], "metadata": {"name": "ui"}},
+            {"repo_id": "react/react", "vector": [1.0, 0.0], "metadata": {"name": "react"}},
+        ]
+    )
+
+    result = rank(
+        "现代前端 UI 框架",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+    )
+
+    assert result["results"][0]["repo_id"] == "react/react"
+    assert result["results"][0]["diagnostics"]["identity_match"] is None
+
+
+def test_unsupported_semantic_match_is_exploratory_not_high_confidence():
+    index = make_index(
+        [{"repo_id": "unrelated/repo", "vector": vector_for_cosine(0.58), "metadata": {}}]
+    )
+
+    result = rank("unsupported specialized system", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+    assert result["results"][0]["confidence"] == "exploratory"
 
 
 def test_alias_identity_is_pinned():

@@ -2032,6 +2032,8 @@ xists 的核心是：
 
 roadmap 是活文档。每次修订在此追加一条：日期、变更内容、原因。
 
+- **2026-07-19** — 2k 实验诊断后续：将 LangChain/LlamaIndex、agent framework、关系型数据库和 data store 四个过窄的评测预期改为有理由的 acceptable alternatives；修复完整 `owner/repo` 嵌入自然语言时 identity 漏检、混合中文查询误把 ASCII 短名称当 identity，以及 no-result 分数被标为 high confidence 的通用行为。未添加任何项目/case 特判。诊断记录见 `docs/scale-2k-diagnosis.md`。配置的 embedding endpoint 当前不可用，因此新的 2k 报告尚未实测；10k 实验保持阻塞，直到该报告完成并审阅。
+
 - **2026-07-19** — v0.6.0 完成，§3 标记 [已完成]。T1 为 profile refresh 增加 JSONL checkpoint 和 `--resume`；T2 增加 ingest/profile dry-run；T3 为两者补齐失败隔离、报告和 `--retry-failed`；T4 增加 GitHub rate-limit reset 等待，并将 ingest checkpoint 从逐条重写完整 JSON 快照改为追加式 JSONL（含 resume 和截断尾行恢复）；T5 增加 recall@1/@5；T6 增加规模实验手册。运行时依赖未增加，schema/version 常量未变，`query.py` 在 v0.6 提交和验收改动中均为零行变化。完整验收证据见 `docs/v0.6.0-completion.md`；2k 实验结果属于后续 v1.0 发布前证据，不以其排名分数作为本版本收版条件。
 
 - **2026-07-17** — v0.5.0 完成，§3 标记 [已完成]。按 §11 执行：T1 四项兼容检查核实补全（model/dimension/input_version/schema_version 检查均已存在，新补"index 缺 embedding_model 字段静默通过"的报错与 4 个 mismatch 测试）；T2 `scripts/generate_synthetic_index.py`；T3 `docs/performance.md`（1k/10k 基线，AMD Ryzen 7 7735H）；T4 `index stats` 增加 `estimated_memory_mb`；T5 `tests/test_performance_smoke.py`。两项需维护者知悉：(1) T3 按其"重复工作"例外条款给 `query.py` 的 `_expanded_token` 加了 `lru_cache`（与 `_tokenize`/`_keyword_tokens` 同惯例，纯 memoization 零打分变化，全部测试不变通过），10k 核心搜索从 2.28s/1.62s 降至 1.56s/0.86s（rank/rank_many）；(2) **待决策**：`rank_many`（numpy 矩阵路径）10k 核心 0.86s 达标，但 CLI `search` 实际使用的单查询 `rank()` 用纯 Python cosine 循环打分，10k 时 1.56s 超过 §11 T3 的 1 秒线——非 O(n²)，是线性但常数大的标量实现。统一 `rank()` 到矩阵路径可解决，但 float32 矩阵与 float64 标量的分数差异约 1e-4，属打分行为变更，依 T3 规定不擅自优化，留待维护者裁决（详见 docs/performance.md）。

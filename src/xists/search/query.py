@@ -12,7 +12,7 @@ import numpy as np
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingConfig, EmbeddingError, call_embeddings, embed_query
 
-HIGH_CONFIDENCE_THRESHOLD = 0.55
+HIGH_CONFIDENCE_THRESHOLD = 0.60
 EXPLORATORY_THRESHOLD = 0.35
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*")
 
@@ -265,6 +265,15 @@ def _identity_variants(entry: dict[str, Any]) -> set[str]:
 
 
 def _exact_identity_match(query: str, entry: dict[str, Any]) -> bool:
+    raw_query = query.strip().lower()
+    repo_id = str(entry.get("repo_id") or "").strip().lower()
+    if repo_id and repo_id in raw_query:
+        return True
+    if raw_query in {value.strip().lower() for value in _identity_values(entry)}:
+        return True
+    # ASCII tokenization cannot safely represent mixed CJK natural-language queries.
+    if any(0x3400 <= ord(char) <= 0x9FFF for char in query):
+        return False
     return bool(_query_variants(query) & _identity_variants(entry))
 
 

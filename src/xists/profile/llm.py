@@ -195,7 +195,7 @@ def parse_llm_profile_response(content: str) -> dict[str, Any]:
     return profile
 
 
-def call_llm(config: LLMConfig, messages: list[dict[str, str]], *, timeout: int = 60) -> LLMResponse:
+def call_llm(config: LLMConfig, messages: list[dict[str, str]], *, timeout: int = 600) -> LLMResponse:
     """Call an OpenAI-compatible chat completions endpoint."""
 
     payload = {

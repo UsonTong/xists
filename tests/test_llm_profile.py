@@ -10,6 +10,7 @@ from xists.profile.llm import (
     PROFILE_PROMPT_VERSION,
     attach_llm_profile,
     build_profile_messages,
+    call_llm,
     generate_llm_profile,
     input_evidence_kinds,
     llm_config_from_env,
@@ -60,6 +61,32 @@ def test_llm_config_from_env_builds_config(monkeypatch):
     assert config.base_url == "https://api.example.com/v1"
     assert config.model == "test-model"
     assert config.chat_completions_url == "https://api.example.com/v1/chat/completions"
+
+
+def test_call_llm_uses_extended_default_timeout(monkeypatch):
+    config = LLMConfig(api_key="key", base_url="https://api.example.com/v1", model="test-model")
+    observed: dict[str, int] = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def read(self):
+            return b'{"choices": [{"message": {"content": "{}"}}]}'
+
+    def fake_urlopen(request, *, timeout):
+        observed["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr("xists.profile.llm.urllib.request.urlopen", fake_urlopen)
+
+    response = call_llm(config, [{"role": "user", "content": "profile this"}])
+
+    assert response.content == "{}"
+    assert observed["timeout"] == 600
 
 
 def test_profile_input_only_includes_collected_evidence():

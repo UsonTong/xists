@@ -38,12 +38,34 @@ def build_summary(report: dict[str, Any]) -> dict[str, Any]:
     insufficient_evidence_count = int(top1_summary.get("top1_miss_insufficient_evidence_count") or 0)
     abstain_count = sum(1 for result in report.get("results", []) if result.get("abstained"))
     wrong_high_confidence_count = int(confidence.get("wrong_high_confidence_top_1_count") or 0)
+    recall_at_1_count = sum(
+        1
+        for result in report.get("results", [])
+        if isinstance(result, dict) and result.get("acceptable_rank") == 1
+    )
+    recall_at_5_count = sum(
+        1
+        for result in report.get("results", [])
+        if isinstance(result, dict)
+        and isinstance(result.get("acceptable_rank"), int)
+        and result["acceptable_rank"] <= 5
+    )
 
     return {
         "case_count": case_count,
         "exact_top_1": {
             "count": exact_top1_count,
             "rate": metrics.get("exact_top1_rate", metrics.get("exact_hit_at_1", 0.0)),
+        },
+        "recall_at_1": {
+            "count": recall_at_1_count,
+            "rate": metrics.get("recall_at_1", metrics.get("acceptable_hit_at_1", 0.0)),
+            "description": "expected repo or a dataset-declared acceptable alternative appears at rank 1",
+        },
+        "recall_at_5": {
+            "count": recall_at_5_count,
+            "rate": metrics.get("recall_at_5", 0.0),
+            "description": "expected repo or a dataset-declared acceptable alternative appears in ranks 1 through 5",
         },
         "acceptable_top_1": {
             "count": acceptable_top1_count,
@@ -85,6 +107,8 @@ def build_summary_text(summary: dict[str, Any]) -> list[str]:
 
     case_count = int(summary.get("case_count") or 0)
     return [
+        f"recall@1: {_safe_rate_count((summary.get('recall_at_1') or {}).get('rate'), (summary.get('recall_at_1') or {}).get('count'), case_count)}",
+        f"recall@5: {_safe_rate_count((summary.get('recall_at_5') or {}).get('rate'), (summary.get('recall_at_5') or {}).get('count'), case_count)}",
         f"exact top-1: {_safe_rate_count((summary.get('exact_top_1') or {}).get('rate'), (summary.get('exact_top_1') or {}).get('count'), case_count)}",
         f"acceptable top-1: {_safe_rate_count((summary.get('acceptable_top_1') or {}).get('rate'), (summary.get('acceptable_top_1') or {}).get('count'), case_count)}",
         f"effective top-1: {_safe_rate_count((summary.get('effective_top_1') or {}).get('rate'), (summary.get('effective_top_1') or {}).get('count'), case_count)}",

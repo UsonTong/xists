@@ -83,6 +83,7 @@ def evaluate_dataset(
     exact_hit_at_k = 0
     acceptable_hit_at_1 = 0
     acceptable_hit_at_k = 0
+    recall_at_5 = 0
     abstained = 0
     mrr_exact_total = 0.0
     mrr_acceptable_total = 0.0
@@ -136,6 +137,8 @@ def evaluate_dataset(
         if acceptable_rank is not None:
             acceptable_hit_at_k += 1
             mrr_acceptable_total += 1.0 / acceptable_rank
+            if acceptable_rank <= 5:
+                recall_at_5 += 1
 
         if top_result_confidence == "high_confidence":
             top_1_high_confidence_count += 1
@@ -221,6 +224,8 @@ def evaluate_dataset(
         "mrr_exact": _round_metric(_safe_divide(mrr_exact_total, case_count)),
         "acceptable_hit_at_1": _round_metric(_safe_divide(acceptable_hit_at_1, case_count)),
         "acceptable_hit_at_k": _round_metric(_safe_divide(acceptable_hit_at_k, case_count)),
+        "recall_at_1": _round_metric(_safe_divide(acceptable_hit_at_1, case_count)),
+        "recall_at_5": _round_metric(_safe_divide(recall_at_5, case_count)),
         "mrr_acceptable": _round_metric(_safe_divide(mrr_acceptable_total, case_count)),
         "abstain_rate": _round_metric(_safe_divide(abstained, case_count)),
         "acceptable_minus_exact_hit_at_1": _round_metric(

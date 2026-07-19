@@ -87,6 +87,10 @@ def normalize_dataset(raw: Any) -> dict[str, Any]:
         acceptable_repo_ids = _expect_string_list(
             raw_case.get("acceptable_repo_ids"), field="acceptable_repo_ids", case_id=case_id
         )
+        acceptable_aliases = _expect_string_list(
+            raw_case.get("acceptable"), field="acceptable", case_id=case_id
+        )
+        acceptable_repo_ids = list(dict.fromkeys([*acceptable_repo_ids, *acceptable_aliases]))
         acceptable_families = _expect_string_list(
             raw_case.get("acceptable_families"), field="acceptable_families", case_id=case_id
         )
@@ -111,6 +115,7 @@ def normalize_dataset(raw: Any) -> dict[str, Any]:
                 "query": query,
                 "expected_repo_id": expected_repo_id,
                 "acceptable_repo_ids": acceptable_repo_ids,
+                "acceptable": acceptable_aliases,
                 "acceptable_families": acceptable_families,
                 "acceptable_set": sorted(acceptable_set),
                 "tags": tags,

@@ -461,7 +461,7 @@ adding cases:
 
 - keep `id` stable and descriptive; changing an id makes trend comparison harder
 - choose an `expected_repo_id` that exists in `repos.txt` and the demo records
-- add `acceptable_repo_ids` or `acceptable_families` for broad or ambiguous queries
+- add `acceptable` (or the legacy `acceptable_repo_ids`) or `acceptable_families` for broad or ambiguous queries
 - use tags to preserve coverage across tools, language ecosystems, alternatives,
   weak-signal queries, and major product areas
 - run `xists eval cases --cases examples/eval-cases.json` and `pytest` before
@@ -493,7 +493,7 @@ xists eval inspect --report demo-eval-report.json --tag weak-signal
       "id": "react-ui-1",
       "query": "frontend ui library",
       "expected_repo_id": "react/react",
-      "acceptable_repo_ids": ["facebook/react"],
+      "acceptable": ["facebook/react"],
       "acceptable_families": ["react-family"],
       "tags": ["frontend", "ui"],
       "notes": "forks and sibling repos are acceptable"
@@ -502,7 +502,7 @@ xists eval inspect --report demo-eval-report.json --tag weak-signal
 }
 ```
 
-`expected_repo_id` is the exact target for strict scoring. `acceptable_repo_ids` and `acceptable_families` let you count highly similar repos, forks, or same-family alternatives without weakening the exact metric.
+`expected_repo_id` is the exact target for strict scoring. `acceptable` is an optional repo-id array for alternatives that count as retrieval hits; `acceptable_repo_ids` is kept as a compatible alias. `acceptable_families` expands named repo families. All three let you count highly similar repos, forks, or same-family alternatives without weakening the exact metric.
 
 #### Metrics
 
@@ -511,6 +511,7 @@ Core retrieval metrics:
 - `exact_hit_at_1` / `exact_hit_at_k`: the expected repo is ranked first or appears anywhere in the top K
 - `mrr_exact`: how early the expected repo appears on average
 - `acceptable_hit_at_1` / `acceptable_hit_at_k`: the expected repo or an acceptable same-family alternative appears in the top results
+- `recall_at_1` / `recall_at_5`: the expected repo or a dataset-declared acceptable alternative appears at rank 1 or anywhere in the first five results
 - `mrr_acceptable`: how early the first acceptable result appears on average
 - `abstain_rate`: the fraction of queries where search returns no result above the exploratory threshold
 

@@ -1463,6 +1463,11 @@ def profile_refresh(args: argparse.Namespace) -> int:
         print(str(error), file=sys.stderr)
         return 2
 
+    workers = getattr(args, "workers", 1) or 1
+    if workers < 1:
+        print("--workers must be at least 1", file=sys.stderr)
+        return 1
+
     checkpoint_path = _profile_refresh_checkpoint_path(args.output)
     if checkpoint_path.exists() and not getattr(args, "resume", False):
         print(
@@ -1484,45 +1489,97 @@ def profile_refresh(args: argparse.Namespace) -> int:
     processed = 0
     total = len(records)
 
+    def prepare_record(record: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+        updated = dict(record)
+        repo_id = record_repo_id(updated) or "<unknown>"
+        reason = "force" if args.force else profile_refresh_reason(
+            updated,
+            only_missing_search_text=bool(args.only_missing_search_text),
+            expected_prompt_version=PROFILE_PROMPT_VERSION,
+        )
+        if retry_failed is not None:
+            reason = "retry_failed" if repo_id in retry_failed else None
+        return updated, reason
+
     try:
-        for record in records:
-            updated = dict(record)
-            repo_id = record_repo_id(updated) or "<unknown>"
-            reason = "force" if args.force else profile_refresh_reason(
-                updated,
-                only_missing_search_text=bool(args.only_missing_search_text),
-                expected_prompt_version=PROFILE_PROMPT_VERSION,
-            )
-            if retry_failed is not None:
-                reason = "retry_failed" if repo_id in retry_failed else None
-
-            if repo_id in resumed_records:
-                output_records.append(dict(resumed_records[repo_id]))
-                resumed += 1
-            elif reason is None:
-                updated["schema_version"] = RECORD_SCHEMA_VERSION
-                output_records.append(updated)
-                skipped += 1
-            else:
-                try:
-                    profile = generate_llm_profile(updated, config)
-                    attach_llm_profile(updated, profile)
+        if workers == 1:
+            for record in records:
+                updated, reason = prepare_record(record)
+                repo_id = record_repo_id(updated) or "<unknown>"
+                if repo_id in resumed_records:
+                    output_records.append(dict(resumed_records[repo_id]))
+                    resumed += 1
+                elif reason is None:
                     updated["schema_version"] = RECORD_SCHEMA_VERSION
-                    _append_profile_refresh_checkpoint(checkpoint_path, updated)
                     output_records.append(updated)
-                    refreshed += 1
-                except LLMError as error:
-                    failed.append(_failure_entry(repo_id, str(error), refresh_reason=reason))
-                    output_records.append(updated)
+                    skipped += 1
+                else:
+                    try:
+                        profile = generate_llm_profile(updated, config)
+                        attach_llm_profile(updated, profile)
+                        updated["schema_version"] = RECORD_SCHEMA_VERSION
+                        _append_profile_refresh_checkpoint(checkpoint_path, updated)
+                        output_records.append(updated)
+                        refreshed += 1
+                    except LLMError as error:
+                        failed.append(_failure_entry(repo_id, str(error), refresh_reason=reason))
+                        output_records.append(updated)
 
-            processed += 1
-            if processed % 10 == 0 or processed == total:
-                print(
-                    f"profile refresh progress: {processed}/{total} processed "
-                    f"({refreshed} refreshed, {resumed} resumed, {len(failed)} failed, {skipped} skipped)",
-                    file=sys.stderr,
-                    flush=True,
-                )
+                processed += 1
+                if processed % 10 == 0 or processed == total:
+                    print(
+                        f"profile refresh progress: {processed}/{total} processed "
+                        f"({refreshed} refreshed, {resumed} resumed, {len(failed)} failed, {skipped} skipped)",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+        else:
+            output_by_repo_id: dict[str, dict[str, Any]] = {}
+            pending: list[tuple[dict[str, Any], str]] = []
+            for record in records:
+                updated, reason = prepare_record(record)
+                repo_id = record_repo_id(updated) or "<unknown>"
+                if repo_id in resumed_records:
+                    output_by_repo_id[repo_id] = dict(resumed_records[repo_id])
+                    resumed += 1
+                elif reason is None:
+                    updated["schema_version"] = RECORD_SCHEMA_VERSION
+                    output_by_repo_id[repo_id] = updated
+                    skipped += 1
+                else:
+                    pending.append((updated, reason))
+
+            processed = resumed + skipped
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futures = {
+                    executor.submit(generate_llm_profile, updated, config): (updated, reason)
+                    for updated, reason in pending
+                }
+                for future in as_completed(futures):
+                    updated, reason = futures[future]
+                    repo_id = record_repo_id(updated) or "<unknown>"
+                    try:
+                        profile = future.result()
+                        attach_llm_profile(updated, profile)
+                        updated["schema_version"] = RECORD_SCHEMA_VERSION
+                        _append_profile_refresh_checkpoint(checkpoint_path, updated)
+                        refreshed += 1
+                    except LLMError as error:
+                        failed.append(_failure_entry(repo_id, str(error), refresh_reason=reason))
+                    output_by_repo_id[repo_id] = updated
+                    processed += 1
+                    if processed % 10 == 0 or processed == total:
+                        print(
+                            f"profile refresh progress: {processed}/{total} processed "
+                            f"({refreshed} refreshed, {resumed} resumed, {len(failed)} failed, {skipped} skipped)",
+                            file=sys.stderr,
+                            flush=True,
+                        )
+
+            output_records = [
+                output_by_repo_id[record_repo_id(record) or "<unknown>"]
+                for record in records
+            ]
 
         write_json_atomic(args.output, output_records)
         if checkpoint_path.exists():
@@ -1957,6 +2014,7 @@ def build_parser() -> argparse.ArgumentParser:
     profile_refresh_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to refresh")
     profile_refresh_parser.add_argument("--output", type=Path, default=Path("records-v2.json"), help="Path to write refreshed records JSON")
     profile_refresh_parser.add_argument("--force", action="store_true", help="Refresh every record instead of only outdated ones")
+    profile_refresh_parser.add_argument("--workers", type=int, default=1, help="Concurrent LLM refresh workers (default: 1)")
     profile_refresh_parser.add_argument("--resume", action="store_true", help="Resume from an existing partial JSONL checkpoint")
     profile_refresh_parser.add_argument("--dry-run", action="store_true", help="Estimate refresh work without calling the LLM or writing files")
     profile_refresh_parser.add_argument("--report", type=Path, default=None, help="Path to write a refresh failure report JSON")

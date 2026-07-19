@@ -1160,6 +1160,46 @@ def test_profile_refresh_writes_v2_records(tmp_path, monkeypatch, capsys):
     assert refreshed[0]["url"] == "https://github.com/old/repo"
 
 
+def test_profile_refresh_workers_runs_profiles_concurrently_and_preserves_order(tmp_path, monkeypatch):
+    records_file = tmp_path / "records.json"
+    records = [_make_record("one/repo"), _make_record("two/repo"), _make_record("three/repo")]
+    records_file.write_text(json.dumps(records), encoding="utf-8")
+    output_file = tmp_path / "records-v2.json"
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+
+    barrier = threading.Barrier(3)
+    lock = threading.Lock()
+    active = 0
+    peak_active = 0
+
+    def fake_generate(record, config, *, caller=None):
+        nonlocal active, peak_active
+        with lock:
+            active += 1
+            peak_active = max(peak_active, active)
+        barrier.wait(timeout=2)
+        with lock:
+            active -= 1
+        return record["llm_profile"]
+
+    args = build_parser().parse_args(
+        [
+            "profile", "refresh", "--records", str(records_file), "--output", str(output_file),
+            "--force", "--workers", "3",
+        ]
+    )
+    with patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+        assert profile_refresh(args) == 0
+
+    assert peak_active == 3
+    saved = json.loads(output_file.read_text(encoding="utf-8"))
+    assert [record["repo_id"] for record in saved] == ["one/repo", "two/repo", "three/repo"]
+    assert not (tmp_path / "records-v2.json.partial.jsonl").exists()
+
+
 def test_profile_refresh_resume_reuses_partial_checkpoint(tmp_path, monkeypatch, capsys):
     records_file = tmp_path / "records.json"
     records_file.write_text(

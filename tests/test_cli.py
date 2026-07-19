@@ -154,6 +154,7 @@ def test_ingest_github_parser_supports_dry_run_and_format():
 
     assert args.dry_run is True
     assert args.format == "json"
+    assert args.resume is False
 
 
 def test_doctor_parser_uses_default_paths():
@@ -2279,8 +2280,84 @@ def test_ingest_github_multithread_checkpoint_survives_midstream_interruption(tm
         with pytest.raises(RuntimeError, match="simulated interruption"):
             ingest_github(args)
 
-    saved = json.loads(output_file.read_text(encoding="utf-8"))
-    assert [record["repo_id"] for record in saved] == ["a/b"]
+    checkpoint_file = Path(f"{output_file}.partial.jsonl")
+    assert not output_file.exists()
+    assert [json.loads(line)["repo_id"] for line in checkpoint_file.read_text(encoding="utf-8").splitlines()] == ["a/b"]
+
+
+def test_ingest_github_resume_reuses_partial_checkpoint(tmp_path, monkeypatch):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\nc/d\n", encoding="utf-8")
+    output_file = tmp_path / "records.json"
+    checkpoint_file = Path(f"{output_file}.partial.jsonl")
+    checkpoint_file.write_text(json.dumps(_make_record("a/b")) + "\n", encoding="utf-8")
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    collected = []
+
+    def fake_collect(repo_id, *, token=None):
+        collected.append(repo_id)
+        return _make_record(repo_id)
+
+    args = build_parser().parse_args([
+        "ingest", "github", "--repos", str(repos_file), "--output", str(output_file), "--resume",
+    ])
+    with patch("xists.cli.collect_record", side_effect=fake_collect), \
+         patch("xists.cli.generate_llm_profile", side_effect=lambda record, config: record["llm_profile"]):
+        code = ingest_github(args)
+
+    assert code == 0
+    assert collected == ["c/d"]
+    assert [record["repo_id"] for record in json.loads(output_file.read_text(encoding="utf-8"))] == ["a/b", "c/d"]
+    assert not checkpoint_file.exists()
+
+
+def test_ingest_github_resume_ignores_truncated_checkpoint_tail(tmp_path, monkeypatch):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\nc/d\n", encoding="utf-8")
+    output_file = tmp_path / "records.json"
+    checkpoint_file = Path(f"{output_file}.partial.jsonl")
+    checkpoint_file.write_text(json.dumps(_make_record("a/b")) + "\n{", encoding="utf-8")
+
+    monkeypatch.setenv("LLM_API_KEY", "key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
+    monkeypatch.setenv("LLM_MODEL", "m")
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    collected = []
+
+    def fake_collect(repo_id, *, token=None):
+        collected.append(repo_id)
+        return _make_record(repo_id)
+
+    args = build_parser().parse_args([
+        "ingest", "github", "--repos", str(repos_file), "--output", str(output_file), "--resume",
+    ])
+    with patch("xists.cli.collect_record", side_effect=fake_collect), \
+         patch("xists.cli.generate_llm_profile", side_effect=lambda record, config: record["llm_profile"]):
+        code = ingest_github(args)
+
+    assert code == 0
+    assert collected == ["c/d"]
+    assert [record["repo_id"] for record in json.loads(output_file.read_text(encoding="utf-8"))] == ["a/b", "c/d"]
+    assert not checkpoint_file.exists()
+
+
+def test_ingest_github_rejects_existing_checkpoint_without_resume(tmp_path, capsys):
+    repos_file = tmp_path / "repos.txt"
+    repos_file.write_text("a/b\n", encoding="utf-8")
+    output_file = tmp_path / "records.json"
+    checkpoint_file = Path(f"{output_file}.partial.jsonl")
+    checkpoint_file.write_text(json.dumps(_make_record("a/b")) + "\n", encoding="utf-8")
+
+    args = build_parser().parse_args(["ingest", "github", "--repos", str(repos_file), "--output", str(output_file)])
+
+    assert ingest_github(args) == 1
+    output = capsys.readouterr().err
+    assert "--resume" in output
+    assert "Delete" in output
 
 
 def test_ingest_github_force_ignores_existing(tmp_path, monkeypatch):

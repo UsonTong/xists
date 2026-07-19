@@ -128,6 +128,18 @@ def _append_profile_refresh_checkpoint(path: Path, record: dict[str, Any]) -> No
         handle.flush()
 
 
+def _ingest_checkpoint_path(output: Path) -> Path:
+    return Path(f"{output}.partial.jsonl")
+
+
+def _load_ingest_checkpoint(path: Path) -> dict[str, dict[str, Any]]:
+    return _load_profile_refresh_checkpoint(path)
+
+
+def _append_ingest_checkpoint(path: Path, record: dict[str, Any]) -> None:
+    _append_profile_refresh_checkpoint(path, record)
+
+
 def _format_dry_run_text(title: str, report: dict[str, Any]) -> str:
     skip_reasons = report.get("skip_reasons") or {}
     lines = [
@@ -364,6 +376,8 @@ def _print_ingest_progress(*, processed: int, total: int, generated: int, failed
 def ingest_github(args: argparse.Namespace) -> int:
     started_at = datetime.now(timezone.utc)
     start_time = time.perf_counter()
+    checkpoint_path = _ingest_checkpoint_path(args.output)
+    resume = bool(getattr(args, "resume", False))
 
     retry_failed: set[str] | None = None
     if getattr(args, "retry_failed", None):
@@ -373,18 +387,40 @@ def ingest_github(args: argparse.Namespace) -> int:
             print(str(error), file=sys.stderr)
             return 1
 
+    if checkpoint_path.exists() and not resume:
+        print(
+            f"Checkpoint file already exists: {checkpoint_path}\n"
+            "Next steps:\n"
+            f"  1. Re-run with --resume to continue from the checkpoint\n"
+            f"  2. Delete {checkpoint_path} if you want to restart from scratch",
+            file=sys.stderr,
+        )
+        return 1
+
+    repo_ids = load_repo_ids(args.repos)
+    checkpoint_records = _load_ingest_checkpoint(checkpoint_path) if resume else {}
+    existing: list[dict[str, Any]] = []
+    if not args.force and args.output.exists():
+        existing = json.loads(args.output.read_text(encoding="utf-8"))
+    existing_ids = {record.get("repo_id") for record in existing if isinstance(record, dict)}
+    completed_ids = existing_ids | set(checkpoint_records)
+
     if getattr(args, "dry_run", False):
-        repo_ids = load_repo_ids(args.repos)
-        existing: list[dict[str, Any]] = []
-        if not args.force and args.output.exists():
-            existing = json.loads(args.output.read_text(encoding="utf-8"))
-        existing_ids = {record.get("repo_id") for record in existing if isinstance(record, dict)}
         if retry_failed is None:
-            skipped = [repo_id for repo_id in repo_ids if repo_id in existing_ids]
-            to_ingest = [repo_id for repo_id in repo_ids if repo_id not in existing_ids]
+            skipped = [repo_id for repo_id in repo_ids if repo_id in completed_ids]
+            to_ingest = [repo_id for repo_id in repo_ids if repo_id not in completed_ids]
+            skip_reasons: dict[str, int] = {}
+            if skipped:
+                existing_count = sum(repo_id in existing_ids for repo_id in skipped)
+                checkpoint_count = len(skipped) - existing_count
+                if existing_count:
+                    skip_reasons["already_exists"] = existing_count
+                if checkpoint_count:
+                    skip_reasons["checkpoint_completed"] = checkpoint_count
         else:
             skipped = [repo_id for repo_id in repo_ids if repo_id not in retry_failed]
             to_ingest = [repo_id for repo_id in repo_ids if repo_id in retry_failed]
+            skip_reasons = {"not_in_failure_report": len(skipped)} if skipped else {}
         github_api = getattr(args, "github_api", "rest")
         github_batch_size = getattr(args, "github_batch_size", 1) or 1
         workers = getattr(args, "workers", 1) or 1
@@ -396,7 +432,7 @@ def ingest_github(args: argparse.Namespace) -> int:
             "total": len(repo_ids),
             "to_process": len(to_ingest),
             "to_skip": len(skipped),
-            "skip_reasons": ({"already_exists": len(skipped)} if retry_failed is None else {"not_in_failure_report": len(skipped)}) if skipped else {},
+            "skip_reasons": skip_reasons,
             "estimated_calls": estimated_calls,
             "github_api": github_api,
             "github_batch_size": github_batch_size,
@@ -414,28 +450,22 @@ def ingest_github(args: argparse.Namespace) -> int:
         print(str(error), file=sys.stderr)
         return 2
 
-    repo_ids = load_repo_ids(args.repos)
     tokens = github_token_from_file(args.token_file) if args.token_file else github_token_from_env()
     token_pool = TokenPool(
         tokens,
         progress=lambda message: print(message, file=sys.stderr, flush=True),
     )
 
-    # Load existing records for incremental update (skip with --force).
-    existing: list[dict[str, Any]] = []
-    if not args.force and args.output.exists():
-        existing = json.loads(args.output.read_text(encoding="utf-8"))
-    existing_ids = {record.get("repo_id") for record in existing}
     if retry_failed is None:
-        skipped = [repo_id for repo_id in repo_ids if repo_id in existing_ids]
-        to_ingest = [repo_id for repo_id in repo_ids if repo_id not in existing_ids]
+        skipped = [repo_id for repo_id in repo_ids if repo_id in completed_ids]
+        to_ingest = [repo_id for repo_id in repo_ids if repo_id not in completed_ids]
     else:
         skipped = [repo_id for repo_id in repo_ids if repo_id not in retry_failed]
         to_ingest = [repo_id for repo_id in repo_ids if repo_id in retry_failed]
         # Retry results replace any stale record with the same repository id.
         existing = [record for record in existing if record.get("repo_id") not in retry_failed]
 
-    merged: list[dict[str, Any]] = list(existing)
+    completed_records = dict(checkpoint_records)
     failed: list[dict[str, Any]] = []
     generated = 0
     with_readme = 0
@@ -465,7 +495,11 @@ def ingest_github(args: argparse.Namespace) -> int:
             print(f"ingest failed: {_summarize_error(result)}", file=sys.stderr, flush=True)
             return
         record = result["record"]
-        merged.append(record)
+        repo_id = record_repo_id(record)
+        if repo_id is None:
+            raise ValueError("Ingested record is missing repo_id")
+        _append_ingest_checkpoint(checkpoint_path, record)
+        completed_records[repo_id] = record
         generated += 1
         if record.get("readme"):
             with_readme += 1
@@ -485,7 +519,6 @@ def ingest_github(args: argparse.Namespace) -> int:
                 for future in as_completed(futures):
                     for result in future.result():
                         process_result(result)
-                    write_json(args.output, merged)
                     _print_ingest_progress(
                         processed=generated + len(failed),
                         total=total_to_process,
@@ -497,7 +530,6 @@ def ingest_github(args: argparse.Namespace) -> int:
             for batch in batches:
                 for result in _ingest_graphql_batch(batch, token_pool, llm_config, max_rate_limit_wait):
                     process_result(result)
-                write_json(args.output, merged)
                 _print_ingest_progress(
                     processed=generated + len(failed),
                     total=total_to_process,
@@ -514,8 +546,6 @@ def ingest_github(args: argparse.Namespace) -> int:
             }
             for future in as_completed(futures):
                 process_result(future.result())
-                # Checkpoint after each thread completes.
-                write_json(args.output, merged)
                 _print_ingest_progress(
                     processed=generated + len(failed),
                     total=total_to_process,
@@ -527,7 +557,6 @@ def ingest_github(args: argparse.Namespace) -> int:
         # Single-threaded: process one by one with checkpoint after each.
         for repo_id in to_ingest:
             process_result(_ingest_one(repo_id, token_pool, llm_config, github_api, max_rate_limit_wait))
-            write_json(args.output, merged)
             _print_ingest_progress(
                 processed=generated + len(failed),
                 total=total_to_process,
@@ -535,6 +564,22 @@ def ingest_github(args: argparse.Namespace) -> int:
                 failed=len(failed),
                 skipped=len(skipped),
             )
+
+    records_by_repo_id = {
+        record.get("repo_id"): record
+        for record in existing
+        if isinstance(record, dict) and record.get("repo_id")
+    }
+    records_by_repo_id.update(completed_records)
+    ordered_ids = list(dict.fromkeys([
+        *(record.get("repo_id") for record in existing if isinstance(record, dict) and record.get("repo_id")),
+        *repo_ids,
+        *completed_records,
+    ]))
+    merged = [records_by_repo_id[repo_id] for repo_id in ordered_ids if repo_id in records_by_repo_id]
+    write_json_atomic(args.output, merged)
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
 
     finished_at = datetime.now(timezone.utc)
     report = {
@@ -554,6 +599,7 @@ def ingest_github(args: argparse.Namespace) -> int:
         },
         "input_count": len(repo_ids),
         "skipped_count": len(skipped),
+        "resumed_count": len(checkpoint_records),
         "generated_count": generated,
         "failed_count": len(failed),
         "failed": failed,
@@ -1924,6 +1970,7 @@ def build_parser() -> argparse.ArgumentParser:
     github.add_argument("--report", type=Path, default=Path("report.json"), help="Path to write generation report JSON")
     github.add_argument("--token-file", type=Path, default=None, help="Optional file containing a GitHub token")
     github.add_argument("--force", action="store_true", help="Ignore existing records.json and reprocess all repos")
+    github.add_argument("--resume", action="store_true", help="Resume from an existing partial JSONL checkpoint")
     github.add_argument("--dry-run", action="store_true", help="Estimate ingest work without calling GitHub or writing files")
     github.add_argument("--workers", type=int, default=1, help="Number of concurrent workers (default: 1)")
     github.add_argument(

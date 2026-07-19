@@ -185,6 +185,7 @@ This fetches data from GitHub, generates LLM profiles, and writes `records.json`
 | `--format` | `text` | Output format for dry-run reports: text or json |
 | `--workers` | `1` | Number of concurrent workers |
 | `--retry-failed` | (none) | Retry only repository ids listed in a previous failure report |
+| `--resume` | off | Resume from an existing partial JSONL checkpoint |
 | `--max-rate-limit-wait` | `3600` | Maximum seconds to wait for exhausted GitHub API quota |
 
 #### Incremental update
@@ -197,7 +198,7 @@ xists ingest github --force
 
 #### Checkpoint / resume
 
-Each record is written to disk as it completes. If the process is interrupted (Ctrl+C, crash, etc.), previously completed records are preserved. Simply run the command again to continue from where it left off.
+Each successful record is appended to `<output>.partial.jsonl` as it completes. If the process is interrupted (Ctrl+C, crash, etc.), previously completed records are preserved. Re-run the same command with `--resume` to continue from that checkpoint.
 
 #### Dry run
 
@@ -220,6 +221,8 @@ xists ingest github --repos repos.txt --output records.json --retry-failed repor
 An ingest that finishes its batch with some individual failures exits `0` and writes their details to the report; a job that cannot process any selected repository exits nonzero. Failed entries are summarized on stderr.
 
 When GitHub returns `403` or `429` with an exhausted quota, xists first rotates to another configured token. If every token is exhausted, it reports the reset time on stderr and waits until reset plus five seconds. Set `--max-rate-limit-wait` to bound that wait; when the limit is exceeded, completed checkpoints remain on disk and the command exits nonzero.
+
+During ingest, each successful record is appended to `<output>.partial.jsonl`; the final `records.json` is written atomically only after the batch completes. Re-run the same command with `--resume` after an interruption. A partial file without `--resume` is rejected so completed work is never overwritten accidentally.
 
 #### Multi-threaded ingest
 
@@ -264,27 +267,14 @@ This reads `records.json`, computes embeddings via the configured endpoint, and 
 | `--records` | `records.json` | Input records file |
 | `--output` | `index.json` | Output index file |
 | `--force` | off | Ignore existing index.json and rebuild from scratch |
-| `--resume` | off | Resume from an existing partial JSONL checkpoint |
-| `--dry-run` | off | Estimate refresh work without calling the LLM or writing files |
-| `--format` | `text` | Output format for dry-run reports: text or json |
 
 #### Incremental update
 
 By default, `xists index build` is incremental. It reuses an existing vector only when the repo id, embedding model, vector dimension, and embedding input fingerprint still match the current record. If the record content or embedding text logic changes, xists re-embeds that record automatically.
 
-#### Checkpoint / resume
+#### Checkpoint
 
 Each batch (64 records) is written to disk as it completes. If interrupted, completed batches are preserved.
-
-#### Dry run
-
-Use `--dry-run` to preview how many records will be refreshed versus skipped before regenerating profiles. Dry runs do not call the LLM and do not write output files.
-
-```bash
-xists profile refresh --records records.json --output records.new.json --dry-run
-```
-
-Add `--format json` when you want a machine-readable estimate.
 
 #### Model mismatch protection
 
@@ -325,6 +315,8 @@ xists profile refresh --records records.json --output records.new.json --dry-run
 xists profile refresh --records records.json --output records.new.json --report refresh-report.json
 xists profile refresh --records records.json --output records.new.json --retry-failed refresh-report.json
 ```
+
+Use `--dry-run` to preview refresh work without calling the LLM or writing files; add `--format json` for a machine-readable estimate. Profile generation allows up to 600 seconds for an individual OpenAI-compatible LLM response, which accommodates local or heavily loaded models during long refreshes.
 
 The refresh failure report includes `repo_id`, `error`, and `attempted_at`. A completed batch with individual failures exits `0`, preserves each failed record's old profile, and writes a stderr summary. A run that cannot refresh any selected record exits nonzero so endpoint or configuration failures remain actionable.
 

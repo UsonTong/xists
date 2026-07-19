@@ -35,6 +35,33 @@ def test_normalize_dataset_expands_acceptable_sets():
     assert dataset["cases"][0]["acceptable_set"] == ["facebook/react", "preactjs/preact", "react/react"]
 
 
+def test_normalize_dataset_accepts_acceptable_alias_and_keeps_old_cases_compatible():
+    dataset = normalize_dataset(
+        {
+            "schema_version": 1,
+            "dataset_name": "acceptable-alias",
+            "cases": [
+                {
+                    "id": "alias",
+                    "query": "组件库",
+                    "expected_repo_id": "react/react",
+                    "acceptable": ["preactjs/preact"],
+                },
+                {
+                    "id": "legacy",
+                    "query": "frontend ui library",
+                    "expected_repo_id": "vuejs/core",
+                },
+            ],
+        }
+    )
+
+    assert dataset["cases"][0]["acceptable"] == ["preactjs/preact"]
+    assert dataset["cases"][0]["acceptable_set"] == ["preactjs/preact", "react/react"]
+    assert dataset["cases"][1]["acceptable"] == []
+    assert dataset["cases"][1]["acceptable_set"] == ["vuejs/core"]
+
+
 def test_normalize_dataset_rejects_unknown_family():
     with pytest.raises(EvaluationDatasetError):
         normalize_dataset(
@@ -174,6 +201,8 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
         "mrr_exact": 0.5,
         "acceptable_hit_at_1": 0.666667,
         "acceptable_hit_at_k": 0.666667,
+        "recall_at_1": 0.666667,
+        "recall_at_5": 0.666667,
         "mrr_acceptable": 0.666667,
         "abstain_rate": 0.333333,
         "acceptable_minus_exact_hit_at_1": 0.333333,
@@ -221,6 +250,8 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
     assert report["summary"]["acceptable_substitute_top_1"]["count"] == 1
     assert report["summary"]["effective_top_1"]["count"] == 2
     assert "exact top-1: 33.3% (1/3)" in report["summary_text"]
+    assert "recall@1: 66.7% (2/3)" in report["summary_text"]
+    assert "recall@5: 66.7% (2/3)" in report["summary_text"]
     assert "acceptable top-1: 66.7% (2/3)" in report["summary_text"]
     assert report["top_misses"][0]["id"] == "abstain"
     assert report["top_misses"][0]["top1_status"] == "serious_mismatch"
@@ -252,6 +283,51 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
     assert functional["filter"]["intent"] == "functional"
     assert functional["matching_count"] == 1
     assert functional["cases"][0]["id"] == "exact-top-1"
+
+
+def test_evaluate_dataset_reports_recall_at_k_for_acceptable_and_chinese_cases(tmp_path):
+    cases_file = tmp_path / "eval-cases.json"
+    cases_file.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "dataset_name": "recall-smoke",
+                "cases": [
+                    {"id": "exact", "query": "react", "expected_repo_id": "react/react"},
+                    {
+                        "id": "acceptable",
+                        "query": "轻量级 React 替代品",
+                        "expected_repo_id": "react/react",
+                        "acceptable": ["preactjs/preact"],
+                    },
+                    {"id": "rank-five", "query": "Python API framework", "expected_repo_id": "tiangolo/fastapi"},
+                    {"id": "miss", "query": "database", "expected_repo_id": "postgres/postgres"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps({"embedding_model": "bge-m3", "dimension": 2, "vectors": []}), encoding="utf-8")
+
+    def fake_rank_many(queries, index, config, *, top_k=10, batch_size=64):
+        assert queries[1] == "轻量级 React 替代品"
+        return [
+            {"results": [{"repo_id": "react/react"}]},
+            {"results": [{"repo_id": "preactjs/preact"}]},
+            {"results": [{"repo_id": "a/a"}, {"repo_id": "b/b"}, {"repo_id": "c/c"}, {"repo_id": "d/d"}, {"repo_id": "tiangolo/fastapi"}]},
+            {"results": [{"repo_id": "mysql/mysql-server"}]},
+        ]
+
+    report = evaluate_dataset(cases_file, index_file, CONFIG, embed_many=fake_rank_many)
+
+    assert report["metrics"]["recall_at_1"] == 0.5
+    assert report["metrics"]["recall_at_5"] == 0.75
+    assert report["results"][1]["acceptable_match"] is True
+    assert report["results"][2]["acceptable_rank"] == 5
+    assert report["summary"]["recall_at_1"]["count"] == 2
+    assert report["summary"]["recall_at_5"]["count"] == 3
+    assert "recall@5: 75.0% (3/4)" in report["summary_text"]
 
 
 def test_evaluate_dataset_with_llm_judge_keeps_hard_metrics_and_adds_analysis(tmp_path):

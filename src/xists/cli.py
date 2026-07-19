@@ -1806,6 +1806,7 @@ def eval_cases(args: argparse.Namespace) -> int:
                 "query": case["query"],
                 "query_intent": intent,
                 "expected_repo_id": case["expected_repo_id"],
+                "acceptable": case.get("acceptable") or [],
                 "acceptable_repo_ids": case.get("acceptable_repo_ids") or [],
                 "acceptable_families": case.get("acceptable_families") or [],
                 "tags": case.get("tags") or [],

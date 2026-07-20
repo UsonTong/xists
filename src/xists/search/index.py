@@ -93,7 +93,9 @@ def build_index(
     dimension: int | None = None
     for start in range(0, len(embeddable), batch_size):
         batch = embeddable[start : start + batch_size]
-        results = call_embeddings(config, [item["text"] for item in batch])
+        results = call_embeddings(
+            config, [item["text"] for item in batch], input_type="passage"
+        )
         if len(results) != len(batch):
             raise EmbeddingError(
                 f"Embedding count mismatch: sent {len(batch)}, received {len(results)}"

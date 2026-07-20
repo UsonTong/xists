@@ -1,4 +1,5 @@
 import math
+import json
 from urllib.error import URLError
 
 import pytest
@@ -88,6 +89,17 @@ def test_embedding_config_from_env_builds(monkeypatch):
     assert config.embeddings_url == "http://localhost/v1/embeddings"
 
 
+def test_embedding_config_reads_optional_input_type_field(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embeddings.example/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "dual-encoder")
+    monkeypatch.setenv("EMBEDDING_INPUT_TYPE_FIELD", "input_type")
+
+    config = embedding_config_from_env()
+
+    assert config.input_type_field == "input_type"
+
+
 def test_embedding_text_excludes_not_for():
     text = embedding_text_from_record(make_record())
     assert text.splitlines()[1].startswith("react javascript ui library")
@@ -123,6 +135,75 @@ def test_call_embeddings_empty_input_returns_empty():
     assert call_embeddings(CONFIG, []) == []
 
 
+def test_configured_embedding_request_sets_query_input_type(monkeypatch):
+    from xists.search import embed as embed_module
+
+    captured = {}
+
+    def fake_request_json(url, body, headers, timeout):
+        captured.update(
+            url=url, payload=json.loads(body), headers=headers, timeout=timeout
+        )
+        return {"data": [{"index": 0, "embedding": [1.0, 0.0]}]}
+
+    monkeypatch.setattr(embed_module, "_request_json", fake_request_json)
+
+    vector = embed_module.embed_query(
+        EmbeddingConfig(
+            api_key="service-secret",
+            base_url="https://embeddings.example/v1",
+            model="dual-encoder",
+            input_type_field="input_type",
+        ),
+        "Chinese repository search",
+    )
+
+    assert vector == [1.0, 0.0]
+    assert captured["url"] == "https://embeddings.example/v1/embeddings"
+    assert captured["payload"] == {
+        "model": "dual-encoder",
+        "input": ["Chinese repository search"],
+        "input_type": "query",
+    }
+    assert captured["headers"]["Authorization"] == "Bearer service-secret"
+
+
+def test_build_index_sends_passage_input_type(monkeypatch):
+    captured = []
+
+    def fake_call(config, inputs, *, timeout=60, input_type=None):
+        captured.append(input_type)
+        return [[1.0, 0.0] for _ in inputs]
+
+    monkeypatch.setattr("xists.search.index.call_embeddings", fake_call)
+    build_index(
+        [make_record()],
+        EmbeddingConfig(
+            api_key="k",
+            base_url="https://embeddings.example/v1",
+            model="dual-encoder",
+            input_type_field="input_type",
+        ),
+    )
+
+    assert captured == ["passage"]
+
+
+def test_embedding_request_without_configured_input_type_field_omits_it(monkeypatch):
+    from xists.search import embed as embed_module
+
+    captured = {}
+
+    def fake_request_json(url, body, headers, timeout):
+        captured.update(payload=json.loads(body))
+        return {"data": [{"index": 0, "embedding": [1.0, 0.0]}]}
+
+    monkeypatch.setattr(embed_module, "_request_json", fake_request_json)
+    call_embeddings(CONFIG, ["hello"], input_type="passage")
+
+    assert captured["payload"] == {"model": "bge-m3", "input": ["hello"]}
+
+
 def test_call_embeddings_reports_all_attempted_endpoints(monkeypatch):
     from xists.search import embed as embed_module
 
@@ -155,7 +236,7 @@ def test_cosine_similarity_and_confidence_bucket():
 def test_build_index_includes_search_metadata(monkeypatch):
     records = [make_record("react/react"), make_record("vuejs/core")]
 
-    def fake_call(config, inputs, *, timeout=60):
+    def fake_call(config, inputs, *, timeout=60, input_type=None):
         return [[1.0, 0.0, 0.0] for _ in inputs]
 
     monkeypatch.setattr("xists.search.index.call_embeddings", fake_call)

@@ -3,6 +3,8 @@
 The endpoint can be OpenAI itself or any compatible server, including a local
 bge-m3 served through vLLM, Infinity, Text Embeddings Inference, Xinference, or
 LocalAI. xists treats them all the same: ``POST {base_url}/embeddings``.
+For dual-encoder retrieval models, an optional configured request field can
+distinguish query embeddings from passage embeddings.
 
 The embedding text is built only from collected facts and the evidence-based
 llm_profile. ``not_for`` is intentionally excluded so it does not pull in
@@ -36,6 +38,7 @@ class EmbeddingConfig:
     api_key: str
     base_url: str
     model: str
+    input_type_field: str | None = None
 
     @property
     def embeddings_url(self) -> str:
@@ -59,6 +62,7 @@ def embedding_config_from_env() -> EmbeddingConfig:
     api_key = os.environ.get("EMBEDDING_API_KEY")
     base_url = os.environ.get("EMBEDDING_BASE_URL")
     model = os.environ.get("EMBEDDING_MODEL")
+    input_type_field = os.environ.get("EMBEDDING_INPUT_TYPE_FIELD") or None
 
     missing = [
         name
@@ -76,7 +80,12 @@ def embedding_config_from_env() -> EmbeddingConfig:
             "Set them in your .env (see .env.example)."
         )
 
-    return EmbeddingConfig(api_key=api_key, base_url=base_url, model=model)
+    return EmbeddingConfig(
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        input_type_field=input_type_field,
+    )
 
 
 def embedding_text_from_record(record: dict[str, Any]) -> str:
@@ -167,7 +176,12 @@ def _request_json(url: str, body: bytes, headers: dict[str, str], timeout: int) 
         return json.loads(response.read().decode("utf-8"))
 
 
-def _embedding_request_attempts(config: EmbeddingConfig, inputs: list[str]) -> list[tuple[str, dict[str, Any], dict[str, str], str]]:
+def _embedding_request_attempts(
+    config: EmbeddingConfig,
+    inputs: list[str],
+    *,
+    input_type: str | None = None,
+) -> list[tuple[str, dict[str, Any], dict[str, str], str]]:
     headers = {
         "Authorization": f"Bearer {config.api_key}",
         "Content-Type": "application/json",
@@ -175,8 +189,11 @@ def _embedding_request_attempts(config: EmbeddingConfig, inputs: list[str]) -> l
     }
     openai_headers = dict(headers)
     tei_headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
+    openai_payload: dict[str, Any] = {"model": config.model, "input": inputs}
+    if input_type is not None and config.input_type_field:
+        openai_payload[config.input_type_field] = input_type
     return [
-        (config.embeddings_url, {"model": config.model, "input": inputs}, openai_headers, "OpenAI-compatible /embeddings"),
+        (config.embeddings_url, openai_payload, openai_headers, "OpenAI-compatible /embeddings"),
         (config.tei_embed_url, {"inputs": inputs}, tei_headers, "TEI /embed"),
     ]
 
@@ -186,12 +203,15 @@ def _call_embeddings_with_details(
     inputs: list[str],
     *,
     timeout: int = 60,
+    input_type: str | None = None,
 ) -> tuple[list[list[float]], dict[str, Any]]:
     if not inputs:
         return [], {"attempted": []}
 
     attempted: list[dict[str, str]] = []
-    for url, payload, hdrs, label in _embedding_request_attempts(config, inputs):
+    for url, payload, hdrs, label in _embedding_request_attempts(
+        config, inputs, input_type=input_type
+    ):
         body = json.dumps(payload).encode("utf-8")
         try:
             data = _request_json(url, body, hdrs, timeout)
@@ -254,6 +274,7 @@ def call_embeddings(
     inputs: list[str],
     *,
     timeout: int = 60,
+    input_type: str | None = None,
 ) -> list[list[float]]:
     """Call an OpenAI-compatible embeddings endpoint, return vectors in order.
 
@@ -262,14 +283,25 @@ def call_embeddings(
     Supports both the OpenAI response shape ``{"data": [...]}`` and the TEI
     bare-array shape ``[[...], ...]``.
     """
-    vectors, _ = _call_embeddings_with_details(config, inputs, timeout=timeout)
+    if input_type not in (None, "query", "passage"):
+        raise ValueError("input_type must be 'query', 'passage', or None")
+    # Generic callers are searches/evaluation queries; index builders
+    # explicitly pass passage. The optional configured request field decides
+    # whether the role is sent to the embedding service.
+    if input_type is None:
+        input_type = "query"
+    vectors, _ = _call_embeddings_with_details(
+        config, inputs, timeout=timeout, input_type=input_type
+    )
     return vectors
 
 
 def probe_embedding_endpoint(config: EmbeddingConfig, *, timeout: int = 10) -> dict[str, Any]:
     """Probe the configured embedding endpoint with a single vector request."""
 
-    vectors, details = _call_embeddings_with_details(config, ["xists endpoint probe"], timeout=timeout)
+    vectors, details = _call_embeddings_with_details(
+        config, ["xists endpoint probe"], timeout=timeout, input_type="query"
+    )
     vector = vectors[0] if vectors else []
     return {
         "status": "ok",
@@ -284,7 +316,7 @@ def probe_embedding_endpoint(config: EmbeddingConfig, *, timeout: int = 10) -> d
 
 
 def embed_query(config: EmbeddingConfig, query: str) -> list[float]:
-    vectors = call_embeddings(config, [query])
+    vectors = call_embeddings(config, [query], input_type="query")
     if not vectors:
         raise EmbeddingError("Embedding endpoint returned no vector for the query")
     return vectors[0]

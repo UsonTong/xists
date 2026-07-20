@@ -260,7 +260,7 @@ def test_build_index_includes_search_metadata(monkeypatch):
 def test_build_index_skips_empty_records(monkeypatch):
     records = [make_record("react/react"), {"repo_id": "empty/empty"}]
 
-    def fake_call(config, inputs, *, timeout=60):
+    def fake_call(config, inputs, *, timeout=60, input_type=None):
         return [[1.0, 0.0] for _ in inputs]
 
     monkeypatch.setattr("xists.search.index.call_embeddings", fake_call)
@@ -281,6 +281,7 @@ def test_rank_returns_sorted_semantic_results_with_stable_shape():
     top = result["results"][0]
     assert result["abstained"] is False
     assert result["considered"] == 2
+    assert isinstance(result["latency_ms"], float)
     assert top["repo_id"] == "react/react"
     assert top["confidence"] == "high_confidence"
     assert top["semantic_score"] == pytest.approx(1.0)
@@ -453,6 +454,76 @@ def test_identity_falls_back_to_repo_id_parts_for_legacy_indexes():
     assert result["results"][0]["repo_id"] == "vllm-project/vllm"
 
 
+def test_semantic_strategy_does_not_apply_identity_or_metadata_adjustments():
+    index = make_index(
+        [
+            {"repo_id": "react/react", "vector": [0.0, 1.0], "metadata": {"name": "react"}},
+            {"repo_id": "semantic/winner", "vector": [1.0, 0.0], "metadata": {"name": "winner"}},
+        ]
+    )
+
+    result = rank(
+        "react",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="semantic",
+    )
+
+    assert result["results"][0]["repo_id"] == "semantic/winner"
+    assert result["results"][0]["metadata_score"] == 0.0
+    assert result["results"][0]["diagnostics"]["identity_match"] is None
+
+
+def test_rerank_strategy_fuses_semantic_recall_and_generic_rerank_evidence():
+    index = make_index(
+        [
+            {"repo_id": "first/repo", "vector": [1.0, 0.0], "metadata": {"description": "First candidate"}},
+            {"repo_id": "second/repo", "vector": vector_for_cosine(0.8), "metadata": {"description": "Second candidate"}},
+        ]
+    )
+    calls = []
+
+    def fake_rerank(query, documents):
+        calls.append((query, documents))
+        return [0.1, 0.9]
+
+    result = rank(
+        "general query",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=fake_rerank,
+        rerank_candidate_limit=2,
+    )
+
+    assert result["results"][0]["repo_id"] == "first/repo"
+    assert result["results"][0]["rerank_score"] == 0.1
+    assert result["results"][0]["metadata_score"] == 0.0
+    assert result["results"][0]["ranking_evidence"] == {
+        "semantic_rank": 1,
+        "rerank_rank": 2,
+        "fusion": "reciprocal_rank",
+    }
+    assert calls == [("general query", ["first/repo\nFirst candidate", "second/repo\nSecond candidate"])]
+
+
+def test_rerank_strategy_requires_a_reranker():
+    index = make_index([{"repo_id": "one/repo", "vector": [1.0, 0.0], "metadata": {}}])
+
+    with pytest.raises(ValueError, match="reranker"):
+        rank(
+            "query",
+            index,
+            CONFIG,
+            embed=lambda config, query: [1.0, 0.0],
+            ranking_strategy="rerank",
+        )
+
+
 def test_semantic_winner_is_not_overturned_by_ordinary_metadata():
     index = make_index(
         [
@@ -539,6 +610,34 @@ def test_weak_semantic_match_abstains_even_with_loose_metadata_overlap():
     assert result["results"] == []
 
 
+def test_exploratory_threshold_is_configurable_for_any_embedding_score_scale():
+    index = make_index(
+        [
+            {
+                "repo_id": "general/result",
+                "vector": vector_for_cosine(0.34),
+                "metadata": {"description": "General purpose retrieval result."},
+            }
+        ]
+    )
+
+    result = rank(
+        "general retrieval",
+        index,
+        CONFIG,
+        embed=lambda config, query: [1.0, 0.0],
+        exploratory_threshold=0.32,
+    )
+
+    assert result["abstained"] is False
+    assert result["results"][0]["confidence"] == "exploratory"
+
+
+def test_rank_rejects_invalid_exploratory_threshold():
+    with pytest.raises(ValueError, match="exploratory threshold"):
+        rank("query", make_index([]), CONFIG, exploratory_threshold=1.01)
+
+
 def test_rank_many_matches_rank_order():
     index = make_index(
         [
@@ -573,6 +672,7 @@ def test_rank_abstains_on_empty_index():
     result = rank("anything", make_index([]), CONFIG, embed=lambda config, query: [1.0, 0.0])
     assert result == {
         "query": "anything",
+        "latency_ms": pytest.approx(result["latency_ms"]),
         "query_intent": _query_intent("anything"),
         "abstained": True,
         "results": [],

@@ -54,7 +54,13 @@ from xists.search.embed import (
     probe_embedding_endpoint,
 )
 from xists.search.index import INDEX_VERSION, entry_metadata, load_index
-from xists.search.query import IndexMismatchError, _query_intent, rank
+from xists.search.query import RANKING_STRATEGIES, IndexMismatchError, _query_intent, rank
+from xists.search.rerank import (
+    RerankerError,
+    RerankerNotConfiguredError,
+    rerank_documents,
+    reranker_config_from_env,
+)
 
 
 def load_env_file(path: Path) -> None:
@@ -737,7 +743,9 @@ def index_build(args: argparse.Namespace) -> int:
     for start in range(0, len(embeddable), batch_size):
         batch = embeddable[start : start + batch_size]
         try:
-            results = call_embeddings(config, [item["text"] for item in batch])
+            results = call_embeddings(
+                config, [item["text"] for item in batch], input_type="passage"
+            )
         except EmbeddingError as error:
             _print_embedding_error(error, command="index build")
             return 1
@@ -824,13 +832,33 @@ def search(args: argparse.Namespace) -> int:
         return 2
 
     index = load_index(args.index)
+    rerank = None
+    if args.ranking_strategy == "rerank":
+        try:
+            reranker_config = reranker_config_from_env()
+        except RerankerNotConfiguredError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        rerank = lambda query, documents: rerank_documents(reranker_config, query, documents)
     try:
-        result = rank(args.query, index, config, top_k=args.top_k)
+        result = rank(
+            args.query,
+            index,
+            config,
+            top_k=args.top_k,
+            ranking_strategy=args.ranking_strategy,
+            rerank=rerank,
+            rerank_candidate_limit=args.rerank_candidates,
+            exploratory_threshold=args.exploratory_threshold,
+        )
     except IndexMismatchError as error:
         print(str(error), file=sys.stderr)
         return 1
     except EmbeddingError as error:
         _print_embedding_error(error, command="search")
+        return 1
+    except (RerankerError, ValueError) as error:
+        print(str(error), file=sys.stderr)
         return 1
 
     if getattr(args, "format", "json") == "text":
@@ -1849,6 +1877,15 @@ def eval_run(args: argparse.Namespace) -> int:
         print(f"Index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
         return 2
 
+    rerank = None
+    if args.ranking_strategy == "rerank":
+        try:
+            reranker_config = reranker_config_from_env()
+        except RerankerNotConfiguredError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        rerank = lambda query, documents: rerank_documents(reranker_config, query, documents)
+
     try:
         report = evaluate_dataset(
             args.cases,
@@ -1858,11 +1895,15 @@ def eval_run(args: argparse.Namespace) -> int:
             batch_size=args.batch_size,
             llm_judge_config=llm_judge_config,
             records_path=args.records,
+            ranking_strategy=args.ranking_strategy,
+            rerank=rerank,
+            rerank_candidate_limit=args.rerank_candidates,
+            exploratory_threshold=args.exploratory_threshold,
         )
     except EmbeddingError as error:
         _print_embedding_error(error, command="eval run")
         return 1
-    except (EvaluationDatasetError, FileNotFoundError, IndexMismatchError, ValueError, LLMError) as error:
+    except (EvaluationDatasetError, FileNotFoundError, IndexMismatchError, ValueError, LLMError, RerankerError) as error:
         print(str(error), file=sys.stderr)
         return 1
 
@@ -2091,6 +2132,24 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to search")
     search_parser.add_argument("--top-k", type=int, default=10, help="Maximum number of results to return")
     search_parser.add_argument(
+        "--ranking-strategy",
+        choices=RANKING_STRATEGIES,
+        default="metadata",
+        help="Ranking mode: metadata (default), semantic, or cross-encoder rerank",
+    )
+    search_parser.add_argument(
+        "--rerank-candidates",
+        type=int,
+        default=50,
+        help="Embedding candidates to send to a reranker (default: 50)",
+    )
+    search_parser.add_argument(
+        "--exploratory-threshold",
+        type=float,
+        default=0.35,
+        help="Minimum embedding similarity required to return a non-identity result (default: 0.35)",
+    )
+    search_parser.add_argument(
         "--format",
         choices=("text", "json"),
         default="text",
@@ -2106,6 +2165,24 @@ def build_parser() -> argparse.ArgumentParser:
     eval_run_parser.add_argument("--output", type=Path, default=Path("eval-report.json"), help="Path to write evaluation report JSON")
     eval_run_parser.add_argument("--top-k", type=int, default=10, help="Maximum results to score per query")
     eval_run_parser.add_argument("--batch-size", type=int, default=64, help="Number of queries to embed per batch")
+    eval_run_parser.add_argument(
+        "--ranking-strategy",
+        choices=RANKING_STRATEGIES,
+        default="metadata",
+        help="Ranking mode: metadata (default), semantic, or cross-encoder rerank",
+    )
+    eval_run_parser.add_argument(
+        "--rerank-candidates",
+        type=int,
+        default=50,
+        help="Embedding candidates to send to a reranker (default: 50)",
+    )
+    eval_run_parser.add_argument(
+        "--exploratory-threshold",
+        type=float,
+        default=0.35,
+        help="Minimum embedding similarity required to return a non-identity result (default: 0.35)",
+    )
     eval_run_parser.add_argument("--records", type=Path, default=None, help="Records JSON used for optional LLM judge comparisons")
     eval_run_parser.add_argument("--llm-judge", action="store_true", help="Run an LLM pairwise judge on top-1 mismatches")
     eval_run_parser.set_defaults(func=eval_run)

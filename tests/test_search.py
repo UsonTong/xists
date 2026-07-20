@@ -269,6 +269,27 @@ def test_cjk_context_does_not_pin_an_ascii_name_fragment():
     assert result["results"][0]["diagnostics"]["identity_match"] is None
 
 
+def test_cjk_context_does_not_pin_a_three_character_project_name_fragment():
+    index = make_index(
+        [
+            {"repo_id": "dingo/api", "vector": [0.0, 1.0], "metadata": {"name": "api"}},
+            {"repo_id": "fastapi/fastapi", "vector": [1.0, 0.0], "metadata": {"name": "fastapi"}},
+        ]
+    )
+
+    result = rank(
+        "Python 异步 Web API 框架",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+    )
+
+    assert result["query_intent"]["type"] == "functional"
+    assert result["results"][0]["repo_id"] == "fastapi/fastapi"
+    assert result["results"][0]["diagnostics"]["identity_match"] is None
+
+
 def test_cjk_context_pins_a_distinct_ascii_name():
     index = make_index(
         [
@@ -528,4 +549,6 @@ def test_query_intent_keeps_basic_labels():
     assert _query_intent("vllm")["type"] == "exact_name"
     assert _query_intent("open source firebase alternative")["type"] == "alternative"
     assert _query_intent("python web framework")["primary_language"] == "python"
+    assert _query_intent("用于容器编排的开源平台")["type"] == "functional"
+    assert _query_intent("Python 异步 Web API 框架")["type"] == "functional"
     assert _query_intent("")["type"] == "empty"

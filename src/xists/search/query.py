@@ -15,6 +15,7 @@ from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingConfig, Embeddi
 HIGH_CONFIDENCE_THRESHOLD = 0.60
 EXPLORATORY_THRESHOLD = 0.35
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*")
+REPO_ID_RE = re.compile(r"(?<![a-z0-9+._#-])[a-z0-9][a-z0-9+._#-]*/[a-z0-9][a-z0-9+._#-]*(?![a-z0-9+._#-])")
 
 GENERIC_TERMS = {
     "a",
@@ -205,9 +206,11 @@ def _query_intent(query: str) -> dict[str, Any]:
     tokens = _tokenize(query)
     keyword_tokens = sorted(_keyword_tokens(query))
     raw_query = query.strip().lower()
-    if not tokens:
+    if not raw_query:
         intent_type = "empty"
-    elif "/" in raw_query or (
+    elif REPO_ID_RE.search(raw_query) or (
+        not any(0x3400 <= ord(char) <= 0x9FFF for char in query)
+        and
         len(tokens) <= EXACT_NAME_QUERY_MAX_TOKENS
         and all(token not in GENERIC_TERMS and token not in QUERY_JOINERS for token in tokens)
     ):
@@ -267,17 +270,20 @@ def _identity_variants(entry: dict[str, Any]) -> set[str]:
 def _exact_identity_match(query: str, entry: dict[str, Any]) -> bool:
     raw_query = query.strip().lower()
     repo_id = str(entry.get("repo_id") or "").strip().lower()
-    if repo_id and repo_id in raw_query:
+    query_repo_ids = {match.group(0) for match in REPO_ID_RE.finditer(raw_query)}
+    if repo_id and repo_id in query_repo_ids:
         return True
     if raw_query in {value.strip().lower() for value in _identity_values(entry)}:
         return True
-    # ASCII tokenization cannot safely represent mixed CJK natural-language queries.
+    # A mixed CJK query has no reliable ASCII word boundaries. Only a distinct
+    # project name is safe to pin; short fragments such as "api" and "ui" are
+    # common natural-language terms rather than unambiguous identifiers.
     if any(0x3400 <= ord(char) <= 0x9FFF for char in query):
         metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
         values = [str(metadata.get("name") or ""), *_string_list(metadata.get("aliases"))]
         for value in values:
             normalized = value.strip().lower()
-            if len(normalized) >= 3 and normalized not in LANGUAGE_TERMS and normalized in raw_query:
+            if len(normalized) >= 4 and normalized not in LANGUAGE_TERMS and normalized in raw_query:
                 return True
         return False
     return bool(_query_variants(query) & _identity_variants(entry))

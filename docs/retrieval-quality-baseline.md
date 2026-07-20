@@ -50,3 +50,41 @@ xists eval run --cases data/scale-cross-domain-holdout.json --index data/scale-2
 Use `scripts/summarize_eval_slices.py` for every later report. A candidate
 change must be evaluated by every domain, language, and category; aggregate
 improvement cannot offset a regression in one of these slices.
+
+## 2k Remote Reranking Calibration
+
+The 2k remote experiment uses a dual-encoder embedding index for candidate
+recall and a configured cross-encoder endpoint for reranking. It does not
+depend on a locally downloaded or hosted embedding/reranking model. The index
+and reports remain local generated artifacts.
+
+The development split selected these explicit, model-score-scale parameters:
+
+```text
+--ranking-strategy rerank --rerank-candidates 50 \
+--exploratory-threshold 0.26 --rerank-abstain-threshold -8
+```
+
+The first value preserves candidates whose embedding similarity is at least
+0.26. The second is a query-level abstention guard: when the fused top result
+has cross-encoder score at or below -8, xists returns no result. Exact
+repository identity matches remain protected. These values are not defaults and
+must be recalibrated for a different model score scale.
+
+The parameters were fixed before running the disjoint holdout split. The
+holdout result was 62.0% Recall@1, 88.0% Recall@5, 4.0% wrong
+high-confidence results, 90.0% no-result abstention, and 2.0% normal-query
+false abstention. Its per-query reranking latency was 1435ms p50 and 1948ms
+p95. Every domain retained or improved on the corresponding 2k baseline
+Recall@5: AI/LLM 80%, web 90%, devtools 90%, infrastructure 80%, and data
+100%.
+
+This passes the 2k gate; it is not evidence for the 10k gate. The same frozen
+configuration must be rerun against the 10k corpus before any production
+default changes. Compare reports without domain-specific logic with:
+
+```text
+python scripts/compare_retrieval_experiments.py \
+  --report baseline=data/scale-2k-cross-domain-holdout-baseline.json \
+  --report calibrated=data/scale-2k-nemotron-holdout-rerank-rrf-threshold-026-rerank-neg8-report.json
+```

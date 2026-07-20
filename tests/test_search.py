@@ -524,6 +524,52 @@ def test_rerank_strategy_requires_a_reranker():
         )
 
 
+def test_rerank_abstain_threshold_rejects_a_query_when_fused_top_score_is_too_low():
+    index = make_index(
+        [
+            {"repo_id": "first/repo", "vector": [1.0, 0.0], "metadata": {}},
+            {"repo_id": "second/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+
+    result = rank(
+        "general query",
+        index,
+        CONFIG,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=lambda query, documents: [-9.0, -10.0],
+        rerank_candidate_limit=2,
+        rerank_abstain_threshold=-8.0,
+    )
+
+    assert result["abstained"] is True
+    assert result["results"] == []
+
+
+def test_rerank_abstain_threshold_preserves_an_exact_repository_identity():
+    index = make_index(
+        [
+            {"repo_id": "owner/project", "vector": [1.0, 0.0], "metadata": {}},
+            {"repo_id": "other/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+
+    result = rank(
+        "owner/project",
+        index,
+        CONFIG,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=lambda query, documents: [-99.0],
+        rerank_candidate_limit=2,
+        rerank_abstain_threshold=-8.0,
+    )
+
+    assert result["abstained"] is False
+    assert result["results"][0]["repo_id"] == "owner/project"
+
+
 def test_semantic_winner_is_not_overturned_by_ordinary_metadata():
     index = make_index(
         [

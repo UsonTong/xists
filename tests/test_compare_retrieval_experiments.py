@@ -14,6 +14,8 @@ def test_compare_reports_includes_slice_and_latency_metrics():
         "dataset_name": "sample",
         "ranking_strategy": "rerank",
         "rerank_candidate_limit": 50,
+        "exploratory_threshold": 0.26,
+        "rerank_abstain_threshold": -8.0,
         "duration_seconds": 1.2,
         "results": [
             {
@@ -39,5 +41,7 @@ def test_compare_reports_includes_slice_and_latency_metrics():
 
     experiment = result["experiments"]["rerank"]
     assert experiment["ranking_strategy"] == "rerank"
+    assert experiment["exploratory_threshold"] == 0.26
+    assert experiment["rerank_abstain_threshold"] == -8.0
     assert experiment["latency"] == {"p50_ms": 20.0, "p95_ms": 40.0}
     assert experiment["slices"]["domain"]["web"]["recall_at_1"] == 1.0

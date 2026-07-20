@@ -40,6 +40,8 @@ def compare_reports(named_reports: dict[str, dict[str, Any]]) -> dict[str, Any]:
         comparisons[name] = {
             "ranking_strategy": report.get("ranking_strategy", "metadata"),
             "rerank_candidate_limit": report.get("rerank_candidate_limit"),
+            "exploratory_threshold": report.get("exploratory_threshold"),
+            "rerank_abstain_threshold": report.get("rerank_abstain_threshold"),
             "duration_seconds": report.get("duration_seconds"),
             "latency": _latency_metrics(report),
             "overall": summary["overall"],

@@ -570,6 +570,7 @@ def _rank_reranked_entries(
     rerank: Callable[[str, list[str]], list[float]],
     candidate_limit: int,
     exploratory_threshold: float,
+    rerank_abstain_threshold: float | None,
 ) -> list[dict[str, Any]]:
     if candidate_limit < 1:
         raise ValueError("rerank candidate limit must be at least 1")
@@ -624,6 +625,10 @@ def _rank_reranked_entries(
         ),
         reverse=True,
     )
+    if not identity_entries and rerank_abstain_threshold is not None and results:
+        top_rerank_score = results[0].get("rerank_score")
+        if isinstance(top_rerank_score, (int, float)) and top_rerank_score <= rerank_abstain_threshold:
+            return []
     presented = [item for item in results if item["confidence"] != "abstain"][: max(top_k, 0)]
     for item in presented:
         item.pop("_identity_pin", None)
@@ -682,6 +687,7 @@ def rank_many(
     rerank: Callable[[str, list[str]], list[float]] | None = None,
     rerank_candidate_limit: int = 50,
     exploratory_threshold: float = EXPLORATORY_THRESHOLD,
+    rerank_abstain_threshold: float | None = None,
 ) -> list[dict[str, Any]]:
     """Rank multiple queries with batched embeddings and matrix similarity."""
 
@@ -744,6 +750,7 @@ def rank_many(
                 rerank=rerank,
                 candidate_limit=rerank_candidate_limit,
                 exploratory_threshold=exploratory_threshold,
+                rerank_abstain_threshold=rerank_abstain_threshold,
             )
         else:
             results = _rank_scored_entries(
@@ -773,6 +780,7 @@ def rank(
     rerank: Callable[[str, list[str]], list[float]] | None = None,
     rerank_candidate_limit: int = 50,
     exploratory_threshold: float = EXPLORATORY_THRESHOLD,
+    rerank_abstain_threshold: float | None = None,
 ) -> dict[str, Any]:
     """Rank index entries against the query."""
 
@@ -806,6 +814,7 @@ def rank(
             rerank=rerank,
             candidate_limit=rerank_candidate_limit,
             exploratory_threshold=exploratory_threshold,
+            rerank_abstain_threshold=rerank_abstain_threshold,
         )
     else:
         results = _rank_scored_entries(

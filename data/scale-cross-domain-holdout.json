@@ -1,0 +1,696 @@
+{
+  "schema_version": 1,
+  "dataset_name": "xists-cross-domain-holdout-v1",
+  "cases": [
+    {
+      "id": "holdout-ai-llm-exact-1",
+      "query": "run-llama/llama_index",
+      "expected_repo_id": "run-llama/llama_index",
+      "tags": [
+        "domain-ai-llm",
+        "category-exact-name",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-ai-llm-exact-2",
+      "query": "查找 vLLM 开源项目",
+      "expected_repo_id": "vllm-project/vllm",
+      "tags": [
+        "domain-ai-llm",
+        "category-exact-name",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-ai-llm-exact-3",
+      "query": "open-webui/open-webui",
+      "expected_repo_id": "open-webui/open-webui",
+      "tags": [
+        "domain-ai-llm",
+        "category-exact-name",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-ai-llm-functional-1",
+      "query": "connect private data to large language model applications",
+      "expected_repo_id": "run-llama/llama_index",
+      "tags": [
+        "domain-ai-llm",
+        "category-functional",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-ai-llm-functional-2",
+      "query": "serve large language models with high throughput",
+      "expected_repo_id": "vllm-project/vllm",
+      "tags": [
+        "domain-ai-llm",
+        "category-functional",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-ai-llm-functional-3",
+      "query": "用于本地大语言模型的自托管 Web 界面",
+      "expected_repo_id": "open-webui/open-webui",
+      "tags": [
+        "domain-ai-llm",
+        "category-functional",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-ai-llm-ecosystem-1",
+      "query": "GPU language model inference server",
+      "expected_repo_id": "vllm-project/vllm",
+      "tags": [
+        "domain-ai-llm",
+        "category-ecosystem",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-ai-llm-ecosystem-2",
+      "query": "自托管大语言模型应用界面",
+      "expected_repo_id": "open-webui/open-webui",
+      "tags": [
+        "domain-ai-llm",
+        "category-ecosystem",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-ai-llm-ambiguous-1",
+      "query": "open source framework for LLM applications and agents",
+      "expected_repo_id": "langchain-ai/langchain",
+      "tags": [
+        "domain-ai-llm",
+        "category-ambiguous",
+        "language-en",
+        "curated"
+      ],
+      "acceptable": [
+        "run-llama/llama_index"
+      ]
+    },
+    {
+      "id": "holdout-ai-llm-ambiguous-2",
+      "query": "开源 面向私有数据的大语言模型应用框架",
+      "expected_repo_id": "run-llama/llama_index",
+      "tags": [
+        "domain-ai-llm",
+        "category-ambiguous",
+        "language-zh",
+        "curated"
+      ],
+      "acceptable": [
+        "langchain-ai/langchain"
+      ]
+    },
+    {
+      "id": "holdout-ai-llm-no-result-1",
+      "query": "open source open source compiler for telepathic neural weather models",
+      "expected_repo_id": "xists/no-result-holdout-ai-llm-1",
+      "tags": [
+        "domain-ai-llm",
+        "category-no-result",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-ai-llm-no-result-2",
+      "query": "开源 用于心灵感应神经天气模型的开源编译器",
+      "expected_repo_id": "xists/no-result-holdout-ai-llm-2",
+      "tags": [
+        "domain-ai-llm",
+        "category-no-result",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-web-exact-1",
+      "query": "fastapi/fastapi",
+      "expected_repo_id": "fastapi/fastapi",
+      "tags": [
+        "domain-web",
+        "category-exact-name",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-web-exact-2",
+      "query": "查找 Django 开源项目",
+      "expected_repo_id": "django/django",
+      "tags": [
+        "domain-web",
+        "category-exact-name",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-web-exact-3",
+      "query": "expressjs/express",
+      "expected_repo_id": "expressjs/express",
+      "tags": [
+        "domain-web",
+        "category-exact-name",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-web-functional-1",
+      "query": "Python framework for asynchronous REST APIs",
+      "expected_repo_id": "fastapi/fastapi",
+      "tags": [
+        "domain-web",
+        "category-functional",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-web-functional-2",
+      "query": "Python framework for database backed web applications",
+      "expected_repo_id": "django/django",
+      "tags": [
+        "domain-web",
+        "category-functional",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-web-functional-3",
+      "query": "轻量级 Node.js Web 应用框架",
+      "expected_repo_id": "expressjs/express",
+      "tags": [
+        "domain-web",
+        "category-functional",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-web-ecosystem-1",
+      "query": "Python server side web framework",
+      "expected_repo_id": "django/django",
+      "tags": [
+        "domain-web",
+        "category-ecosystem",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-web-ecosystem-2",
+      "query": "Node.js Web 框架生态",
+      "expected_repo_id": "expressjs/express",
+      "tags": [
+        "domain-web",
+        "category-ecosystem",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-web-ambiguous-1",
+      "query": "open source component based JavaScript user interface library",
+      "expected_repo_id": "react/react",
+      "tags": [
+        "domain-web",
+        "category-ambiguous",
+        "language-en",
+        "curated"
+      ],
+      "acceptable": [
+        "vuejs/core"
+      ]
+    },
+    {
+      "id": "holdout-web-ambiguous-2",
+      "query": "开源 现代前端组件框架",
+      "expected_repo_id": "vuejs/core",
+      "tags": [
+        "domain-web",
+        "category-ambiguous",
+        "language-zh",
+        "curated"
+      ],
+      "acceptable": [
+        "react/react"
+      ]
+    },
+    {
+      "id": "holdout-web-no-result-1",
+      "query": "open source framework for legally binding interplanetary browser contracts",
+      "expected_repo_id": "xists/no-result-holdout-web-1",
+      "tags": [
+        "domain-web",
+        "category-no-result",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-web-no-result-2",
+      "query": "开源 用于星际浏览器合同的专用开源框架",
+      "expected_repo_id": "xists/no-result-holdout-web-2",
+      "tags": [
+        "domain-web",
+        "category-no-result",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-devtools-exact-1",
+      "query": "rust-lang/rust",
+      "expected_repo_id": "rust-lang/rust",
+      "tags": [
+        "domain-devtools",
+        "category-exact-name",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-devtools-exact-2",
+      "query": "查找 Vite 开源项目",
+      "expected_repo_id": "vitejs/vite",
+      "tags": [
+        "domain-devtools",
+        "category-exact-name",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-devtools-exact-3",
+      "query": "prettier/prettier",
+      "expected_repo_id": "prettier/prettier",
+      "tags": [
+        "domain-devtools",
+        "category-exact-name",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-devtools-functional-1",
+      "query": "systems programming language and compiler",
+      "expected_repo_id": "rust-lang/rust",
+      "tags": [
+        "domain-devtools",
+        "category-functional",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-devtools-functional-2",
+      "query": "fast frontend development server and build tool",
+      "expected_repo_id": "vitejs/vite",
+      "tags": [
+        "domain-devtools",
+        "category-functional",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-devtools-functional-3",
+      "query": "固定风格的代码格式化工具",
+      "expected_repo_id": "prettier/prettier",
+      "tags": [
+        "domain-devtools",
+        "category-functional",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-devtools-ecosystem-1",
+      "query": "modern frontend build tooling",
+      "expected_repo_id": "vitejs/vite",
+      "tags": [
+        "domain-devtools",
+        "category-ecosystem",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-devtools-ecosystem-2",
+      "query": "JavaScript 代码质量工具生态",
+      "expected_repo_id": "prettier/prettier",
+      "tags": [
+        "domain-devtools",
+        "category-ecosystem",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-devtools-ambiguous-1",
+      "query": "open source extensible editor for software development",
+      "expected_repo_id": "microsoft/vscode",
+      "tags": [
+        "domain-devtools",
+        "category-ambiguous",
+        "language-en",
+        "curated"
+      ],
+      "acceptable": [
+        "neovim/neovim"
+      ]
+    },
+    {
+      "id": "holdout-devtools-ambiguous-2",
+      "query": "开源 可扩展的开发者代码编辑器",
+      "expected_repo_id": "neovim/neovim",
+      "tags": [
+        "domain-devtools",
+        "category-ambiguous",
+        "language-zh",
+        "curated"
+      ],
+      "acceptable": [
+        "microsoft/vscode"
+      ]
+    },
+    {
+      "id": "holdout-devtools-no-result-1",
+      "query": "open source source editor for reversible quantum legal histories",
+      "expected_repo_id": "xists/no-result-holdout-devtools-1",
+      "tags": [
+        "domain-devtools",
+        "category-no-result",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-devtools-no-result-2",
+      "query": "开源 用于可逆量子法律历史的源代码编辑器",
+      "expected_repo_id": "xists/no-result-holdout-devtools-2",
+      "tags": [
+        "domain-devtools",
+        "category-no-result",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-infra-exact-1",
+      "query": "moby/moby",
+      "expected_repo_id": "moby/moby",
+      "tags": [
+        "domain-infra",
+        "category-exact-name",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-infra-exact-2",
+      "query": "查找 Ansible 开源项目",
+      "expected_repo_id": "ansible/ansible",
+      "tags": [
+        "domain-infra",
+        "category-exact-name",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-infra-exact-3",
+      "query": "grafana/grafana",
+      "expected_repo_id": "grafana/grafana",
+      "tags": [
+        "domain-infra",
+        "category-exact-name",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-infra-functional-1",
+      "query": "container engine components and tooling",
+      "expected_repo_id": "moby/moby",
+      "tags": [
+        "domain-infra",
+        "category-functional",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-infra-functional-2",
+      "query": "agentless infrastructure automation tool",
+      "expected_repo_id": "ansible/ansible",
+      "tags": [
+        "domain-infra",
+        "category-functional",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-infra-functional-3",
+      "query": "可观测性仪表盘和可视化平台",
+      "expected_repo_id": "grafana/grafana",
+      "tags": [
+        "domain-infra",
+        "category-functional",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-infra-ecosystem-1",
+      "query": "configuration management ecosystem",
+      "expected_repo_id": "ansible/ansible",
+      "tags": [
+        "domain-infra",
+        "category-ecosystem",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-infra-ecosystem-2",
+      "query": "可观测性可视化生态",
+      "expected_repo_id": "grafana/grafana",
+      "tags": [
+        "domain-infra",
+        "category-ecosystem",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-infra-ambiguous-1",
+      "query": "open source infrastructure automation and provisioning tool",
+      "expected_repo_id": "hashicorp/terraform",
+      "tags": [
+        "domain-infra",
+        "category-ambiguous",
+        "language-en",
+        "curated"
+      ],
+      "acceptable": [
+        "ansible/ansible"
+      ]
+    },
+    {
+      "id": "holdout-infra-ambiguous-2",
+      "query": "开源 基础设施自动化与配置工具",
+      "expected_repo_id": "ansible/ansible",
+      "tags": [
+        "domain-infra",
+        "category-ambiguous",
+        "language-zh",
+        "curated"
+      ],
+      "acceptable": [
+        "hashicorp/terraform"
+      ]
+    },
+    {
+      "id": "holdout-infra-no-result-1",
+      "query": "open source orchestrator for autonomous lunar water treaties",
+      "expected_repo_id": "xists/no-result-holdout-infra-1",
+      "tags": [
+        "domain-infra",
+        "category-no-result",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-infra-no-result-2",
+      "query": "开源 管理月球水资源条约的容器编排系统",
+      "expected_repo_id": "xists/no-result-holdout-infra-2",
+      "tags": [
+        "domain-infra",
+        "category-no-result",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-data-exact-1",
+      "query": "apache/spark",
+      "expected_repo_id": "apache/spark",
+      "tags": [
+        "domain-data",
+        "category-exact-name",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-data-exact-2",
+      "query": "查找 DuckDB 开源项目",
+      "expected_repo_id": "duckdb/duckdb",
+      "tags": [
+        "domain-data",
+        "category-exact-name",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-data-exact-3",
+      "query": "pandas-dev/pandas",
+      "expected_repo_id": "pandas-dev/pandas",
+      "tags": [
+        "domain-data",
+        "category-exact-name",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-data-functional-1",
+      "query": "distributed data processing engine",
+      "expected_repo_id": "apache/spark",
+      "tags": [
+        "domain-data",
+        "category-functional",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-data-functional-2",
+      "query": "analytical SQL database for local data",
+      "expected_repo_id": "duckdb/duckdb",
+      "tags": [
+        "domain-data",
+        "category-functional",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-data-functional-3",
+      "query": "用于表格数据分析的 Python 库",
+      "expected_repo_id": "pandas-dev/pandas",
+      "tags": [
+        "domain-data",
+        "category-functional",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-data-ecosystem-1",
+      "query": "analytical database ecosystem",
+      "expected_repo_id": "duckdb/duckdb",
+      "tags": [
+        "domain-data",
+        "category-ecosystem",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-data-ecosystem-2",
+      "query": "Python 数据分析生态",
+      "expected_repo_id": "pandas-dev/pandas",
+      "tags": [
+        "domain-data",
+        "category-ecosystem",
+        "language-zh",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-data-ambiguous-1",
+      "query": "open source open source relational SQL database",
+      "expected_repo_id": "postgres/postgres",
+      "tags": [
+        "domain-data",
+        "category-ambiguous",
+        "language-en",
+        "curated"
+      ],
+      "acceptable": [
+        "MariaDB/server"
+      ]
+    },
+    {
+      "id": "holdout-data-ambiguous-2",
+      "query": "开源 开源关系型 SQL 数据库",
+      "expected_repo_id": "MariaDB/server",
+      "tags": [
+        "domain-data",
+        "category-ambiguous",
+        "language-zh",
+        "curated"
+      ],
+      "acceptable": [
+        "postgres/postgres"
+      ]
+    },
+    {
+      "id": "holdout-data-no-result-1",
+      "query": "open source database for certified dream accounting ledgers",
+      "expected_repo_id": "xists/no-result-holdout-data-1",
+      "tags": [
+        "domain-data",
+        "category-no-result",
+        "language-en",
+        "curated"
+      ]
+    },
+    {
+      "id": "holdout-data-no-result-2",
+      "query": "开源 用于认证梦境账本的专用数据库",
+      "expected_repo_id": "xists/no-result-holdout-data-2",
+      "tags": [
+        "domain-data",
+        "category-no-result",
+        "language-zh",
+        "curated"
+      ]
+    }
+  ]
+}

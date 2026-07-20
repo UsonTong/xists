@@ -16,4 +16,5 @@ data/scale-*-records*.json
 data/scale-*-profiled-records*.json
 data/scale-*-index.json
 data/scale-*-report.json
+data/scale-*-baseline.json
 data/scale-*-result.json

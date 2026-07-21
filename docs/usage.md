@@ -326,6 +326,8 @@ Use `--dry-run` to preview refresh work without calling the LLM or writing files
 
 The refresh failure report includes `repo_id`, `error`, and `attempted_at`. A completed batch with individual failures exits `0`, preserves each failed record's old profile, and writes a stderr summary. A run that cannot refresh any selected record exits nonzero so endpoint or configuration failures remain actionable.
 
+The current profile prompt also produces evidence-grounded `search_phrases`: two to five concise ways a developer might search for the repository. They are embedded alongside the profile's `search_text`, summary, use cases, and capabilities. Refreshing after a prompt version upgrade regenerates these phrases; they are not a curated vocabulary or a per-domain rule set.
+
 ### Step 3: Search
 
 ```bash

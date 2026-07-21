@@ -23,7 +23,7 @@ from xists.records import normalize_llm_profile
 
 USER_AGENT = "xists-llm-profile"
 CONFIDENCE_VALUES = {"high", "medium", "low"}
-PROFILE_PROMPT_VERSION = 2
+PROFILE_PROMPT_VERSION = 3
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
 PROFILE_SYSTEM_PROMPT = (
@@ -50,9 +50,13 @@ PROFILE_SYSTEM_PROMPT = (
     "- related_projects should name adjacent projects in the same space.\n"
     "- search_text should be a compact, retrieval-friendly string for embedding "
     "search and should include the phrases a developer might type.\n"
+    "- search_phrases should contain two to five concise search queries a "
+    "developer might use. Each phrase must be supported by the supplied "
+    "evidence and must not add capabilities that are not stated there.\n"
     "Respond with a single JSON object and nothing else, using exactly these "
     "keys: summary, use_cases, capabilities, not_for, aliases, project_type, "
-    "ecosystem, replaces, related_projects, search_text, confidence, abstained."
+    "ecosystem, replaces, related_projects, search_text, search_phrases, "
+    "confidence, abstained."
 )
 
 

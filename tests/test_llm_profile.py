@@ -115,6 +115,7 @@ def test_build_profile_messages_has_system_and_user():
     assert messages[1]["role"] == "user"
     assert "react/react" in messages[1]["content"]
     assert "search_text" in messages[0]["content"]
+    assert "search_phrases" in messages[0]["content"]
     assert "aliases" in messages[0]["content"]
     assert "project_type" in messages[0]["content"]
 

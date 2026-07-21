@@ -13,6 +13,8 @@ from xists.search.embed import (
     embedding_config_from_env,
     embedding_input_fingerprint,
     embedding_text_from_record,
+    embedding_view_input_fingerprint,
+    embedding_views_from_record,
 )
 from xists.search.index import build_index
 from xists.records import RECORD_SCHEMA_VERSION
@@ -120,6 +122,52 @@ def test_embedding_text_prioritizes_search_text():
 
 def test_embedding_text_empty_when_no_signal():
     assert embedding_text_from_record({"repo_id": None}) == ""
+
+
+def test_embedding_views_separate_identity_intent_and_evidence():
+    views = {view.kind: view.text for view in embedding_views_from_record(make_record())}
+
+    assert set(views) == {"identity", "intent", "evidence"}
+    assert views["identity"].splitlines() == ["react/react", "react", "reactjs"]
+    assert "react javascript ui library frontend ui library web user interfaces" in views["intent"]
+    assert "frontend UI library" in views["intent"]
+    assert "building web user interfaces" in views["intent"]
+    assert "The library for web and native user interfaces." in views["evidence"]
+    assert "declarative UI rendering" in views["evidence"]
+    assert "backend-only services" not in "\n".join(views.values())
+
+
+def test_embedding_views_skip_empty_views_and_support_abstained_profiles():
+    record = {
+        "repo_id": "owner/project",
+        "llm_profile": {
+            "abstained": True,
+            "aliases": [],
+            "search_text": "",
+            "search_phrases": [],
+            "use_cases": [],
+            "summary": None,
+            "capabilities": [],
+            "ecosystem": [],
+            "project_type": None,
+            "not_for": ["unrelated use"],
+        },
+    }
+
+    views = embedding_views_from_record(record)
+
+    assert [(view.kind, view.text) for view in views] == [("identity", "owner/project")]
+    assert "unrelated use" not in "\n".join(view.text for view in views)
+
+
+def test_embedding_view_fingerprint_changes_for_kind_or_text():
+    views = embedding_views_from_record(make_record())
+    identity, intent = views[:2]
+
+    assert embedding_view_input_fingerprint(identity) != embedding_view_input_fingerprint(intent)
+    assert embedding_view_input_fingerprint(identity) != embedding_view_input_fingerprint(
+        type(identity)(kind=identity.kind, text=f"{identity.text} changed")
+    )
 
 
 def test_embedding_input_fingerprint_changes_with_text():

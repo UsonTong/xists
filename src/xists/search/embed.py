@@ -23,6 +23,8 @@ from typing import Any
 
 USER_AGENT = "xists-embedding"
 EMBEDDING_INPUT_VERSION = 3
+EMBEDDING_VIEW_KINDS = ("identity", "intent", "evidence")
+EMBEDDING_VIEW_INPUT_VERSION = 1
 
 
 class EmbeddingError(RuntimeError):
@@ -31,6 +33,19 @@ class EmbeddingError(RuntimeError):
 
 class EmbeddingNotConfiguredError(EmbeddingError):
     """Raised when no embedding configuration is available in the environment."""
+
+
+@dataclass(frozen=True)
+class EmbeddingView:
+    """One evidence-grounded semantic representation of a repository.
+
+    Views deliberately separate a repository's identity, intended use, and
+    broader factual evidence.  The index layer can embed them independently
+    without adding any domain-specific ranking rule.
+    """
+
+    kind: str
+    text: str
 
 
 @dataclass(frozen=True)
@@ -124,6 +139,71 @@ def embedding_text_from_record(record: dict[str, Any]) -> str:
     name = record.get("repo_id") or record.get("name")
     parts = ([str(name)] if name else []) + content
     return "\n".join(parts).strip()
+
+
+def _nonempty_strings(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(value).strip() for value in values if isinstance(value, str) and value.strip()]
+
+
+def embedding_views_from_record(record: dict[str, Any]) -> list[EmbeddingView]:
+    """Return non-empty identity, intent, and evidence views for ``record``.
+
+    Each source field belongs to one view so concise user-intent wording is not
+    diluted by broader repository evidence.  ``not_for`` is intentionally
+    absent: it describes unsuitable queries and must not attract them.
+    """
+
+    github = record.get("github") or {}
+    profile = record.get("llm_profile") or {}
+
+    identity: list[str] = []
+    for value in (record.get("repo_id") or record.get("repo_id_requested"), record.get("name")):
+        if isinstance(value, str) and value.strip():
+            identity.append(value.strip())
+    identity.extend(_nonempty_strings(profile.get("aliases")))
+
+    intent: list[str] = []
+    for value in (profile.get("search_text"),):
+        if isinstance(value, str) and value.strip():
+            intent.append(value.strip())
+    intent.extend(_nonempty_strings(profile.get("search_phrases")))
+    intent.extend(_nonempty_strings(profile.get("use_cases")))
+
+    evidence: list[str] = []
+    for value in (
+        github.get("description"),
+        github.get("language"),
+        profile.get("summary"),
+        profile.get("project_type"),
+    ):
+        if isinstance(value, str) and value.strip():
+            evidence.append(value.strip())
+    evidence.extend(_nonempty_strings(github.get("topics")))
+    evidence.extend(_nonempty_strings(profile.get("capabilities")))
+    evidence.extend(_nonempty_strings(profile.get("ecosystem")))
+
+    return [
+        EmbeddingView(kind=kind, text="\n".join(parts))
+        for kind, parts in (("identity", identity), ("intent", intent), ("evidence", evidence))
+        if parts
+    ]
+
+
+def embedding_view_input_fingerprint(view: EmbeddingView) -> str:
+    """Fingerprint an individual view for incremental multi-view indexes."""
+
+    payload = json.dumps(
+        {
+            "embedding_view_input_version": EMBEDDING_VIEW_INPUT_VERSION,
+            "kind": view.kind,
+            "text": view.text,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def embedding_input_fingerprint(record: dict[str, Any]) -> str | None:

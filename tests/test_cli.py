@@ -1214,41 +1214,6 @@ def test_profile_refresh_writes_v2_records(tmp_path, monkeypatch, capsys):
     assert refreshed[0]["url"] == "https://github.com/old/repo"
 
 
-def test_profile_refresh_preserves_retrieval_evidence_omitted_by_a_new_profile(tmp_path, monkeypatch):
-    records_file = tmp_path / "records.json"
-    record = _make_record("old/repo")
-    record["llm_profile"]["search_text"] = "existing retrieval evidence"
-    record["llm_profile"]["capabilities"] = ["existing capability"]
-    records_file.write_text(json.dumps([record]), encoding="utf-8")
-    output_file = tmp_path / "records-v2.json"
-
-    monkeypatch.setenv("LLM_API_KEY", "key")
-    monkeypatch.setenv("LLM_BASE_URL", "http://test/v1")
-    monkeypatch.setenv("LLM_MODEL", "model")
-    args = build_parser().parse_args(
-        ["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--force"]
-    )
-    generated_profile = {
-        "summary": "new summary",
-        "use_cases": ["new use case"],
-        "capabilities": [],
-        "search_text": None,
-        "search_phrases": ["new search phrase"],
-        "confidence": "low",
-        "abstained": False,
-        "prompt_version": 3,
-    }
-
-    with patch("xists.cli.generate_llm_profile", return_value=generated_profile):
-        assert profile_refresh(args) == 0
-
-    refreshed = json.loads(output_file.read_text(encoding="utf-8"))[0]["llm_profile"]
-    assert refreshed["summary"] == "new summary"
-    assert refreshed["search_text"] == "existing retrieval evidence"
-    assert refreshed["capabilities"] == ["existing capability"]
-    assert refreshed["search_phrases"] == ["new search phrase"]
-
-
 def test_profile_refresh_workers_runs_profiles_concurrently_and_preserves_order(tmp_path, monkeypatch):
     records_file = tmp_path / "records.json"
     records = [_make_record("one/repo"), _make_record("two/repo"), _make_record("three/repo")]

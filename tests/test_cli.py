@@ -879,6 +879,42 @@ def test_index_stats_prints_compact_summary(tmp_path, capsys):
     assert "vectors" not in payload
 
 
+def test_index_stats_reports_multi_view_counts(tmp_path, capsys):
+    index_file = tmp_path / "index.json"
+    index_file.write_text(
+        json.dumps(
+            {
+                "index_version": INDEX_VERSION,
+                "embedding_model": "example/embed",
+                "embedding_view_input_version": EMBEDDING_VIEW_INPUT_VERSION,
+                "dimension": 2,
+                "record_count": 1,
+                "skipped": [],
+                "vectors": [
+                    {
+                        "repo_id": "example/repo",
+                        "metadata": {"language": "Python", "topics": ["search"]},
+                        "views": [
+                            {"kind": "identity", "embedding_input_fingerprint": "a", "vector": [1.0, 0.0]},
+                            {"kind": "intent", "embedding_input_fingerprint": "b", "vector": [0.0, 1.0]},
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(["index", "stats", "--index", str(index_file), "--format", "json"])
+
+    assert index_stats(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["index_kind"] == "multi_view"
+    assert payload["embedding_view_input_version"] == EMBEDDING_VIEW_INPUT_VERSION
+    assert payload["vector_count"] == 2
+    assert payload["view_counts"] == {"identity": 1, "intent": 1}
+
+
 def test_index_stats_text_is_readable(tmp_path, capsys):
     index_file = tmp_path / "index.json"
     index_file.write_text(

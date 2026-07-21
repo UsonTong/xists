@@ -1180,11 +1180,25 @@ def _index_stats_report(index: dict[str, Any], *, index_path: Path, limit: int) 
     topics: Counter[str] = Counter()
     missing_metadata = 0
     missing_fingerprints = 0
+    multi_view = any(isinstance(entry, dict) and isinstance(entry.get("views"), list) for entry in vectors)
+    view_counts: Counter[str] = Counter()
+    vector_count = 0
     for entry in vectors:
         if not isinstance(entry, dict):
             continue
-        if not entry.get("embedding_input_fingerprint"):
-            missing_fingerprints += 1
+        if multi_view:
+            for view in entry.get("views") or []:
+                if not isinstance(view, dict):
+                    continue
+                vector_count += 1
+                if isinstance(view.get("kind"), str):
+                    view_counts[view["kind"]] += 1
+                if not view.get("embedding_input_fingerprint"):
+                    missing_fingerprints += 1
+        else:
+            vector_count += 1
+            if not entry.get("embedding_input_fingerprint"):
+                missing_fingerprints += 1
         metadata = entry.get("metadata")
         if not isinstance(metadata, dict):
             missing_metadata += 1
@@ -1200,7 +1214,7 @@ def _index_stats_report(index: dict[str, Any], *, index_path: Path, limit: int) 
     estimated_memory_mb: float | None = None
     if isinstance(dimension, int) and dimension > 0:
         # Search materializes vectors as a float32 matrix (4 bytes per value).
-        estimated_memory_mb = round(len(vectors) * dimension * 4 / 1024 / 1024, 1)
+        estimated_memory_mb = round(vector_count * dimension * 4 / 1024 / 1024, 1)
 
     payload = {
         "index": str(index_path),
@@ -1209,10 +1223,13 @@ def _index_stats_report(index: dict[str, Any], *, index_path: Path, limit: int) 
         "embedding_model": index.get("embedding_model"),
         "embedding_base_url": index.get("embedding_base_url"),
         "embedding_input_version": index.get("embedding_input_version"),
+        "embedding_view_input_version": index.get("embedding_view_input_version"),
+        "index_kind": "multi_view" if multi_view else "legacy_single_view",
         "dimension": index.get("dimension"),
         "built_at": index.get("built_at"),
         "record_count": index.get("record_count"),
-        "vector_count": len(vectors),
+        "vector_count": vector_count,
+        "view_counts": dict(sorted(view_counts.items())),
         "estimated_memory_mb": estimated_memory_mb,
         "skipped_count": len(index.get("skipped") or []),
         "missing_metadata_count": missing_metadata,
@@ -1232,6 +1249,8 @@ def _format_index_stats_text(report: dict[str, Any]) -> str:
             f"embedding_model: {report.get('embedding_model')}",
             f"embedding_base_url: {report.get('embedding_base_url')}",
             f"embedding_input_version: {report.get('embedding_input_version')}",
+            f"index_kind: {report.get('index_kind')}",
+            f"view_counts: {report.get('view_counts')}",
             f"dimension: {report.get('dimension')}",
             f"built_at: {report.get('built_at')}",
             f"record_count: {report.get('record_count')}",

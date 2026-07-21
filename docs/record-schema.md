@@ -390,12 +390,13 @@ xists fills the provenance fields itself so they stay trustworthy:
 
 ## Embedding index traceability
 
-`index.json` is derived from `records.json`. Each vector entry records the
-fingerprint of the exact embedding input text used to generate the vector:
+`index.json` is derived from `records.json`. Current indexes keep separate
+identity, intent, and evidence views, each with a fingerprint of the exact
+embedding input text used to generate it:
 
 ```json
 {
-  "index_version": 1,
+  "index_version": 2,
   "record_schema_version": 2,
   "embedding_model": "BAAI/bge-m3",
   "embedding_input_version": 3,
@@ -405,7 +406,6 @@ fingerprint of the exact embedding input text used to generate the vector:
   "vectors": [
     {
       "repo_id": "react/react",
-      "embedding_input_fingerprint": "...",
       "metadata": {
         "summary": "React is a JavaScript library for building user interfaces...",
         "aliases": ["react", "reactjs"],
@@ -413,14 +413,24 @@ fingerprint of the exact embedding input text used to generate the vector:
         "ecosystem": ["javascript", "web"],
         "search_text": "JavaScript UI library for building component-based web interfaces..."
       },
-      "vector": [0.01, -0.02]
+      "views": [
+        {"kind": "identity", "embedding_input_fingerprint": "...", "vector": [0.01, -0.02]},
+        {"kind": "intent", "embedding_input_fingerprint": "...", "vector": [0.03, -0.04]},
+        {"kind": "evidence", "embedding_input_fingerprint": "...", "vector": [0.05, -0.06]}
+      ]
     }
   ]
 }
 ```
 
-The fingerprint is a SHA-256 hash over the embedding input version and the exact
-text produced by `embedding_text_from_record()`. During incremental index builds,
-xists reuses an existing vector only when the repo id, embedding model, vector
-dimension, and embedding input fingerprint still match. Older indexes without
+Views have non-overlapping field roles: identity uses repository identity and
+aliases; intent uses search text, search phrases, and use cases; evidence uses
+the broader collected and profile facts. `not_for` is not embedded because it
+describes unsuitable queries. Search keeps one candidate per repository by
+selecting its best-matching view before reranking.
+
+Each view fingerprint is a SHA-256 hash over the view input version, kind, and
+exact text. During incremental index builds, xists reuses an existing view only
+when its repo id, kind, embedding model, vector dimension, and fingerprint still
+match. Older indexes without
 fingerprints are treated as stale and re-embedded.

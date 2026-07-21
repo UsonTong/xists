@@ -152,6 +152,7 @@ def evaluate_dataset(
         top_result_score_breakdown = top_result.get("score_breakdown") if top_result else None
         top_result_rerank_score = top_result.get("rerank_score") if top_result else None
         top_result_ranking_evidence = top_result.get("ranking_evidence") if top_result else None
+        top_result_embedding_view = top_result.get("best_embedding_view") if top_result else None
         exact_match = top_result_repo_id == expected_repo_id
         acceptable_match = top_result_repo_id in acceptable_set if top_result_repo_id else False
 
@@ -241,6 +242,9 @@ def evaluate_dataset(
                     if isinstance(top_result_ranking_evidence, dict)
                     else {}
                 ),
+                "top_result_embedding_view": (
+                    top_result_embedding_view if isinstance(top_result_embedding_view, str) else None
+                ),
                 "exact_match": exact_match,
                 "acceptable_match": acceptable_match,
                 "exact_rank": exact_rank,
@@ -317,6 +321,9 @@ def evaluate_dataset(
         "dataset_name": dataset["dataset_name"],
         "cases": str(cases_path),
         "index": str(index_path),
+        "index_version": index.get("index_version"),
+        "index_kind": "multi_view" if any(isinstance(item, dict) and isinstance(item.get("views"), list) for item in index.get("vectors") or []) else "legacy_single_view",
+        "index_view_count": sum(len(item.get("views") or []) for item in index.get("vectors") or [] if isinstance(item, dict)),
         "top_k": top_k,
         "batch_size": batch_size,
         "ranking_strategy": ranking_strategy,

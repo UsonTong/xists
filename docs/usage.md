@@ -275,11 +275,13 @@ This reads `records.json`, computes embeddings via the configured endpoint, and 
 
 #### Incremental update
 
-By default, `xists index build` is incremental. It reuses an existing vector only when the repo id, embedding model, vector dimension, and embedding input fingerprint still match the current record. If the record content or embedding text logic changes, xists re-embeds that record automatically.
+By default, `xists index build` is incremental. Current indexes keep separate identity, intent, and evidence views for each repository. xists reuses an existing view only when its repo id, view kind, embedding model, vector dimension, and view fingerprint still match. A change to an intent field such as `search_phrases` therefore re-embeds only the intent view, while unchanged identity and evidence views are retained.
+
+At search time, each repository remains one candidate: xists takes the highest semantic similarity among its views, then runs the existing metadata and optional reranking steps on the deduplicated repository candidates. The views are generic representations of record fields, not domain-specific ranking rules. `not_for` is never embedded.
 
 #### Checkpoint
 
-Each batch (64 records) is written to disk as it completes. If interrupted, completed batches are preserved.
+Each batch (64 views) is written to disk as it completes. If interrupted, completed views are preserved and are reused on the next build.
 
 #### Model mismatch protection
 
@@ -294,7 +296,7 @@ xists index stats --index demo-index.json --limit 5
 xists index verify --records demo-records.json --index demo-index.json
 ```
 
-`index stats` includes model, dimension, record/vector counts, an estimated in-memory size of the vector matrix (float32), skipped count, missing metadata/fingerprint counts, and the most common languages/topics. `index verify` compares records and index fingerprints to catch stale, missing, extra, or incompatible vectors before search/eval.
+`index stats` includes index kind, view counts, model, dimension, record/vector counts, an estimated in-memory size of the vector matrix (float32), skipped count, missing metadata/fingerprint counts, and the most common languages/topics. `index verify` compares records and per-view fingerprints to catch stale, missing, extra, or incompatible vectors before search/eval.
 
 ### Maintain a data source
 

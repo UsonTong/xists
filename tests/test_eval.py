@@ -138,9 +138,18 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
     index_file.write_text(
         json.dumps(
             {
+                "index_version": 2,
                 "embedding_model": "bge-m3",
                 "dimension": 2,
-                "vectors": [],
+                "vectors": [
+                    {
+                        "repo_id": "react/react",
+                        "views": [
+                            {"kind": "identity", "vector": [1.0, 0.0]},
+                            {"kind": "intent", "vector": [0.0, 1.0]},
+                        ],
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -158,6 +167,7 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
                         "repo_id": "react/react",
                         "score": 0.8,
                         "confidence": "high_confidence",
+                        "best_embedding_view": "intent",
                         "why": ["matched topic: frontend"],
                         "matched_terms": ["frontend"],
                         "score_breakdown": {"semantic": 0.7, "metadata": 0.1, "final": 0.8},
@@ -197,6 +207,9 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
     report = evaluate_dataset(cases_file, index_file, CONFIG, embed_many=fake_rank_many)
 
     assert report["case_count"] == 3
+    assert report["index_version"] == 2
+    assert report["index_kind"] == "multi_view"
+    assert report["index_view_count"] == 2
     assert report["metrics"] == {
         "exact_hit_at_1": 0.333333,
         "exact_hit_at_k": 0.666667,
@@ -268,6 +281,7 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
         "semantic_rank": 1,
         "rerank_rank": 2,
     }
+    assert report["results"][0]["top_result_embedding_view"] == "intent"
     assert report["results"][0]["top1_status"] == "exact"
     assert report["results"][1]["top1_status"] == "acceptable"
     assert report["results"][1]["exact_match"] is False

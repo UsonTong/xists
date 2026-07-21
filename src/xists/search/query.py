@@ -293,6 +293,16 @@ def _exact_identity_match(query: str, entry: dict[str, Any]) -> bool:
             normalized = value.strip().lower()
             if len(normalized) >= 4 and normalized not in LANGUAGE_TERMS and normalized in raw_query:
                 return True
+            compact = value.strip()
+            if (
+                len(compact) == 3
+                and compact.isascii()
+                and compact.isalpha()
+                and compact[0].isupper()
+                and compact[1:].islower()
+                and re.search(rf"(?<![A-Za-z0-9]){re.escape(compact)}(?![A-Za-z0-9])", query)
+            ):
+                return True
         return False
     return bool(_query_variants(query) & _identity_variants(entry))
 

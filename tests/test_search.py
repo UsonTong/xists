@@ -372,6 +372,26 @@ def test_cjk_context_does_not_pin_a_three_character_project_name_fragment():
     assert result["results"][0]["diagnostics"]["identity_match"] is None
 
 
+def test_cjk_context_pins_a_title_cased_three_character_alias():
+    index = make_index(
+        [
+            {"repo_id": "vuejs/core", "vector": [0.0, 1.0], "metadata": {"name": "core", "aliases": ["Vue"]}},
+            {"repo_id": "semantic/winner", "vector": [1.0, 0.0], "metadata": {"name": "winner"}},
+        ]
+    )
+
+    result = rank(
+        "查找 Vue 开源项目",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+    )
+
+    assert result["results"][0]["repo_id"] == "vuejs/core"
+    assert result["results"][0]["diagnostics"]["identity_match"] == "exact"
+
+
 def test_cjk_context_pins_a_distinct_ascii_name():
     index = make_index(
         [

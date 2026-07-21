@@ -850,6 +850,8 @@ def search(args: argparse.Namespace) -> int:
             rerank=rerank,
             rerank_candidate_limit=args.rerank_candidates,
             rerank_fusion=args.rerank_fusion,
+            rerank_semantic_weight=args.rerank_semantic_weight,
+            rerank_rank_weight=args.rerank_rank_weight,
             exploratory_threshold=args.exploratory_threshold,
             rerank_abstain_threshold=args.rerank_abstain_threshold,
         )
@@ -1901,6 +1903,8 @@ def eval_run(args: argparse.Namespace) -> int:
             rerank=rerank,
             rerank_candidate_limit=args.rerank_candidates,
             rerank_fusion=args.rerank_fusion,
+            rerank_semantic_weight=args.rerank_semantic_weight,
+            rerank_rank_weight=args.rerank_rank_weight,
             exploratory_threshold=args.exploratory_threshold,
             rerank_abstain_threshold=args.rerank_abstain_threshold,
         )
@@ -2154,6 +2158,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="How to combine embedding recall with reranking (default: reciprocal_rank)",
     )
     search_parser.add_argument(
+        "--rerank-semantic-weight",
+        type=float,
+        default=1.0,
+        help="Embedding rank weight for reciprocal-rank fusion (default: 1.0)",
+    )
+    search_parser.add_argument(
+        "--rerank-rank-weight",
+        type=float,
+        default=1.0,
+        help="Reranker rank weight for reciprocal-rank fusion (default: 1.0)",
+    )
+    search_parser.add_argument(
         "--exploratory-threshold",
         type=float,
         default=0.35,
@@ -2198,6 +2214,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=RERANK_FUSIONS,
         default="reciprocal_rank",
         help="How to combine embedding recall with reranking (default: reciprocal_rank)",
+    )
+    eval_run_parser.add_argument(
+        "--rerank-semantic-weight",
+        type=float,
+        default=1.0,
+        help="Embedding rank weight for reciprocal-rank fusion (default: 1.0)",
+    )
+    eval_run_parser.add_argument(
+        "--rerank-rank-weight",
+        type=float,
+        default=1.0,
+        help="Reranker rank weight for reciprocal-rank fusion (default: 1.0)",
     )
     eval_run_parser.add_argument(
         "--exploratory-threshold",

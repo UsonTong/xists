@@ -455,6 +455,8 @@ def test_eval_run_writes_report(tmp_path, monkeypatch):
         rerank=None,
         rerank_candidate_limit=50,
         rerank_fusion="reciprocal_rank",
+        rerank_semantic_weight=1.0,
+        rerank_rank_weight=1.0,
         exploratory_threshold=0.35,
         rerank_abstain_threshold=None,
     ):
@@ -469,6 +471,8 @@ def test_eval_run_writes_report(tmp_path, monkeypatch):
         assert rerank is None
         assert rerank_candidate_limit == 50
         assert rerank_fusion == "reciprocal_rank"
+        assert rerank_semantic_weight == 1.0
+        assert rerank_rank_weight == 1.0
         assert exploratory_threshold == 0.35
         assert rerank_abstain_threshold is None
         return {

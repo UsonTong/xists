@@ -61,6 +61,8 @@ def evaluate_dataset(
     rerank: Any | None = None,
     rerank_candidate_limit: int = 50,
     rerank_fusion: str = "reciprocal_rank",
+    rerank_semantic_weight: float = 1.0,
+    rerank_rank_weight: float = 1.0,
     exploratory_threshold: float = 0.35,
     rerank_abstain_threshold: float | None = None,
 ) -> dict[str, Any]:
@@ -88,6 +90,8 @@ def evaluate_dataset(
             rerank=rerank,
             rerank_candidate_limit=rerank_candidate_limit,
             rerank_fusion=rerank_fusion,
+            rerank_semantic_weight=rerank_semantic_weight,
+            rerank_rank_weight=rerank_rank_weight,
             exploratory_threshold=exploratory_threshold,
             rerank_abstain_threshold=rerank_abstain_threshold,
         )
@@ -312,6 +316,8 @@ def evaluate_dataset(
         "ranking_strategy": ranking_strategy,
         "rerank_candidate_limit": rerank_candidate_limit if ranking_strategy == "rerank" else None,
         "rerank_fusion": rerank_fusion if ranking_strategy == "rerank" else None,
+        "rerank_semantic_weight": rerank_semantic_weight if ranking_strategy == "rerank" else None,
+        "rerank_rank_weight": rerank_rank_weight if ranking_strategy == "rerank" else None,
         "exploratory_threshold": exploratory_threshold,
         "rerank_abstain_threshold": rerank_abstain_threshold if ranking_strategy == "rerank" else None,
         "case_count": case_count,

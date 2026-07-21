@@ -571,6 +571,8 @@ def _rank_reranked_entries(
     rerank: Callable[[str, list[str]], list[float]],
     candidate_limit: int,
     rerank_fusion: str,
+    rerank_semantic_weight: float,
+    rerank_rank_weight: float,
     exploratory_threshold: float,
     rerank_abstain_threshold: float | None,
 ) -> list[dict[str, Any]]:
@@ -578,6 +580,10 @@ def _rank_reranked_entries(
         raise ValueError("rerank candidate limit must be at least 1")
     if rerank_fusion not in RERANK_FUSIONS:
         raise ValueError(f"Unknown rerank fusion: {rerank_fusion}")
+    if rerank_semantic_weight < 0 or rerank_rank_weight < 0:
+        raise ValueError("rerank fusion weights must be non-negative")
+    if rerank_fusion == "reciprocal_rank" and rerank_semantic_weight + rerank_rank_weight == 0:
+        raise ValueError("reciprocal rank fusion requires at least one positive weight")
     identity_entries = [item for item in scored_entries if _exact_identity_match(query, item[0])]
     identity_ids = {str(entry.get("repo_id") or "") for entry, _ in identity_entries}
     candidates = sorted(scored_entries, key=lambda item: item[1], reverse=True)
@@ -605,8 +611,8 @@ def _rank_reranked_entries(
             fusion_score = float(rerank_score)
         else:
             fusion_score = (
-                1.0 / (RERANK_FUSION_RANK_CONSTANT + semantic_rank)
-                + 1.0 / (RERANK_FUSION_RANK_CONSTANT + rerank_rank)
+                rerank_semantic_weight / (RERANK_FUSION_RANK_CONSTANT + semantic_rank)
+                + rerank_rank_weight / (RERANK_FUSION_RANK_CONSTANT + rerank_rank)
             )
         result = _semantic_result(entry, semantic_score, exploratory_threshold=exploratory_threshold)
         result["score"] = fusion_score
@@ -694,6 +700,8 @@ def rank_many(
     rerank: Callable[[str, list[str]], list[float]] | None = None,
     rerank_candidate_limit: int = 50,
     rerank_fusion: str = "reciprocal_rank",
+    rerank_semantic_weight: float = 1.0,
+    rerank_rank_weight: float = 1.0,
     exploratory_threshold: float = EXPLORATORY_THRESHOLD,
     rerank_abstain_threshold: float | None = None,
 ) -> list[dict[str, Any]]:
@@ -758,6 +766,8 @@ def rank_many(
                 rerank=rerank,
                 candidate_limit=rerank_candidate_limit,
                 rerank_fusion=rerank_fusion,
+                rerank_semantic_weight=rerank_semantic_weight,
+                rerank_rank_weight=rerank_rank_weight,
                 exploratory_threshold=exploratory_threshold,
                 rerank_abstain_threshold=rerank_abstain_threshold,
             )
@@ -789,6 +799,8 @@ def rank(
     rerank: Callable[[str, list[str]], list[float]] | None = None,
     rerank_candidate_limit: int = 50,
     rerank_fusion: str = "reciprocal_rank",
+    rerank_semantic_weight: float = 1.0,
+    rerank_rank_weight: float = 1.0,
     exploratory_threshold: float = EXPLORATORY_THRESHOLD,
     rerank_abstain_threshold: float | None = None,
 ) -> dict[str, Any]:
@@ -824,6 +836,8 @@ def rank(
             rerank=rerank,
             candidate_limit=rerank_candidate_limit,
             rerank_fusion=rerank_fusion,
+            rerank_semantic_weight=rerank_semantic_weight,
+            rerank_rank_weight=rerank_rank_weight,
             exploratory_threshold=exploratory_threshold,
             rerank_abstain_threshold=rerank_abstain_threshold,
         )

@@ -539,6 +539,46 @@ def test_cross_encoder_fusion_uses_reranker_score_ordering():
     }
 
 
+def test_reciprocal_rank_fusion_accepts_independent_evidence_weights():
+    index = make_index(
+        [
+            {"repo_id": "first/repo", "vector": [1.0, 0.0], "metadata": {}},
+            {"repo_id": "second/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+
+    result = rank(
+        "general query",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=lambda query, documents: [0.1, 0.9],
+        rerank_candidate_limit=2,
+        rerank_semantic_weight=0.1,
+        rerank_rank_weight=1.0,
+    )
+
+    assert result["results"][0]["repo_id"] == "second/repo"
+
+
+def test_reciprocal_rank_fusion_requires_a_positive_weight():
+    index = make_index([{"repo_id": "first/repo", "vector": [1.0, 0.0], "metadata": {}}])
+
+    with pytest.raises(ValueError, match="positive weight"):
+        rank(
+            "general query",
+            index,
+            CONFIG,
+            embed=lambda config, query: [1.0, 0.0],
+            ranking_strategy="rerank",
+            rerank=lambda query, documents: [0.1],
+            rerank_semantic_weight=0.0,
+            rerank_rank_weight=0.0,
+        )
+
+
 def test_rerank_strategy_requires_a_reranker():
     index = make_index([{"repo_id": "one/repo", "vector": [1.0, 0.0], "metadata": {}}])
 

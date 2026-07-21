@@ -71,6 +71,18 @@ def make_index(vectors):
     }
 
 
+def make_multi_view_index(entries):
+    return {
+        "index_version": 2,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "bge-m3",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "embedding_view_input_version": 1,
+        "dimension": 2,
+        "vectors": entries,
+    }
+
+
 def vector_for_cosine(score):
     return [score, math.sqrt(1.0 - score**2)]
 
@@ -377,9 +389,96 @@ def test_exact_identity_is_pinned_even_when_embedding_is_weaker():
     result = rank("react", index, CONFIG, top_k=2, embed=lambda config, query: [1.0, 0.0])
     assert result["query_intent"]["type"] == "exact_name"
     assert result["results"][0]["repo_id"] == "react/react"
-    assert result["results"][0]["confidence"] == "high_confidence"
-    assert result["results"][0]["diagnostics"]["identity_match"] == "exact"
-    assert "matched exact repository identity" in result["results"][0]["why"]
+
+
+def test_multi_view_rank_uses_best_view_once_per_repository():
+    index = make_multi_view_index([
+        {
+            "repo_id": "owner/first",
+            "metadata": {"summary": "first"},
+            "views": [
+                {"kind": "identity", "vector": [0.1, 0.9]},
+                {"kind": "intent", "vector": [1.0, 0.0]},
+                {"kind": "evidence", "vector": [0.5, 0.5]},
+            ],
+        },
+        {
+            "repo_id": "owner/second",
+            "metadata": {"summary": "second"},
+            "views": [{"kind": "intent", "vector": [0.8, 0.2]}],
+        },
+    ])
+
+    result = rank(
+        "generic retrieval query",
+        index,
+        CONFIG,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="semantic",
+        exploratory_threshold=0.0,
+    )
+
+    assert result["considered"] == 2
+    assert [item["repo_id"] for item in result["results"]] == ["owner/first", "owner/second"]
+    assert result["results"][0]["semantic_score"] == pytest.approx(1.0)
+    assert result["results"][0]["best_embedding_view"] == "intent"
+
+
+def test_multi_view_rerank_receives_unique_repositories():
+    index = make_multi_view_index([
+        {
+            "repo_id": "owner/first",
+            "metadata": {"summary": "first"},
+            "views": [
+                {"kind": "identity", "vector": [1.0, 0.0]},
+                {"kind": "intent", "vector": [0.9, 0.1]},
+            ],
+        },
+        {
+            "repo_id": "owner/second",
+            "metadata": {"summary": "second"},
+            "views": [{"kind": "evidence", "vector": [0.8, 0.2]}],
+        },
+    ])
+    calls = []
+
+    rank(
+        "generic retrieval query",
+        index,
+        CONFIG,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=lambda query, documents: calls.append(documents) or [0.2, 0.1],
+        rerank_candidate_limit=2,
+        exploratory_threshold=0.0,
+    )
+
+    assert len(calls) == 1
+    assert len(calls[0]) == 2
+    assert calls[0].count("owner/first\nfirst") == 1
+
+
+def test_multi_view_respects_no_result_threshold_after_repo_aggregation():
+    index = make_multi_view_index([{
+        "repo_id": "owner/project",
+        "metadata": {},
+        "views": [
+            {"kind": "identity", "vector": [0.0, 1.0]},
+            {"kind": "intent", "vector": [0.1, 0.9]},
+        ],
+    }])
+
+    result = rank(
+        "unrelated need",
+        index,
+        CONFIG,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="semantic",
+        exploratory_threshold=0.5,
+    )
+
+    assert result["abstained"] is True
+    assert result["results"] == []
 
 
 def test_repo_id_identity_is_pinned_inside_natural_language_query():

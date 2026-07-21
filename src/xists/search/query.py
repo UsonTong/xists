@@ -473,7 +473,7 @@ def _result_from_score(
         confidence = "abstain"
     else:
         confidence = confidence_bucket(final_score, exploratory_threshold=exploratory_threshold)
-    return {
+    result = {
         "repo_id": entry.get("repo_id"),
         "url": metadata.get("url"),
         "score": final_score,
@@ -490,6 +490,9 @@ def _result_from_score(
         "why": adjustment["why"],
         "_identity_pin": bool(adjustment["exact_identity"]),
     }
+    if isinstance(entry.get("_best_embedding_view"), str):
+        result["best_embedding_view"] = entry["_best_embedding_view"]
+    return result
 
 
 def _semantic_result(
@@ -499,7 +502,7 @@ def _semantic_result(
     exploratory_threshold: float,
 ) -> dict[str, Any]:
     metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
-    return {
+    result = {
         "repo_id": entry.get("repo_id"),
         "url": metadata.get("url"),
         "score": semantic_score,
@@ -524,6 +527,9 @@ def _semantic_result(
         "why": ["ranked by semantic similarity"],
         "_identity_pin": False,
     }
+    if isinstance(entry.get("_best_embedding_view"), str):
+        result["best_embedding_view"] = entry["_best_embedding_view"]
+    return result
 
 
 def _rank_scored_entries(
@@ -699,6 +705,47 @@ def _normalized_matrix(vectors: list[list[float]]) -> np.ndarray:
     return np.divide(matrix, norms, out=np.zeros_like(matrix), where=norms != 0)
 
 
+def _index_view_entries(index: dict[str, Any]) -> list[tuple[dict[str, Any], str | None, list[float]]]:
+    """Return index vectors with an optional view kind.
+
+    Version-1 indexes retain one vector per repository. Version-2 indexes keep
+    named vectors below each repository entry.  This adapter lets both schemas
+    share the same ranking path without changing legacy results.
+    """
+
+    items: list[tuple[dict[str, Any], str | None, list[float]]] = []
+    for entry in index.get("vectors") or []:
+        if not isinstance(entry, dict):
+            continue
+        views = entry.get("views")
+        if isinstance(views, list):
+            for view in views:
+                if isinstance(view, dict) and isinstance(view.get("vector"), list):
+                    items.append((entry, view.get("kind") if isinstance(view.get("kind"), str) else None, view["vector"]))
+        elif isinstance(entry.get("vector"), list):
+            items.append((entry, None, entry["vector"]))
+    return items
+
+
+def _aggregate_view_scores(
+    view_entries: list[tuple[dict[str, Any], str | None, list[float]]],
+    scores: list[float],
+) -> list[tuple[dict[str, Any], float]]:
+    """Keep the maximum semantic view score for each repository."""
+
+    best: dict[str, tuple[dict[str, Any], float]] = {}
+    for (entry, view_kind, _), score in zip(view_entries, scores):
+        repo_id = str(entry.get("repo_id") or "")
+        current = best.get(repo_id)
+        if current is not None and current[1] >= score:
+            continue
+        selected = dict(entry)
+        if view_kind is not None:
+            selected["_best_embedding_view"] = view_kind
+        best[repo_id] = (selected, score)
+    return list(best.values())
+
+
 def rank_many(
     queries: list[str],
     index: dict[str, Any],
@@ -738,8 +785,9 @@ def rank_many(
     if len(rerank_queries) != len(queries):
         raise ValueError("rerank queries must contain one value for every query")
 
-    entries = index.get("vectors", [])
-    vectors = [entry["vector"] for entry in entries]
+    entries = [entry for entry in index.get("vectors", []) if isinstance(entry, dict)]
+    view_entries = _index_view_entries(index)
+    vectors = [vector for _, _, vector in view_entries]
     dimension = index.get("dimension")
     if dimension is not None and any(len(vector) != dimension for vector in vectors):
         raise IndexMismatchError(
@@ -765,7 +813,7 @@ def rank_many(
             "Rebuild the index or check the model."
         )
 
-    if not entries:
+    if not view_entries:
         return [
             {"query": query, "query_intent": _query_intent(query), "abstained": True, "results": [], "considered": 0}
             for query in queries
@@ -782,9 +830,10 @@ def rank_many(
         variant_scores = scores[offset : offset + variant_count]
         offset += variant_count
         scored_entries = [
-            (entry, float(variant_scores[:, column].max()))
-            for column, entry in enumerate(entries)
+            (view_entries[column][0], float(variant_scores[:, column].max()))
+            for column in range(len(view_entries))
         ]
+        scored_entries = _aggregate_view_scores(view_entries, [score for _, score in scored_entries])
         if ranking_strategy == "semantic":
             results = _rank_semantic_entries(
                 scored_entries, top_k, exploratory_threshold=exploratory_threshold
@@ -859,11 +908,12 @@ def rank(
             f"dimension {dimension}. Rebuild the index or check the model."
         )
 
-    entries = index.get("vectors", [])
-    scored_entries = [
-        (entry, max(cosine_similarity(vector, entry["vector"]) for vector in query_vectors))
-        for entry in entries
-    ]
+    entries = [entry for entry in index.get("vectors", []) if isinstance(entry, dict)]
+    view_entries = _index_view_entries(index)
+    scored_entries = _aggregate_view_scores(
+        view_entries,
+        [max(cosine_similarity(vector, indexed) for vector in query_vectors) for _, _, indexed in view_entries],
+    )
     if ranking_strategy not in RANKING_STRATEGIES:
         raise ValueError(f"Unknown ranking strategy: {ranking_strategy}")
     if ranking_strategy == "semantic":

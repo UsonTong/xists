@@ -28,7 +28,14 @@ from xists.cli import (
 from xists.ingest.github import GitHubAPIError
 from xists.profile.llm import LLMError, PROFILE_PROMPT_VERSION
 from xists.records import RECORD_SCHEMA_VERSION
-from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingError, embedding_input_fingerprint
+from xists.search.embed import (
+    EMBEDDING_INPUT_VERSION,
+    EMBEDDING_VIEW_INPUT_VERSION,
+    EmbeddingError,
+    embedding_input_fingerprint,
+    embedding_view_input_fingerprint,
+    embedding_views_from_record,
+)
 from xists.search.index import INDEX_VERSION
 
 
@@ -1613,6 +1620,42 @@ def test_index_verify_reports_stale_missing_and_fingerprint_gaps(tmp_path, capsy
     assert payload["status"] == "invalid"
 
 
+def test_index_verify_reports_multi_view_gaps_staleness_and_dimension_mismatches(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    record = _make_record("react/react")
+    records_file.write_text(json.dumps([record]), encoding="utf-8")
+    views = embedding_views_from_record(record)
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps({
+        "index_version": INDEX_VERSION,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "BAAI/bge-m3",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "embedding_view_input_version": EMBEDDING_VIEW_INPUT_VERSION,
+        "dimension": 2,
+        "record_count": 1,
+        "vectors": [{
+            "repo_id": "react/react",
+            "metadata": {},
+            "views": [
+                {"kind": "identity", "embedding_input_fingerprint": embedding_view_input_fingerprint(views[0]), "vector": [1.0, 0.0]},
+                {"kind": "intent", "embedding_input_fingerprint": "stale", "vector": [0.0]},
+            ],
+        }],
+    }), encoding="utf-8")
+
+    args = build_parser().parse_args([
+        "index", "verify", "--records", str(records_file), "--index", str(index_file), "--format", "json",
+    ])
+
+    assert index_verify(args) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["index_kind"] == "multi_view"
+    assert payload["errors"]["missing_vectors"] == 1
+    assert payload["errors"]["stale_vectors"] == 1
+    assert payload["errors"]["dimension_mismatch"] == 1
+
+
 def test_index_verify_reports_version_and_dimension_mismatches(tmp_path, capsys):
     records_file = tmp_path / "records.json"
     record = _make_record("fastapi/fastapi")
@@ -2166,9 +2209,9 @@ def test_index_build_rebuilds_legacy_vectors_without_fingerprints(tmp_path, monk
     assert index["record_count"] == 2
     assert len(index["vectors"]) == 2
     assert index["vectors"][0]["repo_id"] == "a/b"
-    assert index["vectors"][0]["vector"] == [0.0, 1.0, 0.0, 0.0]
+    assert all(view["vector"] == [0.0, 1.0, 0.0, 0.0] for view in index["vectors"][0]["views"])
     assert index["vectors"][1]["repo_id"] == "c/d"
-    assert index["vectors"][1]["embedding_input_fingerprint"]
+    assert all(view["embedding_input_fingerprint"] for view in index["vectors"][1]["views"])
 
 
 def test_index_build_refreshes_metadata_when_reusing_vector(tmp_path, monkeypatch):
@@ -2206,12 +2249,14 @@ def test_index_build_refreshes_metadata_when_reusing_vector(tmp_path, monkeypatc
     records_file.write_text(json.dumps([record]), encoding="utf-8")
 
     output_file = tmp_path / "index.json"
+    views = embedding_views_from_record(record)
     output_file.write_text(json.dumps({
         "index_version": INDEX_VERSION,
         "record_schema_version": RECORD_SCHEMA_VERSION,
         "embedding_model": "BAAI/bge-m3",
         "embedding_base_url": "http://localhost:6597/v1",
         "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "embedding_view_input_version": EMBEDDING_VIEW_INPUT_VERSION,
         "dimension": 2,
         "built_at": "2026-01-01T00:00:00+00:00",
         "record_count": 1,
@@ -2219,8 +2264,10 @@ def test_index_build_refreshes_metadata_when_reusing_vector(tmp_path, monkeypatc
         "vectors": [
             {
                 "repo_id": "vuejs/core",
-                "embedding_input_fingerprint": embedding_input_fingerprint(record),
-                "vector": [1.0, 0.0],
+                "views": [
+                    {"kind": view.kind, "embedding_input_fingerprint": embedding_view_input_fingerprint(view), "vector": [1.0, 0.0]}
+                    for view in views
+                ],
             }
         ],
     }), encoding="utf-8")
@@ -2238,12 +2285,64 @@ def test_index_build_refreshes_metadata_when_reusing_vector(tmp_path, monkeypatc
     assert code == 0
     index = json.loads(output_file.read_text())
     assert index["record_count"] == 1
-    assert index["vectors"][0]["vector"] == [1.0, 0.0]
+    assert all(view["vector"] == [1.0, 0.0] for view in index["vectors"][0]["views"])
     assert index["vectors"][0]["metadata"]["language"] == "JavaScript"
     assert index["vectors"][0]["metadata"]["topics"] == ["frontend", "vue"]
     assert index["vectors"][0]["metadata"]["search_phrases"] == [
         "progressive framework for building modern web interfaces"
     ]
+
+
+def test_index_build_reuses_unchanged_views_and_refreshes_only_changed_view(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "local")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    record = _make_record("vuejs/core")
+    views = embedding_views_from_record(record)
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps([record]), encoding="utf-8")
+    output_file = tmp_path / "index.json"
+    output_file.write_text(json.dumps({
+        "index_version": INDEX_VERSION,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "BAAI/bge-m3",
+        "embedding_base_url": "http://localhost:6597/v1",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "embedding_view_input_version": EMBEDDING_VIEW_INPUT_VERSION,
+        "dimension": 2,
+        "record_count": 1,
+        "vector_count": len(views),
+        "skipped": [],
+        "vectors": [{
+            "repo_id": "vuejs/core",
+            "metadata": {},
+            "views": [
+                {"kind": view.kind, "embedding_input_fingerprint": embedding_view_input_fingerprint(view), "vector": [1.0, 0.0]}
+                for view in views
+            ],
+        }],
+    }), encoding="utf-8")
+
+    record["llm_profile"]["search_phrases"] = ["changed intent phrase"]
+    records_file.write_text(json.dumps([record]), encoding="utf-8")
+    calls = []
+
+    def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
+        calls.append((inputs, input_type))
+        return [[0.0, 1.0] for _ in inputs]
+
+    args = build_parser().parse_args(["index", "build", "--records", str(records_file), "--output", str(output_file)])
+    with patch("xists.cli.call_embeddings", side_effect=fake_call_embeddings):
+        assert index_build(args) == 0
+
+    assert calls == [([
+        "vuejs/core semantic search text\nchanged intent phrase\nvuejs/core use case",
+    ], "passage")]
+    entry = json.loads(output_file.read_text())["vectors"][0]
+    by_kind = {view["kind"]: view for view in entry["views"]}
+    assert by_kind["identity"]["vector"] == [1.0, 0.0]
+    assert by_kind["evidence"]["vector"] == [1.0, 0.0]
+    assert by_kind["intent"]["vector"] == [0.0, 1.0]
 
 
 def test_index_build_rejects_model_mismatch(tmp_path, monkeypatch):
@@ -2525,7 +2624,7 @@ def test_index_build_force_rebuilds_from_scratch(tmp_path, monkeypatch):
     assert code == 0
     index = json.loads(output_file.read_text())
     assert index["record_count"] == 1
-    assert index["vectors"][0]["vector"] == [0.0, 0.0, 1.0, 0.0]
+    assert all(view["vector"] == [0.0, 0.0, 1.0, 0.0] for view in index["vectors"][0]["views"])
 
 
 def test_index_build_checkpoint_writes_after_each_batch(tmp_path, monkeypatch):
@@ -2590,7 +2689,8 @@ def test_index_build_checkpoint_saves_partial_on_crash(tmp_path, monkeypatch):
         code = index_build(args)
 
     assert code == 1
-    # First batch (64 records) should be saved even though second batch crashed.
+    # First 64 views should be saved even though the second view batch crashed.
     index = json.loads(output_file.read_text())
-    assert index["record_count"] == 64
-    assert len(index["vectors"]) == 64
+    assert index["record_count"] == 65
+    assert index["vector_count"] == 64
+    assert sum(len(entry["views"]) for entry in index["vectors"]) == 64

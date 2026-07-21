@@ -302,7 +302,9 @@ def test_build_index_includes_search_metadata(monkeypatch):
     assert metadata["project_type"] == "library"
     assert metadata["ecosystem"] == ["javascript", "web"]
     assert metadata["search_text"].startswith("react javascript")
-    assert index["vectors"][0]["embedding_input_fingerprint"] == embedding_input_fingerprint(records[0])
+    views = index["vectors"][0]["views"]
+    assert {view["kind"] for view in views} == {"identity", "intent", "evidence"}
+    assert all(view["embedding_input_fingerprint"] for view in views)
 
 
 def test_build_index_skips_empty_records(monkeypatch):
@@ -313,8 +315,29 @@ def test_build_index_skips_empty_records(monkeypatch):
 
     monkeypatch.setattr("xists.search.index.call_embeddings", fake_call)
     index = build_index(records, CONFIG)
+    assert index["record_count"] == 2
+    assert index["skipped"] == []
+    empty = next(entry for entry in index["vectors"] if entry["repo_id"] == "empty/empty")
+    assert [view["kind"] for view in empty["views"]] == ["identity"]
+
+
+def test_build_index_creates_one_fingerprinted_vector_per_view(monkeypatch):
+    calls = []
+
+    def fake_call(config, inputs, *, timeout=60, input_type=None):
+        calls.append((inputs, input_type))
+        return [[float(index), 1.0] for index, _ in enumerate(inputs)]
+
+    monkeypatch.setattr("xists.search.index.call_embeddings", fake_call)
+    index = build_index([make_record()], CONFIG)
+
+    assert index["index_version"] == 2
     assert index["record_count"] == 1
-    assert index["skipped"] == ["empty/empty"]
+    assert index["vector_count"] == 3
+    assert calls[0][1] == "passage"
+    views = index["vectors"][0]["views"]
+    assert [view["kind"] for view in views] == ["identity", "intent", "evidence"]
+    assert all(len(view["vector"]) == 2 for view in views)
 
 
 def test_rank_returns_sorted_semantic_results_with_stable_shape():

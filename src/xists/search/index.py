@@ -15,15 +15,17 @@ from typing import Any
 
 from xists.search.embed import (
     EMBEDDING_INPUT_VERSION,
+    EMBEDDING_VIEW_INPUT_VERSION,
     EmbeddingConfig,
     EmbeddingError,
     call_embeddings,
-    embedding_input_fingerprint,
-    embedding_text_from_record,
+    embedding_view_input_fingerprint,
+    embedding_views_from_record,
 )
 from xists.records import RECORD_SCHEMA_VERSION
 
-INDEX_VERSION = 1
+INDEX_VERSION = 2
+LEGACY_INDEX_VERSION = 1
 
 
 def _string_list(values: Any) -> list[str]:
@@ -75,26 +77,33 @@ def build_index(
     embeddable: list[dict[str, Any]] = []
     skipped: list[str] = []
     for record in records:
-        text = embedding_text_from_record(record)
         repo_id = record.get("repo_id") or record.get("repo_id_requested")
-        if not text:
+        views = embedding_views_from_record(record)
+        if not views:
             skipped.append(repo_id or "<unknown>")
             continue
         embeddable.append(
             {
                 "repo_id": repo_id,
-                "text": text,
-                "fingerprint": embedding_input_fingerprint(record),
+                "views": views,
                 "metadata": entry_metadata(record),
             }
         )
 
     vectors: list[dict[str, Any]] = []
     dimension: int | None = None
-    for start in range(0, len(embeddable), batch_size):
-        batch = embeddable[start : start + batch_size]
+    view_requests = [
+        {"repo": item, "view": view}
+        for item in embeddable
+        for view in item["views"]
+    ]
+    vectors_by_repo: dict[str, list[dict[str, Any]]] = {
+        item["repo_id"]: [] for item in embeddable
+    }
+    for start in range(0, len(view_requests), batch_size):
+        batch = view_requests[start : start + batch_size]
         results = call_embeddings(
-            config, [item["text"] for item in batch], input_type="passage"
+            config, [item["view"].text for item in batch], input_type="passage"
         )
         if len(results) != len(batch):
             raise EmbeddingError(
@@ -107,14 +116,23 @@ def build_index(
                 raise EmbeddingError(
                     f"Inconsistent embedding dimension: {len(vector)} vs {dimension}"
                 )
-            vectors.append(
+            view = item["view"]
+            vectors_by_repo[item["repo"]["repo_id"]].append(
                 {
-                    "repo_id": item["repo_id"],
-                    "embedding_input_fingerprint": item["fingerprint"],
-                    "metadata": item["metadata"],
+                    "kind": view.kind,
+                    "embedding_input_fingerprint": embedding_view_input_fingerprint(view),
                     "vector": vector,
                 }
             )
+
+    for item in embeddable:
+        vectors.append(
+            {
+                "repo_id": item["repo_id"],
+                "metadata": item["metadata"],
+                "views": vectors_by_repo[item["repo_id"]],
+            }
+        )
 
     return {
         "index_version": INDEX_VERSION,
@@ -122,9 +140,11 @@ def build_index(
         "embedding_model": config.model,
         "embedding_base_url": config.base_url,
         "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "embedding_view_input_version": EMBEDDING_VIEW_INPUT_VERSION,
         "dimension": dimension,
         "built_at": datetime.now(timezone.utc).isoformat(),
         "record_count": len(vectors),
+        "vector_count": len(view_requests),
         "skipped": skipped,
         "vectors": vectors,
     }

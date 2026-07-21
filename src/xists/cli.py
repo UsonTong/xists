@@ -45,12 +45,13 @@ from xists.records import (
 )
 from xists.search.embed import (
     EMBEDDING_INPUT_VERSION,
+    EMBEDDING_VIEW_INPUT_VERSION,
     EmbeddingError,
     EmbeddingNotConfiguredError,
     call_embeddings,
     embedding_config_from_env,
-    embedding_input_fingerprint,
-    embedding_text_from_record,
+    embedding_view_input_fingerprint,
+    embedding_views_from_record,
     probe_embedding_endpoint,
 )
 from xists.search.index import INDEX_VERSION, entry_metadata, load_index
@@ -661,8 +662,10 @@ def _index_write_checkpoint(
     embedding_model: str,
     embedding_base_url: str,
     embedding_input_version: int,
+    embedding_view_input_version: int,
     dimension: int | None,
     record_count: int,
+    vector_count: int,
     skipped: list[str],
     vectors: list[dict[str, Any]],
 ) -> None:
@@ -674,9 +677,11 @@ def _index_write_checkpoint(
             "embedding_model": embedding_model,
             "embedding_base_url": embedding_base_url,
             "embedding_input_version": embedding_input_version,
+            "embedding_view_input_version": embedding_view_input_version,
             "dimension": dimension,
             "built_at": datetime.now(timezone.utc).isoformat(),
             "record_count": record_count,
+            "vector_count": vector_count,
             "skipped": skipped,
             "vectors": vectors,
         },
@@ -712,12 +717,11 @@ def index_build(args: argparse.Namespace) -> int:
         return 1
     batch_size = 64
 
-    # Load existing index for fingerprint-aware incremental update (skip with --force).
-    vectors: list[dict[str, Any]] = []
-    skipped: list[str] = []
+    # A v2 index stores one repository entry with independently reusable named
+    # views.  A legacy v1 index is still readable by search but is not a safe
+    # source of multi-view vectors, so it is rebuilt instead of mis-reused.
     dimension: int | None = None
-    reusable_vectors: dict[str, dict[str, Any]] = {}
-
+    existing_views: dict[tuple[str, str], dict[str, Any]] = {}
     if not args.force and args.output.exists():
         existing_index = json.loads(args.output.read_text(encoding="utf-8"))
         if existing_index.get("embedding_model") and existing_index["embedding_model"] != config.model:
@@ -729,100 +733,93 @@ def index_build(args: argparse.Namespace) -> int:
             )
             return 1
         reusable = (
-            existing_index.get("embedding_input_version") == EMBEDDING_INPUT_VERSION
+            existing_index.get("index_version") == INDEX_VERSION
+            and existing_index.get("embedding_input_version") == EMBEDDING_INPUT_VERSION
+            and existing_index.get("embedding_view_input_version") == EMBEDDING_VIEW_INPUT_VERSION
             and existing_index.get("record_schema_version") == RECORD_SCHEMA_VERSION
         )
         if reusable:
             dimension = existing_index.get("dimension")
-            reusable_vectors = {
-                entry.get("repo_id"): entry
-                for entry in existing_index.get("vectors", [])
-                if entry.get("repo_id")
-            }
+            for entry in existing_index.get("vectors") or []:
+                if not isinstance(entry, dict) or not isinstance(entry.get("repo_id"), str):
+                    continue
+                for view in entry.get("views") or []:
+                    if isinstance(view, dict) and isinstance(view.get("kind"), str):
+                        existing_views[(entry["repo_id"], view["kind"])] = view
 
-    # Prepare embeddable records and reuse unchanged vectors.
-    embeddable: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    entries_by_id: dict[str, dict[str, Any]] = {}
+    pending: list[dict[str, Any]] = []
     for record in records:
-        text = embedding_text_from_record(record)
         repo_id = record.get("repo_id") or record.get("repo_id_requested")
-        if not text:
+        if not isinstance(repo_id, str) or not repo_id:
             skipped.append(repo_id or "<unknown>")
             continue
-        fingerprint = embedding_input_fingerprint(record)
-        metadata = entry_metadata(record)
-        existing = reusable_vectors.get(repo_id)
-        if existing and existing.get("embedding_input_fingerprint") == fingerprint:
-            vector = existing.get("vector") or []
-            if dimension is None:
-                dimension = len(vector)
-            if len(vector) == dimension:
-                existing = {**existing, "metadata": metadata}
-                vectors.append(existing)
-                continue
-        embeddable.append({"repo_id": repo_id, "text": text, "fingerprint": fingerprint, "metadata": metadata})
+        entry = {"repo_id": repo_id, "metadata": entry_metadata(record), "views": []}
+        views = embedding_views_from_record(record)
+        if not views:
+            skipped.append(repo_id)
+            continue
+        entries_by_id[repo_id] = entry
+        for view in views:
+            fingerprint = embedding_view_input_fingerprint(view)
+            existing = existing_views.get((repo_id, view.kind))
+            if existing and existing.get("embedding_input_fingerprint") == fingerprint and isinstance(existing.get("vector"), list):
+                vector = existing["vector"]
+                if dimension is None:
+                    dimension = len(vector)
+                if len(vector) == dimension:
+                    entry["views"].append({"kind": view.kind, "embedding_input_fingerprint": fingerprint, "vector": vector})
+                    continue
+            pending.append({"repo_id": repo_id, "kind": view.kind, "text": view.text, "fingerprint": fingerprint})
+
+    def checkpoint() -> None:
+        vectors = list(entries_by_id.values())
+        _index_write_checkpoint(
+            args.output,
+            index_version=INDEX_VERSION,
+            record_schema_version=RECORD_SCHEMA_VERSION,
+            embedding_model=config.model,
+            embedding_base_url=config.base_url,
+            embedding_input_version=EMBEDDING_INPUT_VERSION,
+            embedding_view_input_version=EMBEDDING_VIEW_INPUT_VERSION,
+            dimension=dimension,
+            record_count=len(vectors),
+            vector_count=sum(len(entry["views"]) for entry in vectors),
+            skipped=skipped,
+            vectors=vectors,
+        )
 
     new_count = 0
-    for start in range(0, len(embeddable), batch_size):
-        batch = embeddable[start : start + batch_size]
+    for start in range(0, len(pending), batch_size):
+        batch = pending[start : start + batch_size]
         try:
-            results = call_embeddings(
-                config, [item["text"] for item in batch], input_type="passage"
-            )
+            results = call_embeddings(config, [item["text"] for item in batch], input_type="passage")
         except EmbeddingError as error:
+            checkpoint()
             _print_embedding_error(error, command="index build")
             return 1
         if len(results) != len(batch):
-            print(
-                f"Embedding count mismatch: sent {len(batch)}, received {len(results)}",
-                file=sys.stderr,
-            )
+            checkpoint()
+            print(f"Embedding count mismatch: sent {len(batch)}, received {len(results)}", file=sys.stderr)
             return 1
         for item, vector in zip(batch, results):
             if dimension is None:
                 dimension = len(vector)
             elif len(vector) != dimension:
-                print(
-                    f"Inconsistent embedding dimension: {len(vector)} vs {dimension}",
-                    file=sys.stderr,
-                )
+                checkpoint()
+                print(f"Inconsistent embedding dimension: {len(vector)} vs {dimension}", file=sys.stderr)
                 return 1
-            vectors.append(
-                {
-                    "repo_id": item["repo_id"],
-                    "embedding_input_fingerprint": item["fingerprint"],
-                    "metadata": item["metadata"],
-                    "vector": vector,
-                }
+            entries_by_id[item["repo_id"]]["views"].append(
+                {"kind": item["kind"], "embedding_input_fingerprint": item["fingerprint"], "vector": vector}
             )
             new_count += 1
+        checkpoint()
 
-        # Checkpoint: write after each batch.
-        _index_write_checkpoint(
-            args.output,
-            index_version=INDEX_VERSION,
-            record_schema_version=RECORD_SCHEMA_VERSION,
-            embedding_model=config.model,
-            embedding_base_url=config.base_url,
-            embedding_input_version=EMBEDDING_INPUT_VERSION,
-            dimension=dimension,
-            record_count=len(vectors),
-            skipped=skipped,
-            vectors=vectors,
-        )
+    if not pending:
+        checkpoint()
 
-    if not embeddable:
-        _index_write_checkpoint(
-            args.output,
-            index_version=INDEX_VERSION,
-            record_schema_version=RECORD_SCHEMA_VERSION,
-            embedding_model=config.model,
-            embedding_base_url=config.base_url,
-            embedding_input_version=EMBEDDING_INPUT_VERSION,
-            dimension=dimension,
-            record_count=len(vectors),
-            skipped=skipped,
-            vectors=vectors,
-        )
+    vectors = list(entries_by_id.values())
 
     print(
         json.dumps(
@@ -832,6 +829,7 @@ def index_build(args: argparse.Namespace) -> int:
                 "embedding_model": config.model,
                 "dimension": dimension,
                 "record_count": len(vectors),
+                "vector_count": sum(len(entry["views"]) for entry in vectors),
                 "new_vectors": new_count,
                 "skipped": skipped,
             },
@@ -1765,19 +1763,36 @@ def _index_verify_report(records: list[dict[str, Any]], index: dict[str, Any]) -
         errors["embedding_input_version_mismatch"] += 1
 
     vectors = [entry for entry in index.get("vectors") or [] if isinstance(entry, dict)]
+    multi_view = any(isinstance(entry.get("views"), list) for entry in vectors)
+    if multi_view and index.get("embedding_view_input_version") != EMBEDDING_VIEW_INPUT_VERSION:
+        errors["embedding_view_input_version_mismatch"] += 1
     vector_by_id = {entry.get("repo_id"): entry for entry in vectors if entry.get("repo_id")}
     dimension = index.get("dimension")
     if not isinstance(dimension, int) or dimension <= 0:
         errors["dimension_missing"] += 1
-    missing_fingerprints = [entry.get("repo_id") for entry in vectors if not entry.get("embedding_input_fingerprint")]
+    if multi_view:
+        view_entries = [
+            (entry.get("repo_id"), view)
+            for entry in vectors
+            for view in entry.get("views") or []
+            if isinstance(view, dict)
+        ]
+        missing_fingerprints = [repo_id for repo_id, view in view_entries if not view.get("embedding_input_fingerprint")]
+        invalid_vectors = [repo_id for repo_id, view in view_entries if not isinstance(view.get("vector"), list)]
+        dimension_mismatches = [
+            repo_id for repo_id, view in view_entries
+            if isinstance(view.get("vector"), list) and isinstance(dimension, int) and len(view["vector"]) != dimension
+        ]
+    else:
+        missing_fingerprints = [entry.get("repo_id") for entry in vectors if not entry.get("embedding_input_fingerprint")]
+        dimension_mismatches = [
+            entry.get("repo_id")
+            for entry in vectors
+            if isinstance(entry.get("vector"), list) and isinstance(dimension, int) and len(entry["vector"]) != dimension
+        ]
+        invalid_vectors = [entry.get("repo_id") for entry in vectors if not isinstance(entry.get("vector"), list)]
     if missing_fingerprints:
         errors["missing_fingerprints"] = len(missing_fingerprints)
-    dimension_mismatches = [
-        entry.get("repo_id")
-        for entry in vectors
-        if isinstance(entry.get("vector"), list) and isinstance(dimension, int) and len(entry["vector"]) != dimension
-    ]
-    invalid_vectors = [entry.get("repo_id") for entry in vectors if not isinstance(entry.get("vector"), list)]
     if dimension_mismatches:
         errors["dimension_mismatch"] = len(dimension_mismatches)
     if invalid_vectors:
@@ -1793,15 +1808,34 @@ def _index_verify_report(records: list[dict[str, Any]], index: dict[str, Any]) -
         repo_id = record_repo_id(record)
         if not repo_id:
             continue
-        fingerprint = embedding_input_fingerprint(record)
-        if fingerprint is None or not embedding_text_from_record(record):
-            skipped_expected.append(repo_id)
-            continue
         entry = vector_by_id.get(repo_id)
-        if entry is None:
-            missing_vectors.append(repo_id)
-        elif entry.get("embedding_input_fingerprint") != fingerprint:
-            stale_vectors.append(repo_id)
+        if multi_view:
+            expected_views = embedding_views_from_record(record)
+            if not expected_views:
+                skipped_expected.append(repo_id)
+                continue
+            actual_views = {view.get("kind"): view for view in (entry or {}).get("views") or [] if isinstance(view, dict)}
+            missing_kinds = [view.kind for view in expected_views if view.kind not in actual_views]
+            stale_kinds = [
+                view.kind for view in expected_views
+                if view.kind in actual_views
+                and actual_views[view.kind].get("embedding_input_fingerprint") != embedding_view_input_fingerprint(view)
+            ]
+            if entry is None or missing_kinds:
+                missing_vectors.append(repo_id)
+            if stale_kinds:
+                stale_vectors.append(repo_id)
+        else:
+            # Legacy indexes retain their original record-level fingerprint rules.
+            from xists.search.embed import embedding_input_fingerprint, embedding_text_from_record
+            fingerprint = embedding_input_fingerprint(record)
+            if fingerprint is None or not embedding_text_from_record(record):
+                skipped_expected.append(repo_id)
+                continue
+            if entry is None:
+                missing_vectors.append(repo_id)
+            elif entry.get("embedding_input_fingerprint") != fingerprint:
+                stale_vectors.append(repo_id)
     extra_vectors = sorted(str(repo_id) for repo_id in vector_by_id if repo_id not in record_ids)
     if missing_vectors:
         errors["missing_vectors"] = len(missing_vectors)
@@ -1823,6 +1857,8 @@ def _index_verify_report(records: list[dict[str, Any]], index: dict[str, Any]) -
         "expected_embedding_input_version": EMBEDDING_INPUT_VERSION,
         "record_count": len(records),
         "vector_count": len(vectors),
+        "index_kind": "multi_view" if multi_view else "legacy_single_view",
+        "view_count": len(view_entries) if multi_view else len(vectors),
         "errors": dict(errors),
         "warnings": dict(warnings),
         "missing_fingerprints": missing_fingerprints,

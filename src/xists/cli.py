@@ -669,7 +669,10 @@ def _index_write_checkpoint(
     skipped: list[str],
     vectors: list[dict[str, Any]],
 ) -> None:
-    write_json(
+    # Index files can be large enough that a reader may otherwise observe a
+    # partially truncated JSON document while a checkpoint is being rewritten.
+    # Replacing a completed sibling file keeps every visible checkpoint valid.
+    write_json_atomic(
         output,
         {
             "index_version": index_version,

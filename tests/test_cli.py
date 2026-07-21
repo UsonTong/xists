@@ -915,6 +915,31 @@ def test_index_stats_reports_multi_view_counts(tmp_path, capsys):
     assert payload["view_counts"] == {"identity": 1, "intent": 1}
 
 
+def test_index_checkpoint_replaces_an_existing_file_atomically(tmp_path):
+    output = tmp_path / "index.json"
+    output.write_text('{"old": true}\n', encoding="utf-8")
+
+    from xists.cli import _index_write_checkpoint
+
+    _index_write_checkpoint(
+        output,
+        index_version=INDEX_VERSION,
+        record_schema_version=RECORD_SCHEMA_VERSION,
+        embedding_model="example/embed",
+        embedding_base_url="https://example.invalid/v1",
+        embedding_input_version=EMBEDDING_INPUT_VERSION,
+        embedding_view_input_version=EMBEDDING_VIEW_INPUT_VERSION,
+        dimension=2,
+        record_count=1,
+        vector_count=1,
+        skipped=[],
+        vectors=[{"repo_id": "example/repo", "metadata": {}, "views": []}],
+    )
+
+    assert not output.with_name("index.json.tmp").exists()
+    assert json.loads(output.read_text(encoding="utf-8"))["index_version"] == INDEX_VERSION
+
+
 def test_index_stats_text_is_readable(tmp_path, capsys):
     index_file = tmp_path / "index.json"
     index_file.write_text(

@@ -511,6 +511,34 @@ def test_rerank_strategy_fuses_semantic_recall_and_generic_rerank_evidence():
     assert calls == [("general query", ["first/repo\nFirst candidate", "second/repo\nSecond candidate"])]
 
 
+def test_cross_encoder_fusion_uses_reranker_score_ordering():
+    index = make_index(
+        [
+            {"repo_id": "first/repo", "vector": [1.0, 0.0], "metadata": {"description": "First candidate"}},
+            {"repo_id": "second/repo", "vector": vector_for_cosine(0.8), "metadata": {"description": "Second candidate"}},
+        ]
+    )
+
+    result = rank(
+        "general query",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=lambda query, documents: [0.1, 0.9],
+        rerank_candidate_limit=2,
+        rerank_fusion="cross_encoder",
+    )
+
+    assert result["results"][0]["repo_id"] == "second/repo"
+    assert result["results"][0]["ranking_evidence"] == {
+        "semantic_rank": 2,
+        "rerank_rank": 1,
+        "fusion": "cross_encoder",
+    }
+
+
 def test_rerank_strategy_requires_a_reranker():
     index = make_index([{"repo_id": "one/repo", "vector": [1.0, 0.0], "metadata": {}}])
 

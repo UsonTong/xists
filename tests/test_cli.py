@@ -452,10 +452,11 @@ def test_eval_run_writes_report(tmp_path, monkeypatch):
         records_path=None,
         judge_caller=None,
         ranking_strategy="metadata",
-            rerank=None,
-            rerank_candidate_limit=50,
-            exploratory_threshold=0.35,
-            rerank_abstain_threshold=None,
+        rerank=None,
+        rerank_candidate_limit=50,
+        rerank_fusion="reciprocal_rank",
+        exploratory_threshold=0.35,
+        rerank_abstain_threshold=None,
     ):
         assert cases == cases_file
         assert index == index_file
@@ -467,6 +468,7 @@ def test_eval_run_writes_report(tmp_path, monkeypatch):
         assert ranking_strategy == "metadata"
         assert rerank is None
         assert rerank_candidate_limit == 50
+        assert rerank_fusion == "reciprocal_rank"
         assert exploratory_threshold == 0.35
         assert rerank_abstain_threshold is None
         return {

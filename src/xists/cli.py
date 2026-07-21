@@ -54,7 +54,7 @@ from xists.search.embed import (
     probe_embedding_endpoint,
 )
 from xists.search.index import INDEX_VERSION, entry_metadata, load_index
-from xists.search.query import RANKING_STRATEGIES, IndexMismatchError, _query_intent, rank
+from xists.search.query import RANKING_STRATEGIES, RERANK_FUSIONS, IndexMismatchError, _query_intent, rank
 from xists.search.rerank import (
     RerankerError,
     RerankerNotConfiguredError,
@@ -849,6 +849,7 @@ def search(args: argparse.Namespace) -> int:
             ranking_strategy=args.ranking_strategy,
             rerank=rerank,
             rerank_candidate_limit=args.rerank_candidates,
+            rerank_fusion=args.rerank_fusion,
             exploratory_threshold=args.exploratory_threshold,
             rerank_abstain_threshold=args.rerank_abstain_threshold,
         )
@@ -1899,6 +1900,7 @@ def eval_run(args: argparse.Namespace) -> int:
             ranking_strategy=args.ranking_strategy,
             rerank=rerank,
             rerank_candidate_limit=args.rerank_candidates,
+            rerank_fusion=args.rerank_fusion,
             exploratory_threshold=args.exploratory_threshold,
             rerank_abstain_threshold=args.rerank_abstain_threshold,
         )
@@ -2146,6 +2148,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Embedding candidates to send to a reranker (default: 50)",
     )
     search_parser.add_argument(
+        "--rerank-fusion",
+        choices=RERANK_FUSIONS,
+        default="reciprocal_rank",
+        help="How to combine embedding recall with reranking (default: reciprocal_rank)",
+    )
+    search_parser.add_argument(
         "--exploratory-threshold",
         type=float,
         default=0.35,
@@ -2184,6 +2192,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=50,
         help="Embedding candidates to send to a reranker (default: 50)",
+    )
+    eval_run_parser.add_argument(
+        "--rerank-fusion",
+        choices=RERANK_FUSIONS,
+        default="reciprocal_rank",
+        help="How to combine embedding recall with reranking (default: reciprocal_rank)",
     )
     eval_run_parser.add_argument(
         "--exploratory-threshold",

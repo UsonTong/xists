@@ -18,6 +18,7 @@ from xists.search.rerank import rerank_text_from_entry
 HIGH_CONFIDENCE_THRESHOLD = 0.60
 EXPLORATORY_THRESHOLD = 0.35
 RANKING_STRATEGIES = ("metadata", "semantic", "rerank")
+RERANK_FUSIONS = ("reciprocal_rank", "cross_encoder")
 RERANK_FUSION_RANK_CONSTANT = 60
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*")
 REPO_ID_RE = re.compile(r"(?<![a-z0-9+._#-])[a-z0-9][a-z0-9+._#-]*/[a-z0-9][a-z0-9+._#-]*(?![a-z0-9+._#-])")
@@ -569,11 +570,14 @@ def _rank_reranked_entries(
     *,
     rerank: Callable[[str, list[str]], list[float]],
     candidate_limit: int,
+    rerank_fusion: str,
     exploratory_threshold: float,
     rerank_abstain_threshold: float | None,
 ) -> list[dict[str, Any]]:
     if candidate_limit < 1:
         raise ValueError("rerank candidate limit must be at least 1")
+    if rerank_fusion not in RERANK_FUSIONS:
+        raise ValueError(f"Unknown rerank fusion: {rerank_fusion}")
     identity_entries = [item for item in scored_entries if _exact_identity_match(query, item[0])]
     identity_ids = {str(entry.get("repo_id") or "") for entry, _ in identity_entries}
     candidates = sorted(scored_entries, key=lambda item: item[1], reverse=True)
@@ -597,10 +601,13 @@ def _rank_reranked_entries(
         zip(candidates, rerank_scores), start=1
     ):
         rerank_rank = rerank_ranks[semantic_rank - 1]
-        fusion_score = (
-            1.0 / (RERANK_FUSION_RANK_CONSTANT + semantic_rank)
-            + 1.0 / (RERANK_FUSION_RANK_CONSTANT + rerank_rank)
-        )
+        if rerank_fusion == "cross_encoder":
+            fusion_score = float(rerank_score)
+        else:
+            fusion_score = (
+                1.0 / (RERANK_FUSION_RANK_CONSTANT + semantic_rank)
+                + 1.0 / (RERANK_FUSION_RANK_CONSTANT + rerank_rank)
+            )
         result = _semantic_result(entry, semantic_score, exploratory_threshold=exploratory_threshold)
         result["score"] = fusion_score
         result["rerank_score"] = float(rerank_score)
@@ -612,7 +619,7 @@ def _rank_reranked_entries(
         result["ranking_evidence"] = {
             "semantic_rank": semantic_rank,
             "rerank_rank": rerank_rank,
-            "fusion": "reciprocal_rank",
+            "fusion": rerank_fusion,
         }
         result["why"] = ["ranked by fused embedding recall and cross-encoder relevance"]
         results.append(result)
@@ -686,6 +693,7 @@ def rank_many(
     ranking_strategy: str = "metadata",
     rerank: Callable[[str, list[str]], list[float]] | None = None,
     rerank_candidate_limit: int = 50,
+    rerank_fusion: str = "reciprocal_rank",
     exploratory_threshold: float = EXPLORATORY_THRESHOLD,
     rerank_abstain_threshold: float | None = None,
 ) -> list[dict[str, Any]]:
@@ -749,6 +757,7 @@ def rank_many(
                 top_k,
                 rerank=rerank,
                 candidate_limit=rerank_candidate_limit,
+                rerank_fusion=rerank_fusion,
                 exploratory_threshold=exploratory_threshold,
                 rerank_abstain_threshold=rerank_abstain_threshold,
             )
@@ -779,6 +788,7 @@ def rank(
     ranking_strategy: str = "metadata",
     rerank: Callable[[str, list[str]], list[float]] | None = None,
     rerank_candidate_limit: int = 50,
+    rerank_fusion: str = "reciprocal_rank",
     exploratory_threshold: float = EXPLORATORY_THRESHOLD,
     rerank_abstain_threshold: float | None = None,
 ) -> dict[str, Any]:
@@ -813,6 +823,7 @@ def rank(
             top_k,
             rerank=rerank,
             candidate_limit=rerank_candidate_limit,
+            rerank_fusion=rerank_fusion,
             exploratory_threshold=exploratory_threshold,
             rerank_abstain_threshold=rerank_abstain_threshold,
         )

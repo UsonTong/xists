@@ -38,6 +38,7 @@ from xists.profile.llm import (
 )
 from xists.records import (
     RECORD_SCHEMA_VERSION,
+    preserve_retrieval_profile_fields,
     profile_refresh_reason,
     record_profile,
     record_repo_id,
@@ -1595,7 +1596,9 @@ def profile_refresh(args: argparse.Namespace) -> int:
                     skipped += 1
                 else:
                     try:
-                        profile = generate_llm_profile(updated, config)
+                        profile = preserve_retrieval_profile_fields(
+                            updated.get("llm_profile"), generate_llm_profile(updated, config)
+                        )
                         attach_llm_profile(updated, profile)
                         updated["schema_version"] = RECORD_SCHEMA_VERSION
                         _append_profile_refresh_checkpoint(checkpoint_path, updated)
@@ -1639,7 +1642,7 @@ def profile_refresh(args: argparse.Namespace) -> int:
                     updated, reason = futures[future]
                     repo_id = record_repo_id(updated) or "<unknown>"
                     try:
-                        profile = future.result()
+                        profile = preserve_retrieval_profile_fields(updated.get("llm_profile"), future.result())
                         attach_llm_profile(updated, profile)
                         updated["schema_version"] = RECORD_SCHEMA_VERSION
                         _append_profile_refresh_checkpoint(checkpoint_path, updated)

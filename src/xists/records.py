@@ -8,6 +8,18 @@ from typing import Any
 RECORD_SCHEMA_VERSION = 2
 CONFIDENCE_VALUES = {"high", "medium", "low"}
 MIN_SEARCH_TEXT_CHARS = 24
+RETRIEVAL_PROFILE_FIELDS = (
+    "summary",
+    "use_cases",
+    "capabilities",
+    "aliases",
+    "project_type",
+    "ecosystem",
+    "replaces",
+    "related_projects",
+    "search_text",
+    "search_phrases",
+)
 
 
 def _clean_str(value: Any) -> str | None:
@@ -75,6 +87,23 @@ def record_repo_id(record: dict[str, Any]) -> str | None:
 def record_profile(record: dict[str, Any]) -> dict[str, Any]:
     profile = record.get("llm_profile")
     return normalize_llm_profile(profile if isinstance(profile, dict) else None)
+
+
+def preserve_retrieval_profile_fields(
+    existing: dict[str, Any] | None, generated: dict[str, Any]
+) -> dict[str, Any]:
+    """Keep existing retrieval evidence when a refreshed profile omits it."""
+
+    preserved = dict(generated)
+    existing_profile = normalize_llm_profile(existing)
+    generated_profile = normalize_llm_profile(generated)
+    for field in RETRIEVAL_PROFILE_FIELDS:
+        if not generated_profile[field] and existing_profile[field]:
+            preserved[field] = existing_profile[field]
+    if generated_profile["abstained"] and existing_profile["search_text"]:
+        preserved["abstained"] = existing_profile["abstained"]
+        preserved["confidence"] = existing_profile["confidence"]
+    return preserved
 
 
 def profile_refresh_reason(

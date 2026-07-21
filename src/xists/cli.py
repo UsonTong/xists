@@ -61,6 +61,14 @@ from xists.search.rerank import (
     rerank_documents,
     reranker_config_from_env,
 )
+from xists.search.transform import (
+    QUERY_TRANSFORM_MODES,
+    QueryTransformError,
+    QueryTransformNotConfiguredError,
+    query_transform_config_from_env,
+    query_variants,
+    transform_queries,
+)
 
 
 def load_env_file(path: Path) -> None:
@@ -98,6 +106,20 @@ def write_json_atomic(path: Path, data: Any) -> None:
     tmp_path = path.with_name(f"{path.name}.tmp")
     tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp_path.replace(path)
+
+
+def _prepare_query_transforms(
+    queries: list[str], mode: str
+) -> tuple[list[list[str]] | None, list[str] | None, str | None]:
+    if mode == "off":
+        return None, None, None
+    config = query_transform_config_from_env()
+    canonical_queries = transform_queries(config, queries)
+    return (
+        [query_variants(query, canonical, mode) for query, canonical in zip(queries, canonical_queries)],
+        canonical_queries,
+        config.model,
+    )
 
 
 def _profile_refresh_checkpoint_path(output: Path) -> Path:
@@ -841,6 +863,10 @@ def search(args: argparse.Namespace) -> int:
             return 2
         rerank = lambda query, documents: rerank_documents(reranker_config, query, documents)
     try:
+        variants, rerank_queries, _ = _prepare_query_transforms([args.query], args.query_transform_mode)
+        rank_kwargs: dict[str, Any] = {}
+        if variants is not None and rerank_queries is not None:
+            rank_kwargs = {"query_variants": variants[0], "rerank_query": rerank_queries[0]}
         result = rank(
             args.query,
             index,
@@ -854,6 +880,7 @@ def search(args: argparse.Namespace) -> int:
             rerank_rank_weight=args.rerank_rank_weight,
             exploratory_threshold=args.exploratory_threshold,
             rerank_abstain_threshold=args.rerank_abstain_threshold,
+            **rank_kwargs,
         )
     except IndexMismatchError as error:
         print(str(error), file=sys.stderr)
@@ -861,7 +888,7 @@ def search(args: argparse.Namespace) -> int:
     except EmbeddingError as error:
         _print_embedding_error(error, command="search")
         return 1
-    except (RerankerError, ValueError) as error:
+    except (QueryTransformError, QueryTransformNotConfiguredError, RerankerError, ValueError) as error:
         print(str(error), file=sys.stderr)
         return 1
 
@@ -1891,6 +1918,18 @@ def eval_run(args: argparse.Namespace) -> int:
         rerank = lambda query, documents: rerank_documents(reranker_config, query, documents)
 
     try:
+        transform_kwargs: dict[str, Any] = {}
+        if args.query_transform_mode != "off":
+            queries = [case["query"] for case in load_dataset(args.cases)["cases"]]
+            variants, rerank_queries, transform_model = _prepare_query_transforms(
+                queries, args.query_transform_mode
+            )
+            transform_kwargs = {
+                "query_variants": variants,
+                "rerank_queries": rerank_queries,
+                "query_transform_mode": args.query_transform_mode,
+                "query_transform_model": transform_model,
+            }
         report = evaluate_dataset(
             args.cases,
             args.index,
@@ -1907,11 +1946,21 @@ def eval_run(args: argparse.Namespace) -> int:
             rerank_rank_weight=args.rerank_rank_weight,
             exploratory_threshold=args.exploratory_threshold,
             rerank_abstain_threshold=args.rerank_abstain_threshold,
+            **transform_kwargs,
         )
     except EmbeddingError as error:
         _print_embedding_error(error, command="eval run")
         return 1
-    except (EvaluationDatasetError, FileNotFoundError, IndexMismatchError, ValueError, LLMError, RerankerError) as error:
+    except (
+        EvaluationDatasetError,
+        FileNotFoundError,
+        IndexMismatchError,
+        QueryTransformError,
+        QueryTransformNotConfiguredError,
+        ValueError,
+        LLMError,
+        RerankerError,
+    ) as error:
         print(str(error), file=sys.stderr)
         return 1
 
@@ -2182,6 +2231,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional minimum cross-encoder score required for the fused top result",
     )
     search_parser.add_argument(
+        "--query-transform-mode",
+        choices=QUERY_TRANSFORM_MODES,
+        default="off",
+        help="Optional English canonical query mode: off, canonical, or merge (default: off)",
+    )
+    search_parser.add_argument(
         "--format",
         choices=("text", "json"),
         default="text",
@@ -2238,6 +2293,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Optional minimum cross-encoder score required for the fused top result",
+    )
+    eval_run_parser.add_argument(
+        "--query-transform-mode",
+        choices=QUERY_TRANSFORM_MODES,
+        default="off",
+        help="Optional English canonical query mode: off, canonical, or merge (default: off)",
     )
     eval_run_parser.add_argument("--records", type=Path, default=None, help="Records JSON used for optional LLM judge comparisons")
     eval_run_parser.add_argument("--llm-judge", action="store_true", help="Run an LLM pairwise judge on top-1 mismatches")

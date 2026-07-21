@@ -579,6 +579,7 @@ def _rank_reranked_entries(
     top_k: int,
     *,
     rerank: Callable[[str, list[str]], list[float]],
+    rerank_query: str,
     candidate_limit: int,
     rerank_fusion: str,
     rerank_semantic_weight: float,
@@ -598,7 +599,7 @@ def _rank_reranked_entries(
     identity_ids = {str(entry.get("repo_id") or "") for entry, _ in identity_entries}
     candidates = sorted(scored_entries, key=lambda item: item[1], reverse=True)
     candidates = [item for item in candidates if str(item[0].get("repo_id") or "") not in identity_ids][:candidate_limit]
-    rerank_scores = rerank(query, [rerank_text_from_entry(entry) for entry, _ in candidates])
+    rerank_scores = rerank(rerank_query, [rerank_text_from_entry(entry) for entry, _ in candidates])
     if len(rerank_scores) != len(candidates):
         raise ValueError(f"reranker returned {len(rerank_scores)} scores for {len(candidates)} candidates")
 
@@ -714,6 +715,8 @@ def rank_many(
     rerank_rank_weight: float = 1.0,
     exploratory_threshold: float = EXPLORATORY_THRESHOLD,
     rerank_abstain_threshold: float | None = None,
+    query_variants: list[list[str]] | None = None,
+    rerank_queries: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Rank multiple queries with batched embeddings and matrix similarity."""
 
@@ -726,6 +729,14 @@ def rank_many(
         raise ValueError("exploratory threshold must be between 0 and 1")
     if not queries:
         return []
+    if query_variants is None:
+        query_variants = [[query] for query in queries]
+    if len(query_variants) != len(queries) or any(not variants for variants in query_variants):
+        raise ValueError("query variants must contain at least one value for every query")
+    if rerank_queries is None:
+        rerank_queries = list(queries)
+    if len(rerank_queries) != len(queries):
+        raise ValueError("rerank queries must contain one value for every query")
 
     entries = index.get("vectors", [])
     vectors = [entry["vector"] for entry in entries]
@@ -736,15 +747,18 @@ def rank_many(
             "Rebuild the index with xists index build."
         )
 
+    flattened_variants = [variant for variants in query_variants for variant in variants]
     query_vectors: list[list[float]] = []
-    for start in range(0, len(queries), batch_size):
-        batch = queries[start : start + batch_size]
+    for start in range(0, len(flattened_variants), batch_size):
+        batch = flattened_variants[start : start + batch_size]
         if embed_many is call_embeddings:
             query_vectors.extend(embed_many(config, batch, input_type="query"))
         else:
             query_vectors.extend(embed_many(config, batch))
-    if len(query_vectors) != len(queries):
-        raise EmbeddingError(f"Embedding count mismatch: sent {len(queries)}, received {len(query_vectors)}")
+    if len(query_vectors) != len(flattened_variants):
+        raise EmbeddingError(
+            f"Embedding count mismatch: sent {len(flattened_variants)}, received {len(query_vectors)}"
+        )
     if dimension is not None and any(len(vector) != dimension for vector in query_vectors):
         raise IndexMismatchError(
             f"One or more query vectors do not match index dimension {dimension}. "
@@ -761,9 +775,16 @@ def rank_many(
     query_matrix = _normalized_matrix(query_vectors)
     scores = query_matrix @ index_matrix.T
     ranked: list[dict[str, Any]] = []
+    offset = 0
     for row, query in enumerate(queries):
         started = perf_counter()
-        scored_entries = [(entry, float(scores[row, column])) for column, entry in enumerate(entries)]
+        variant_count = len(query_variants[row])
+        variant_scores = scores[offset : offset + variant_count]
+        offset += variant_count
+        scored_entries = [
+            (entry, float(variant_scores[:, column].max()))
+            for column, entry in enumerate(entries)
+        ]
         if ranking_strategy == "semantic":
             results = _rank_semantic_entries(
                 scored_entries, top_k, exploratory_threshold=exploratory_threshold
@@ -774,6 +795,7 @@ def rank_many(
                 scored_entries,
                 top_k,
                 rerank=rerank,
+                rerank_query=rerank_queries[row],
                 candidate_limit=rerank_candidate_limit,
                 rerank_fusion=rerank_fusion,
                 rerank_semantic_weight=rerank_semantic_weight,
@@ -785,16 +807,17 @@ def rank_many(
             results = _rank_scored_entries(
                 query, scored_entries, top_k, exploratory_threshold=exploratory_threshold
             )
-        ranked.append(
-            {
-                "query": query,
-                "latency_ms": round((perf_counter() - started) * 1000, 3),
-                "query_intent": _query_intent(query),
-                "abstained": len(results) == 0,
-                "results": results,
-                "considered": len(entries),
-            }
-        )
+        item = {
+            "query": query,
+            "latency_ms": round((perf_counter() - started) * 1000, 3),
+            "query_intent": _query_intent(query),
+            "abstained": len(results) == 0,
+            "results": results,
+            "considered": len(entries),
+        }
+        if query_variants[row] != [query]:
+            item["query_variants"] = query_variants[row]
+        ranked.append(item)
     return ranked
 
 
@@ -813,6 +836,8 @@ def rank(
     rerank_rank_weight: float = 1.0,
     exploratory_threshold: float = EXPLORATORY_THRESHOLD,
     rerank_abstain_threshold: float | None = None,
+    query_variants: list[str] | None = None,
+    rerank_query: str | None = None,
 ) -> dict[str, Any]:
     """Rank index entries against the query."""
 
@@ -820,16 +845,25 @@ def rank(
     ensure_index_matches_model(index, config)
     if not 0.0 <= exploratory_threshold <= 1.0:
         raise ValueError("exploratory threshold must be between 0 and 1")
-    query_vector = embed(config, query)
+    if query_variants is None:
+        query_variants = [query]
+    if not query_variants:
+        raise ValueError("query variants must contain at least one value")
+    if rerank_query is None:
+        rerank_query = query
+    query_vectors = [embed(config, variant) for variant in query_variants]
     dimension = index.get("dimension")
-    if dimension is not None and len(query_vector) != dimension:
+    if dimension is not None and any(len(vector) != dimension for vector in query_vectors):
         raise IndexMismatchError(
-            f"Query vector dimension {len(query_vector)} does not match index "
+            "Query vector dimension does not match index "
             f"dimension {dimension}. Rebuild the index or check the model."
         )
 
     entries = index.get("vectors", [])
-    scored_entries = [(entry, cosine_similarity(query_vector, entry["vector"])) for entry in entries]
+    scored_entries = [
+        (entry, max(cosine_similarity(vector, entry["vector"]) for vector in query_vectors))
+        for entry in entries
+    ]
     if ranking_strategy not in RANKING_STRATEGIES:
         raise ValueError(f"Unknown ranking strategy: {ranking_strategy}")
     if ranking_strategy == "semantic":
@@ -844,6 +878,7 @@ def rank(
             scored_entries,
             top_k,
             rerank=rerank,
+            rerank_query=rerank_query,
             candidate_limit=rerank_candidate_limit,
             rerank_fusion=rerank_fusion,
             rerank_semantic_weight=rerank_semantic_weight,
@@ -855,7 +890,7 @@ def rank(
         results = _rank_scored_entries(
             query, scored_entries, top_k, exploratory_threshold=exploratory_threshold
         )
-    return {
+    result = {
         "query": query,
         "latency_ms": round((perf_counter() - started) * 1000, 3),
         "query_intent": _query_intent(query),
@@ -863,3 +898,6 @@ def rank(
         "results": results,
         "considered": len(entries),
     }
+    if query_variants != [query]:
+        result["query_variants"] = query_variants
+    return result

@@ -238,6 +238,7 @@ def test_eval_run_parser_uses_default_paths():
     assert args.batch_size == 64
     assert args.ranking_strategy == "metadata"
     assert args.rerank_candidates == 50
+    assert args.query_transform_mode == "off"
 
 
 def test_search_parser_uses_default_options():
@@ -248,6 +249,7 @@ def test_search_parser_uses_default_options():
     assert args.format == "text"
     assert args.ranking_strategy == "metadata"
     assert args.rerank_candidates == 50
+    assert args.query_transform_mode == "off"
 
 
 def test_search_defaults_to_text_output(tmp_path, monkeypatch, capsys):

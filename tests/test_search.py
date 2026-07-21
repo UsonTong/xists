@@ -802,6 +802,61 @@ def test_rank_many_batches_embeddings():
     assert len(results) == 3
 
 
+def test_dual_query_variants_keep_the_stronger_cross_language_candidate():
+    index = make_index(
+        [
+            {"repo_id": "wrong/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+            {"repo_id": "target/repo", "vector": [0.0, 1.0], "metadata": {}},
+        ]
+    )
+    vectors = {"原始查询": [1.0, 0.0], "canonical query": [0.0, 1.0]}
+
+    result = rank(
+        "原始查询",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: vectors[query],
+        query_variants=["原始查询", "canonical query"],
+    )
+
+    assert result["results"][0]["repo_id"] == "target/repo"
+    assert result["query_variants"] == ["原始查询", "canonical query"]
+
+
+def test_rank_many_batches_all_query_variants_and_reranks_with_canonical_query():
+    calls = []
+    rerank_calls = []
+
+    def fake_embed_many(config, queries):
+        calls.append(list(queries))
+        return [[1.0, 0.0] if query == "原始查询" else [0.0, 1.0] for query in queries]
+
+    index = make_index(
+        [
+            {"repo_id": "wrong/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+            {"repo_id": "target/repo", "vector": [0.0, 1.0], "metadata": {}},
+        ]
+    )
+    results = rank_many(
+        ["原始查询"],
+        index,
+        CONFIG,
+        top_k=2,
+        batch_size=2,
+        embed_many=fake_embed_many,
+        ranking_strategy="rerank",
+        rerank=lambda query, documents: rerank_calls.append(query) or [0.9, 0.1],
+        rerank_candidate_limit=2,
+        query_variants=[["原始查询", "canonical query"]],
+        rerank_queries=["canonical query"],
+    )
+
+    assert calls == [["原始查询", "canonical query"]]
+    assert rerank_calls == ["canonical query"]
+    assert results[0]["query_variants"] == ["原始查询", "canonical query"]
+
+
 def test_rank_abstains_on_empty_index():
     result = rank("anything", make_index([]), CONFIG, embed=lambda config, query: [1.0, 0.0])
     assert result == {

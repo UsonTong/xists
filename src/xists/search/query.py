@@ -109,7 +109,9 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
         norm_b += y * y
     if norm_a == 0.0 or norm_b == 0.0:
         return 0.0
-    return dot / (math.sqrt(norm_a) * math.sqrt(norm_b))
+    # Compact v3 indexes decode to NumPy float32 values.  Cast at this public
+    # boundary so single-query JSON output never exposes a NumPy scalar.
+    return float(dot / (math.sqrt(norm_a) * math.sqrt(norm_b)))
 
 
 def confidence_bucket(score: float) -> str:

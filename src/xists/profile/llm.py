@@ -227,7 +227,7 @@ def call_llm(config: LLMConfig, messages: list[dict[str, str]], *, timeout: int 
             if error.code not in RETRYABLE_HTTP_STATUSES or attempt == 2:
                 raise last_error from error
             time.sleep(2**attempt)
-        except urllib.error.URLError as error:
+        except (urllib.error.URLError, TimeoutError) as error:
             last_error = LLMError(f"LLM request failed: {error}")
             if attempt == 2:
                 raise last_error from error

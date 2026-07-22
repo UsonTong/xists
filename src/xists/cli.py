@@ -53,7 +53,7 @@ from xists.search.embed import (
     embedding_text_from_record,
     probe_embedding_endpoint,
 )
-from xists.search.index import INDEX_VERSION, entry_metadata, load_index
+from xists.search.index import INDEX_VERSION, decode_vector, encode_vector, entry_metadata, load_index
 from xists.search.query import IndexMismatchError, _query_intent, rank
 
 
@@ -750,10 +750,13 @@ def index_build(args: argparse.Namespace) -> int:
         metadata = entry_metadata(record)
         existing = reusable_vectors.get(repo_id)
         if existing and existing.get("embedding_input_fingerprint") == fingerprint:
-            vector = existing.get("vector") or []
+            vector = decode_vector(existing.get("vector"), dimension=dimension)
+            if vector is None:
+                embeddable.append({"repo_id": repo_id, "text": text, "fingerprint": fingerprint, "metadata": metadata})
+                continue
             if dimension is None:
-                dimension = len(vector)
-            if len(vector) == dimension:
+                dimension = int(vector.size)
+            if vector.size == dimension:
                 existing = {**existing, "metadata": metadata}
                 vectors.append(existing)
                 continue
@@ -805,7 +808,7 @@ def index_build(args: argparse.Namespace) -> int:
                     "repo_id": item["repo_id"],
                     "embedding_input_fingerprint": item["fingerprint"],
                     "metadata": item["metadata"],
-                    "vector": vector,
+                    "vector": encode_vector(vector),
                 }
             )
             new_count += 1
@@ -1748,9 +1751,11 @@ def _index_verify_report(records: list[dict[str, Any]], index: dict[str, Any]) -
     dimension_mismatches = [
         entry.get("repo_id")
         for entry in vectors
-        if isinstance(entry.get("vector"), list) and isinstance(dimension, int) and len(entry["vector"]) != dimension
+        if isinstance(dimension, int)
+        and (decoded := decode_vector(entry.get("vector"))) is not None
+        and decoded.size != dimension
     ]
-    invalid_vectors = [entry.get("repo_id") for entry in vectors if not isinstance(entry.get("vector"), list)]
+    invalid_vectors = [entry.get("repo_id") for entry in vectors if decode_vector(entry.get("vector")) is None]
     if dimension_mismatches:
         errors["dimension_mismatch"] = len(dimension_mismatches)
     if invalid_vectors:

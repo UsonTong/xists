@@ -29,7 +29,7 @@ from xists.ingest.github import GitHubAPIError
 from xists.profile.llm import LLMError, PROFILE_PROMPT_VERSION
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingError, embedding_input_fingerprint
-from xists.search.index import INDEX_VERSION
+from xists.search.index import INDEX_VERSION, decode_vector
 
 
 def test_load_env_file_loads_values(tmp_path, monkeypatch):
@@ -2093,7 +2093,7 @@ def test_index_build_rebuilds_legacy_vectors_without_fingerprints(tmp_path, monk
     assert index["record_count"] == 2
     assert len(index["vectors"]) == 2
     assert index["vectors"][0]["repo_id"] == "a/b"
-    assert index["vectors"][0]["vector"] == [0.0, 1.0, 0.0, 0.0]
+    assert decode_vector(index["vectors"][0]["vector"]).tolist() == [0.0, 1.0, 0.0, 0.0]
     assert index["vectors"][1]["repo_id"] == "c/d"
     assert index["vectors"][1]["embedding_input_fingerprint"]
 
@@ -2452,7 +2452,7 @@ def test_index_build_force_rebuilds_from_scratch(tmp_path, monkeypatch):
     assert code == 0
     index = json.loads(output_file.read_text())
     assert index["record_count"] == 1
-    assert index["vectors"][0]["vector"] == [0.0, 0.0, 1.0, 0.0]
+    assert decode_vector(index["vectors"][0]["vector"]).tolist() == [0.0, 0.0, 1.0, 0.0]
 
 
 def test_index_build_checkpoint_writes_after_each_batch(tmp_path, monkeypatch):

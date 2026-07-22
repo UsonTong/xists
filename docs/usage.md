@@ -267,6 +267,7 @@ This reads `records.json`, computes embeddings via the configured endpoint, and 
 | `--records` | `records.json` | Input records file |
 | `--output` | `index.json` | Output index file |
 | `--force` | off | Ignore existing index.json and rebuild from scratch |
+| `--resume` | off | Continue from a partial index checkpoint |
 
 #### Incremental update
 
@@ -274,7 +275,7 @@ By default, `xists index build` is incremental. It reuses an existing vector onl
 
 #### Checkpoint
 
-Each batch (64 records) is written to disk as it completes. If interrupted, completed batches are preserved.
+Completed work is periodically written to a partial index checkpoint. If interrupted, run the same command with the resume option; xists reuses completed vectors and publishes the final index only after the whole build succeeds. Current indexes store vectors as compact float32 base64 data, which reduces memory pressure on large indexes.
 
 #### Model mismatch protection
 

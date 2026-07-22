@@ -13,7 +13,7 @@ from xists.search.embed import (
     embedding_input_fingerprint,
     embedding_text_from_record,
 )
-from xists.search.index import build_index
+from xists.search.index import INDEX_VERSION, build_index, decode_vector, encode_vector
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.query import (
     IndexMismatchError,
@@ -186,6 +186,35 @@ def test_build_index_skips_empty_records(monkeypatch):
     index = build_index(records, CONFIG)
     assert index["record_count"] == 1
     assert index["skipped"] == ["empty/empty"]
+
+
+def test_compact_vector_round_trip_and_legacy_rank_compatibility():
+    encoded = encode_vector([1.0, 0.0])
+
+    assert isinstance(encoded, str)
+    assert decode_vector(encoded).tolist() == pytest.approx([1.0, 0.0])
+    assert decode_vector([1.0, 0.0]).tolist() == pytest.approx([1.0, 0.0])
+    index = {
+        **make_index(
+            [
+                {"repo_id": "winner/repo", "vector": encoded, "metadata": {}},
+                {"repo_id": "other/repo", "vector": encode_vector([0.0, 1.0]), "metadata": {}},
+            ]
+        ),
+        "index_version": INDEX_VERSION,
+    }
+
+    assert rank("query", index, CONFIG, embed=lambda *_: [1.0, 0.0])["results"][0]["repo_id"] == "winner/repo"
+
+
+def test_build_index_writes_compact_vectors(monkeypatch):
+    monkeypatch.setattr("xists.search.index.call_embeddings", lambda *_args, **_kwargs: [[1.0, 0.0]])
+
+    index = build_index([make_record()], CONFIG)
+
+    assert index["index_version"] == INDEX_VERSION
+    assert isinstance(index["vectors"][0]["vector"], str)
+    assert decode_vector(index["vectors"][0]["vector"]).tolist() == pytest.approx([1.0, 0.0])
 
 
 def test_rank_returns_sorted_semantic_results_with_stable_shape():

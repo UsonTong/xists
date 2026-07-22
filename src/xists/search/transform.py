@@ -66,10 +66,16 @@ def query_transform_config_from_env() -> QueryTransformConfig:
 
 
 def _parse_transformed_queries(content: str, expected_count: int) -> list[str]:
+    decoder = json.JSONDecoder()
+    start = content.find("{")
+    if start < 0:
+        raise QueryTransformError("Query transformation response was not valid JSON: no JSON object found")
     try:
-        data = json.loads(content)
+        data, end = decoder.raw_decode(content, start)
     except json.JSONDecodeError as error:
         raise QueryTransformError(f"Query transformation response was not valid JSON: {error}") from error
+    if content[end:].strip():
+        raise QueryTransformError("Query transformation response must contain exactly one JSON object")
     values = data.get("queries") if isinstance(data, dict) else None
     if not isinstance(values, list) or len(values) != expected_count:
         raise QueryTransformError("Query transformation response must contain one query for every input")

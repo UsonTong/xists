@@ -759,15 +759,32 @@ def index_build(args: argparse.Namespace) -> int:
                 continue
         embeddable.append({"repo_id": repo_id, "text": text, "fingerprint": fingerprint, "metadata": metadata})
 
+    def write_partial_checkpoint() -> None:
+        _index_write_checkpoint(
+            checkpoint_path,
+            index_version=INDEX_VERSION,
+            record_schema_version=RECORD_SCHEMA_VERSION,
+            embedding_model=config.model,
+            embedding_base_url=config.base_url,
+            embedding_input_version=EMBEDDING_INPUT_VERSION,
+            dimension=dimension,
+            record_count=len(vectors),
+            skipped=skipped,
+            vectors=vectors,
+        )
+
     new_count = 0
-    for start in range(0, len(embeddable), batch_size):
+    checkpoint_every_batches = 16
+    for batch_number, start in enumerate(range(0, len(embeddable), batch_size), start=1):
         batch = embeddable[start : start + batch_size]
         try:
             results = call_embeddings(config, [item["text"] for item in batch])
         except EmbeddingError as error:
+            write_partial_checkpoint()
             _print_embedding_error(error, command="index build")
             return 1
         if len(results) != len(batch):
+            write_partial_checkpoint()
             print(
                 f"Embedding count mismatch: sent {len(batch)}, received {len(results)}",
                 file=sys.stderr,
@@ -777,6 +794,7 @@ def index_build(args: argparse.Namespace) -> int:
             if dimension is None:
                 dimension = len(vector)
             elif len(vector) != dimension:
+                write_partial_checkpoint()
                 print(
                     f"Inconsistent embedding dimension: {len(vector)} vs {dimension}",
                     file=sys.stderr,
@@ -792,19 +810,8 @@ def index_build(args: argparse.Namespace) -> int:
             )
             new_count += 1
 
-        # Keep interrupted builds separate from the last known-good index.
-        _index_write_checkpoint(
-            checkpoint_path,
-            index_version=INDEX_VERSION,
-            record_schema_version=RECORD_SCHEMA_VERSION,
-            embedding_model=config.model,
-            embedding_base_url=config.base_url,
-            embedding_input_version=EMBEDDING_INPUT_VERSION,
-            dimension=dimension,
-            record_count=len(vectors),
-            skipped=skipped,
-            vectors=vectors,
-        )
+        if batch_number % checkpoint_every_batches == 0:
+            write_partial_checkpoint()
 
     _index_write_checkpoint(
         args.output,

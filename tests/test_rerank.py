@@ -1,3 +1,5 @@
+import http.client
+
 import pytest
 
 from xists.search.rerank import (
@@ -80,3 +82,47 @@ def test_rerank_documents_supports_passages_protocol():
         "query": {"text": "query"},
         "passages": [{"text": "first"}, {"text": "second"}],
     }
+
+
+def test_rerank_documents_retries_a_transient_disconnect():
+    calls = 0
+    sleeps = []
+
+    def fake_request(*_args):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise http.client.RemoteDisconnected("upstream closed")
+        return [{"index": 0, "score": 0.8}]
+
+    scores = rerank_documents(
+        RerankerConfig(api_key=None, base_url="http://reranker"),
+        "query",
+        ["document"],
+        request_json=fake_request,
+        sleep=sleeps.append,
+    )
+
+    assert scores == [0.8]
+    assert calls == 2
+    assert sleeps == [1]
+
+
+def test_rerank_documents_retries_a_connection_reset():
+    calls = 0
+
+    def fake_request(*_args):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ConnectionResetError(104, "connection reset")
+        return [{"index": 0, "score": 0.8}]
+
+    assert rerank_documents(
+        RerankerConfig(api_key=None, base_url="http://reranker"),
+        "query",
+        ["document"],
+        request_json=fake_request,
+        sleep=lambda _seconds: None,
+    ) == [0.8]
+    assert calls == 2

@@ -161,6 +161,8 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
                         "why": ["matched topic: frontend"],
                         "matched_terms": ["frontend"],
                         "score_breakdown": {"semantic": 0.7, "metadata": 0.1, "final": 0.8},
+                        "rerank_score": 2.4,
+                        "ranking_evidence": {"semantic_rank": 1, "rerank_rank": 2},
                         "diagnostics": {
                             "query_terms": ["frontend"],
                             "matched_terms": ["frontend"],
@@ -256,10 +258,16 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
     assert report["top_misses"][0]["id"] == "abstain"
     assert report["top_misses"][0]["top1_status"] == "serious_mismatch"
     assert report["results"][0]["query_intent"] == {"type": "functional"}
+    assert report["results"][0]["latency_ms"] is None
     assert report["results"][0]["top_result_why"] == ["matched topic: frontend"]
     assert report["results"][0]["top_result_matched_terms"] == ["frontend"]
     assert report["results"][0]["top_result_diagnostics"]["topic_matches"] == ["frontend"]
     assert report["results"][0]["top_result_score_breakdown"]["final"] == 0.8
+    assert report["results"][0]["top_result_rerank_score"] == 2.4
+    assert report["results"][0]["top_result_ranking_evidence"] == {
+        "semantic_rank": 1,
+        "rerank_rank": 2,
+    }
     assert report["results"][0]["top1_status"] == "exact"
     assert report["results"][1]["top1_status"] == "acceptable"
     assert report["results"][1]["exact_match"] is False

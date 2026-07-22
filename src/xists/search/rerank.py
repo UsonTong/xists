@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+import http.client
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -11,6 +13,8 @@ from typing import Any
 
 
 USER_AGENT = "xists-reranker"
+RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
+REQUEST_ATTEMPTS = 3
 
 
 class RerankerError(RuntimeError):
@@ -130,6 +134,7 @@ def rerank_documents(
     *,
     timeout: int = 60,
     request_json: Any = _request_json,
+    sleep: Any = time.sleep,
 ) -> list[float]:
     """Return reranker scores in the same order as ``documents``."""
 
@@ -152,13 +157,20 @@ def rerank_documents(
         payload = {"query": query, "texts": documents, "raw_scores": True}
         if config.model:
             payload["model"] = config.model
-    try:
-        data = request_json(config.rerank_url, payload, headers, timeout)
-    except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", errors="replace")
-        raise RerankerError(f"Reranker HTTP {error.code}: {detail}") from error
-    except urllib.error.URLError as error:
-        raise RerankerError(f"Reranker request failed: {error}") from error
+    for attempt in range(REQUEST_ATTEMPTS):
+        try:
+            data = request_json(config.rerank_url, payload, headers, timeout)
+            break
+        except urllib.error.HTTPError as error:
+            detail = error.read().decode("utf-8", errors="replace")
+            if error.code not in RETRYABLE_HTTP_STATUSES or attempt == REQUEST_ATTEMPTS - 1:
+                raise RerankerError(f"Reranker HTTP {error.code}: {detail}") from error
+        except (urllib.error.URLError, http.client.RemoteDisconnected, ConnectionError, TimeoutError) as error:
+            if attempt == REQUEST_ATTEMPTS - 1:
+                raise RerankerError(f"Reranker request failed: {error}") from error
+        sleep(2**attempt)
+    else:  # pragma: no cover - the final attempt always returns or raises.
+        raise RerankerError("Reranker request failed")
     if config.protocol == "passages":
         return _parse_passage_scores(data, len(documents))
     return _parse_tei_scores(data, len(documents))

@@ -7,6 +7,7 @@ import pytest
 
 from xists import __version__
 from xists.cli import (
+    _load_canonical_queries,
     build_parser,
     doctor,
     eval_cases,
@@ -238,6 +239,19 @@ def test_eval_run_parser_uses_default_paths():
     assert args.ranking_strategy == "metadata"
     assert args.rerank_candidates == 50
     assert args.query_transform_mode == "off"
+    assert args.canonical_queries is None
+
+
+def test_load_canonical_queries_requires_an_exact_nonempty_case_map(tmp_path):
+    cases = [{"id": "one"}, {"id": "two"}]
+    queries_file = tmp_path / "canonical.json"
+    queries_file.write_text(json.dumps({"one": "first retrieval query", "two": "second retrieval query"}), encoding="utf-8")
+
+    assert _load_canonical_queries(queries_file, cases) == ["first retrieval query", "second retrieval query"]
+
+    queries_file.write_text(json.dumps({"one": "first retrieval query", "extra": "other"}), encoding="utf-8")
+    with pytest.raises(Exception, match="missing case ids: two; unexpected case ids: extra"):
+        _load_canonical_queries(queries_file, cases)
 
 
 def test_search_parser_uses_default_options():

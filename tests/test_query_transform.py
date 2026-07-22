@@ -36,7 +36,7 @@ def test_transform_queries_preserves_input_order_and_uses_json_contract():
 
     assert transformed == ["Vue open-source project", "Kafka streaming"]
     assert observed["config"].model == "test-model"
-    assert observed["timeout"] == 60
+    assert observed["timeout"] == 600
     assert "Preserve repository names" in observed["messages"][0]["content"]
     assert json.loads(observed["messages"][1]["content"])["queries"][0] == "查找 Vue 开源项目"
 

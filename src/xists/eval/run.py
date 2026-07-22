@@ -61,6 +61,7 @@ def evaluate_dataset(
     rerank: Any | None = None,
     rerank_candidate_limit: int = 50,
     exploratory_threshold: float = 0.35,
+    rerank_abstain_threshold: float | None = None,
 ) -> dict[str, Any]:
     started_at = datetime.now(timezone.utc)
     started_clock = perf_counter()
@@ -86,6 +87,7 @@ def evaluate_dataset(
             rerank=rerank,
             rerank_candidate_limit=rerank_candidate_limit,
             exploratory_threshold=exploratory_threshold,
+            rerank_abstain_threshold=rerank_abstain_threshold,
         )
     else:
         ranked = rank_many_fn(queries, index, config, top_k=top_k, batch_size=batch_size)
@@ -308,6 +310,7 @@ def evaluate_dataset(
         "ranking_strategy": ranking_strategy,
         "rerank_candidate_limit": rerank_candidate_limit if ranking_strategy == "rerank" else None,
         "exploratory_threshold": exploratory_threshold,
+        "rerank_abstain_threshold": rerank_abstain_threshold if ranking_strategy == "rerank" else None,
         "case_count": case_count,
         "metrics": metrics,
         "confidence": {

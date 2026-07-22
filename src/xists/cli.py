@@ -885,6 +885,7 @@ def search(args: argparse.Namespace) -> int:
             rerank=rerank,
             rerank_candidate_limit=args.rerank_candidates,
             exploratory_threshold=args.exploratory_threshold,
+            rerank_abstain_threshold=args.rerank_abstain_threshold,
         )
     except IndexMismatchError as error:
         print(str(error), file=sys.stderr)
@@ -1934,6 +1935,7 @@ def eval_run(args: argparse.Namespace) -> int:
             rerank=rerank,
             rerank_candidate_limit=args.rerank_candidates,
             exploratory_threshold=args.exploratory_threshold,
+            rerank_abstain_threshold=args.rerank_abstain_threshold,
         )
     except EmbeddingError as error:
         _print_embedding_error(error, command="eval run")
@@ -2181,6 +2183,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Minimum embedding similarity for a non-identity result (default: 0.35)",
     )
     search_parser.add_argument(
+        "--rerank-abstain-threshold",
+        type=float,
+        default=None,
+        help="Optional minimum cross-encoder score required for the fused top result",
+    )
+    search_parser.add_argument(
         "--format",
         choices=("text", "json"),
         default="text",
@@ -2213,6 +2221,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.35,
         help="Minimum embedding similarity for a non-identity result (default: 0.35)",
+    )
+    eval_run_parser.add_argument(
+        "--rerank-abstain-threshold",
+        type=float,
+        default=None,
+        help="Optional minimum cross-encoder score required for the fused top result",
     )
     eval_run_parser.add_argument("--records", type=Path, default=None, help="Records JSON used for optional LLM judge comparisons")
     eval_run_parser.add_argument("--llm-judge", action="store_true", help="Run an LLM pairwise judge on top-1 mismatches")

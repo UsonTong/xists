@@ -122,6 +122,37 @@ def _prepare_query_transforms(
     )
 
 
+def _load_canonical_queries(path: Path, cases: list[dict[str, Any]]) -> list[str]:
+    """Load a complete, case-id keyed canonical-query snapshot for an eval run."""
+
+    try:
+        values = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise QueryTransformError(f"Canonical query file not found: {path}") from error
+    except json.JSONDecodeError as error:
+        raise QueryTransformError(f"Canonical query file is not valid JSON: {error}") from error
+    if not isinstance(values, dict):
+        raise QueryTransformError("Canonical query file must be an object mapping case id to query text")
+
+    expected_ids = [str(case["id"]) for case in cases]
+    expected_id_set = set(expected_ids)
+    actual_id_set = set(values)
+    missing = [case_id for case_id in expected_ids if case_id not in actual_id_set]
+    unexpected = sorted(str(case_id) for case_id in actual_id_set - expected_id_set)
+    if missing or unexpected:
+        details: list[str] = []
+        if missing:
+            details.append(f"missing case ids: {', '.join(missing)}")
+        if unexpected:
+            details.append(f"unexpected case ids: {', '.join(unexpected)}")
+        raise QueryTransformError("Canonical query file must match eval cases exactly; " + "; ".join(details))
+
+    canonical_queries = [values[case_id] for case_id in expected_ids]
+    if any(not isinstance(query, str) or not query.strip() for query in canonical_queries):
+        raise QueryTransformError("Canonical query file values must be non-empty strings")
+    return [query.strip() for query in canonical_queries]
+
+
 def _profile_refresh_checkpoint_path(output: Path) -> Path:
     return Path(f"{output}.partial.jsonl")
 
@@ -1951,11 +1982,22 @@ def eval_run(args: argparse.Namespace) -> int:
 
     try:
         transform_kwargs: dict[str, Any] = {}
+        if args.canonical_queries is not None and args.query_transform_mode == "off":
+            raise QueryTransformError("--canonical-queries requires --query-transform-mode canonical or merge")
         if args.query_transform_mode != "off":
-            queries = [case["query"] for case in load_dataset(args.cases)["cases"]]
-            variants, rerank_queries, transform_model = _prepare_query_transforms(
-                queries, args.query_transform_mode
-            )
+            cases = load_dataset(args.cases)["cases"]
+            queries = [case["query"] for case in cases]
+            if args.canonical_queries is None:
+                variants, rerank_queries, transform_model = _prepare_query_transforms(
+                    queries, args.query_transform_mode
+                )
+            else:
+                rerank_queries = _load_canonical_queries(args.canonical_queries, cases)
+                variants = [
+                    query_variants(query, canonical, args.query_transform_mode)
+                    for query, canonical in zip(queries, rerank_queries)
+                ]
+                transform_model = "frozen-canonical-queries"
             transform_kwargs = {
                 "query_variants": variants,
                 "rerank_queries": rerank_queries,
@@ -2288,6 +2330,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=QUERY_TRANSFORM_MODES,
         default="off",
         help="Optional English canonical query mode: off, canonical, or merge (default: off)",
+    )
+    eval_run_parser.add_argument(
+        "--canonical-queries",
+        type=Path,
+        default=None,
+        help="Optional JSON object mapping every eval case id to a fixed canonical query",
     )
     eval_run_parser.add_argument("--records", type=Path, default=None, help="Records JSON used for optional LLM judge comparisons")
     eval_run_parser.add_argument("--llm-judge", action="store_true", help="Run an LLM pairwise judge on top-1 mismatches")

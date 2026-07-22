@@ -52,6 +52,21 @@ def test_transform_queries_rejects_invalid_response_shape():
         )
 
 
+def test_transform_queries_uses_small_ordered_batches():
+    config = QueryTransformConfig(api_key="key", base_url="https://example.test/v1", model="test-model")
+    requests = []
+
+    def fake_caller(llm_config, messages, *, timeout):
+        batch = json.loads(messages[1]["content"])["queries"]
+        requests.append(batch)
+        return LLMResponse(content=json.dumps({"queries": [f"English {query}" for query in batch]}))
+
+    transformed = transform_queries(config, ["一", "二", "三"], caller=fake_caller, batch_size=2)
+
+    assert requests == [["一", "二"], ["三"]]
+    assert transformed == ["English 一", "English 二", "English 三"]
+
+
 def test_query_variants_keeps_original_and_canonical_expressions_distinct():
     assert query_variants("中文查询", "English query", "off") == ["中文查询"]
     assert query_variants("中文查询", "English query", "canonical") == ["English query"]

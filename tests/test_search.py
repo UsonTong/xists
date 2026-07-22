@@ -204,7 +204,10 @@ def test_compact_vector_round_trip_and_legacy_rank_compatibility():
         "index_version": INDEX_VERSION,
     }
 
-    assert rank("query", index, CONFIG, embed=lambda *_: [1.0, 0.0])["results"][0]["repo_id"] == "winner/repo"
+    result = rank("query", index, CONFIG, embed=lambda *_: [1.0, 0.0])
+
+    assert result["results"][0]["repo_id"] == "winner/repo"
+    __import__("json").dumps(result)
 
 
 def test_build_index_writes_compact_vectors(monkeypatch):

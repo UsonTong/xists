@@ -781,7 +781,7 @@ def index_build(args: argparse.Namespace) -> int:
     for batch_number, start in enumerate(range(0, len(embeddable), batch_size), start=1):
         batch = embeddable[start : start + batch_size]
         try:
-            results = call_embeddings(config, [item["text"] for item in batch])
+            results = call_embeddings(config, [item["text"] for item in batch], input_type="passage")
         except EmbeddingError as error:
             write_partial_checkpoint()
             _print_embedding_error(error, command="index build")

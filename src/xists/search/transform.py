@@ -10,6 +10,7 @@ from typing import Callable
 from xists.profile.llm import LLMConfig, LLMError, LLMResponse, call_llm
 
 QUERY_TRANSFORM_MODES = ("off", "canonical", "merge")
+QUERY_TRANSFORM_BATCH_SIZE = 16
 
 QUERY_TRANSFORM_SYSTEM_PROMPT = (
     "Convert each search query into a concise English retrieval expression. "
@@ -82,20 +83,28 @@ def transform_queries(
     queries: list[str],
     *,
     caller: Callable[..., LLMResponse] = call_llm,
+    batch_size: int = QUERY_TRANSFORM_BATCH_SIZE,
 ) -> list[str]:
     """Return one English canonical retrieval expression for each input query."""
 
     if not queries:
         return []
-    messages = [
-        {"role": "system", "content": QUERY_TRANSFORM_SYSTEM_PROMPT},
-        {"role": "user", "content": json.dumps({"queries": queries}, ensure_ascii=False)},
-    ]
-    try:
-        response = caller(config.llm_config, messages, timeout=60)
-    except LLMError as error:
-        raise QueryTransformError(str(error)) from error
-    return _parse_transformed_queries(response.content, len(queries))
+    if batch_size < 1:
+        raise ValueError("query transform batch size must be at least 1")
+
+    transformed: list[str] = []
+    for start in range(0, len(queries), batch_size):
+        batch = queries[start : start + batch_size]
+        messages = [
+            {"role": "system", "content": QUERY_TRANSFORM_SYSTEM_PROMPT},
+            {"role": "user", "content": json.dumps({"queries": batch}, ensure_ascii=False)},
+        ]
+        try:
+            response = caller(config.llm_config, messages, timeout=60)
+        except LLMError as error:
+            raise QueryTransformError(str(error)) from error
+        transformed.extend(_parse_transformed_queries(response.content, len(batch)))
+    return transformed
 
 
 def query_variants(query: str, canonical_query: str, mode: str) -> list[str]:

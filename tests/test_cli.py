@@ -2524,6 +2524,32 @@ def test_index_build_checkpoint_saves_partial_on_crash(tmp_path, monkeypatch):
     assert len(index["vectors"]) == 64
 
 
+def test_index_build_checkpoints_large_builds_in_bounded_intervals(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "local")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    records = [_make_record(f"r{i}/repo") for i in range(17 * 64)]
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps(records), encoding="utf-8")
+    output_file = tmp_path / "index.json"
+    writes: list[Path] = []
+    original_checkpoint = __import__("xists.cli", fromlist=["_index_write_checkpoint"])._index_write_checkpoint
+
+    def record_checkpoint(output, **kwargs):
+        writes.append(output)
+        original_checkpoint(output, **kwargs)
+
+    args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file)]
+    )
+    with patch("xists.cli.call_embeddings", side_effect=lambda _config, inputs, **_kwargs: [[1.0] for _ in inputs]), patch(
+        "xists.cli._index_write_checkpoint", side_effect=record_checkpoint
+    ):
+        assert index_build(args) == 0
+
+    assert writes == [Path(f"{output_file}.partial.json"), output_file]
+
+
 def test_index_build_resume_completes_partial_checkpoint(tmp_path, monkeypatch):
     monkeypatch.setenv("EMBEDDING_API_KEY", "local")
     monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")

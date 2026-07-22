@@ -235,6 +235,8 @@ def test_eval_run_parser_uses_default_paths():
     assert args.output == Path("eval-report.json")
     assert args.top_k == 10
     assert args.batch_size == 64
+    assert args.ranking_strategy == "metadata"
+    assert args.rerank_candidates == 50
 
 
 def test_search_parser_uses_default_options():
@@ -243,6 +245,8 @@ def test_search_parser_uses_default_options():
     assert args.index == Path("index.json")
     assert args.top_k == 10
     assert args.format == "text"
+    assert args.ranking_strategy == "metadata"
+    assert args.rerank_candidates == 50
 
 
 def test_search_defaults_to_text_output(tmp_path, monkeypatch, capsys):
@@ -436,7 +440,21 @@ def test_eval_run_writes_report(tmp_path, monkeypatch):
         ]
     )
 
-    def fake_evaluate_dataset(cases, index, config, *, top_k=10, batch_size=64, llm_judge_config=None, records_path=None, judge_caller=None):
+    def fake_evaluate_dataset(
+        cases,
+        index,
+        config,
+        *,
+        top_k=10,
+        batch_size=64,
+        llm_judge_config=None,
+        records_path=None,
+        judge_caller=None,
+        ranking_strategy="metadata",
+            rerank=None,
+            rerank_candidate_limit=50,
+            exploratory_threshold=0.35,
+    ):
         assert cases == cases_file
         assert index == index_file
         assert config.model == "bge-m3"
@@ -444,6 +462,10 @@ def test_eval_run_writes_report(tmp_path, monkeypatch):
         assert batch_size == 8
         assert llm_judge_config is None
         assert records_path is None
+        assert ranking_strategy == "metadata"
+        assert rerank is None
+        assert rerank_candidate_limit == 50
+        assert exploratory_threshold == 0.35
         return {
             "dataset_name": "smoke",
             "case_count": 1,

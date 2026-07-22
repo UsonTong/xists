@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Callable
 from functools import lru_cache
+from time import perf_counter
 from typing import Any
 
 import numpy as np
@@ -12,9 +14,12 @@ import numpy as np
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingConfig, EmbeddingError, call_embeddings, embed_query
 from xists.search.index import decode_vector
+from xists.search.rerank import rerank_text_from_entry
 
 HIGH_CONFIDENCE_THRESHOLD = 0.60
 EXPLORATORY_THRESHOLD = 0.35
+RANKING_STRATEGIES = ("metadata", "semantic", "rerank")
+RERANK_FUSION_RANK_CONSTANT = 60
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*")
 
 GENERIC_TERMS = {
@@ -114,10 +119,12 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return float(dot / (math.sqrt(norm_a) * math.sqrt(norm_b)))
 
 
-def confidence_bucket(score: float) -> str:
+def confidence_bucket(score: float, *, exploratory_threshold: float = EXPLORATORY_THRESHOLD) -> str:
+    if not 0.0 <= exploratory_threshold <= 1.0:
+        raise ValueError("exploratory threshold must be between 0 and 1")
     if score >= HIGH_CONFIDENCE_THRESHOLD:
         return "high_confidence"
-    if score >= EXPLORATORY_THRESHOLD:
+    if score >= exploratory_threshold:
         return "exploratory"
     return "abstain"
 
@@ -435,17 +442,23 @@ def _score_breakdown(*, semantic_score: float, metadata_score: float, final_scor
     }
 
 
-def _result_from_score(query: str, entry: dict[str, Any], semantic_score: float) -> dict[str, Any]:
+def _result_from_score(
+    query: str,
+    entry: dict[str, Any],
+    semantic_score: float,
+    *,
+    exploratory_threshold: float = EXPLORATORY_THRESHOLD,
+) -> dict[str, Any]:
     metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
     adjustment = _metadata_adjustment(query, entry, semantic_score)
     metadata_score = float(adjustment["adjustment"])
     final_score = semantic_score + metadata_score
     if adjustment["exact_identity"]:
         confidence = "high_confidence"
-    elif semantic_score < EXPLORATORY_THRESHOLD:
+    elif semantic_score < exploratory_threshold:
         confidence = "abstain"
     else:
-        confidence = confidence_bucket(final_score)
+        confidence = confidence_bucket(final_score, exploratory_threshold=exploratory_threshold)
     return {
         "repo_id": entry.get("repo_id"),
         "url": metadata.get("url"),
@@ -465,8 +478,17 @@ def _result_from_score(query: str, entry: dict[str, Any], semantic_score: float)
     }
 
 
-def _rank_scored_entries(query: str, scored_entries: list[tuple[dict[str, Any], float]], top_k: int) -> list[dict[str, Any]]:
-    results = [_result_from_score(query, entry, score) for entry, score in scored_entries]
+def _rank_scored_entries(
+    query: str,
+    scored_entries: list[tuple[dict[str, Any], float]],
+    top_k: int,
+    *,
+    exploratory_threshold: float = EXPLORATORY_THRESHOLD,
+) -> list[dict[str, Any]]:
+    results = [
+        _result_from_score(query, entry, score, exploratory_threshold=exploratory_threshold)
+        for entry, score in scored_entries
+    ]
     results.sort(
         key=lambda item: (
             1 if item.get("_identity_pin") else 0,
@@ -482,6 +504,113 @@ def _rank_scored_entries(query: str, scored_entries: list[tuple[dict[str, Any], 
         if item.get("url") is None:
             item.pop("url", None)
     return presented
+
+
+def _semantic_result(
+    entry: dict[str, Any],
+    semantic_score: float,
+    *,
+    exploratory_threshold: float,
+) -> dict[str, Any]:
+    metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+    confidence = confidence_bucket(semantic_score, exploratory_threshold=exploratory_threshold)
+    return {
+        "repo_id": entry.get("repo_id"),
+        "url": metadata.get("url"),
+        "score": semantic_score,
+        "semantic_score": semantic_score,
+        "metadata_score": 0.0,
+        "confidence": confidence,
+        "score_breakdown": _score_breakdown(
+            semantic_score=semantic_score,
+            metadata_score=0.0,
+            final_score=semantic_score,
+        ),
+        "matched_terms": [],
+        "diagnostics": {"identity_match": None},
+        "why": ["ranked by semantic similarity"],
+        "_identity_pin": False,
+    }
+
+
+def _present_ranked_results(results: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
+    presented = [item for item in results if item["confidence"] != "abstain"][: max(top_k, 0)]
+    for item in presented:
+        item.pop("_identity_pin", None)
+        if item.get("url") is None:
+            item.pop("url", None)
+    return presented
+
+
+def _rank_semantic_entries(
+    scored_entries: list[tuple[dict[str, Any], float]],
+    top_k: int,
+    *,
+    exploratory_threshold: float,
+) -> list[dict[str, Any]]:
+    results = [
+        _semantic_result(entry, score, exploratory_threshold=exploratory_threshold)
+        for entry, score in scored_entries
+    ]
+    results.sort(key=lambda item: (item["score"], str(item.get("repo_id") or "")), reverse=True)
+    return _present_ranked_results(results, top_k)
+
+
+def _rank_reranked_entries(
+    query: str,
+    scored_entries: list[tuple[dict[str, Any], float]],
+    top_k: int,
+    *,
+    rerank: Callable[[str, list[str]], list[float]],
+    candidate_limit: int,
+    exploratory_threshold: float,
+) -> list[dict[str, Any]]:
+    if candidate_limit < 1:
+        raise ValueError("rerank candidate limit must be at least 1")
+    identity_entries = [item for item in scored_entries if _exact_identity_match(query, item[0])]
+    identity_ids = {str(entry.get("repo_id") or "") for entry, _ in identity_entries}
+    candidates = sorted(scored_entries, key=lambda item: item[1], reverse=True)
+    candidates = [item for item in candidates if str(item[0].get("repo_id") or "") not in identity_ids][:candidate_limit]
+    rerank_scores = rerank(query, [rerank_text_from_entry(entry) for entry, _ in candidates])
+    if len(rerank_scores) != len(candidates):
+        raise ValueError(f"reranker returned {len(rerank_scores)} scores for {len(candidates)} candidates")
+    rerank_order = sorted(range(len(candidates)), key=lambda position: (rerank_scores[position], -position), reverse=True)
+    rerank_ranks = {position: rank for rank, position in enumerate(rerank_order, start=1)}
+    results = [
+        _result_from_score(query, entry, score, exploratory_threshold=exploratory_threshold)
+        for entry, score in identity_entries
+    ]
+    for semantic_rank, ((entry, semantic_score), rerank_score) in enumerate(zip(candidates, rerank_scores), start=1):
+        rerank_rank = rerank_ranks[semantic_rank - 1]
+        fusion_score = (
+            1.0 / (RERANK_FUSION_RANK_CONSTANT + semantic_rank)
+            + 1.0 / (RERANK_FUSION_RANK_CONSTANT + rerank_rank)
+        )
+        result = _semantic_result(entry, semantic_score, exploratory_threshold=exploratory_threshold)
+        result["score"] = fusion_score
+        result["rerank_score"] = float(rerank_score)
+        result["score_breakdown"] = _score_breakdown(
+            semantic_score=semantic_score,
+            metadata_score=0.0,
+            final_score=fusion_score,
+        )
+        result["ranking_evidence"] = {
+            "semantic_rank": semantic_rank,
+            "rerank_rank": rerank_rank,
+            "fusion": "reciprocal_rank",
+        }
+        result["why"] = ["ranked by fused embedding recall and cross-encoder relevance"]
+        results.append(result)
+    results.sort(
+        key=lambda item: (
+            1 if item.get("_identity_pin") else 0,
+            item["score"],
+            item["semantic_score"],
+            str(item.get("repo_id") or ""),
+        ),
+        reverse=True,
+    )
+    return _present_ranked_results(results, top_k)
 
 
 def ensure_index_matches_model(index: dict[str, Any], config: EmbeddingConfig) -> None:
@@ -530,10 +659,20 @@ def rank_many(
     top_k: int = 10,
     batch_size: int = 64,
     embed_many: Any = call_embeddings,
+    ranking_strategy: str = "metadata",
+    rerank: Callable[[str, list[str]], list[float]] | None = None,
+    rerank_candidate_limit: int = 50,
+    exploratory_threshold: float = EXPLORATORY_THRESHOLD,
 ) -> list[dict[str, Any]]:
     """Rank multiple queries with batched embeddings and matrix similarity."""
 
     ensure_index_matches_model(index, config)
+    if ranking_strategy not in RANKING_STRATEGIES:
+        raise ValueError(f"Unknown ranking strategy: {ranking_strategy}")
+    if ranking_strategy == "rerank" and rerank is None:
+        raise ValueError("A reranker is required when ranking_strategy is rerank")
+    if not 0.0 <= exploratory_threshold <= 1.0:
+        raise ValueError("exploratory threshold must be between 0 and 1")
     if not queries:
         return []
 
@@ -548,7 +687,11 @@ def rank_many(
 
     query_vectors: list[list[float]] = []
     for start in range(0, len(queries), batch_size):
-        query_vectors.extend(embed_many(config, queries[start : start + batch_size]))
+        batch = queries[start : start + batch_size]
+        if embed_many is call_embeddings:
+            query_vectors.extend(embed_many(config, batch, input_type="query"))
+        else:
+            query_vectors.extend(embed_many(config, batch))
     if len(query_vectors) != len(queries):
         raise EmbeddingError(f"Embedding count mismatch: sent {len(queries)}, received {len(query_vectors)}")
     if dimension is not None and any(len(vector) != dimension for vector in query_vectors):
@@ -568,11 +711,25 @@ def rank_many(
     scores = query_matrix @ index_matrix.T
     ranked: list[dict[str, Any]] = []
     for row, query in enumerate(queries):
+        started = perf_counter()
         scored_entries = [(entry, float(scores[row, column])) for column, entry in enumerate(entries)]
-        results = _rank_scored_entries(query, scored_entries, top_k)
+        if ranking_strategy == "semantic":
+            results = _rank_semantic_entries(scored_entries, top_k, exploratory_threshold=exploratory_threshold)
+        elif ranking_strategy == "rerank":
+            results = _rank_reranked_entries(
+                query,
+                scored_entries,
+                top_k,
+                rerank=rerank,
+                candidate_limit=rerank_candidate_limit,
+                exploratory_threshold=exploratory_threshold,
+            )
+        else:
+            results = _rank_scored_entries(query, scored_entries, top_k, exploratory_threshold=exploratory_threshold)
         ranked.append(
             {
                 "query": query,
+                "latency_ms": round((perf_counter() - started) * 1000, 3),
                 "query_intent": _query_intent(query),
                 "abstained": len(results) == 0,
                 "results": results,
@@ -589,10 +746,19 @@ def rank(
     *,
     top_k: int = 10,
     embed: Any = embed_query,
+    ranking_strategy: str = "metadata",
+    rerank: Callable[[str, list[str]], list[float]] | None = None,
+    rerank_candidate_limit: int = 50,
+    exploratory_threshold: float = EXPLORATORY_THRESHOLD,
 ) -> dict[str, Any]:
     """Rank index entries against the query."""
 
+    started = perf_counter()
     ensure_index_matches_model(index, config)
+    if ranking_strategy not in RANKING_STRATEGIES:
+        raise ValueError(f"Unknown ranking strategy: {ranking_strategy}")
+    if not 0.0 <= exploratory_threshold <= 1.0:
+        raise ValueError("exploratory threshold must be between 0 and 1")
     query_vector = embed(config, query)
     dimension = index.get("dimension")
     if dimension is not None and len(query_vector) != dimension:
@@ -613,9 +779,24 @@ def rank(
         for entry, vector in zip(entries, vectors)
         if vector is not None
     ]
-    results = _rank_scored_entries(query, scored_entries, top_k)
+    if ranking_strategy == "semantic":
+        results = _rank_semantic_entries(scored_entries, top_k, exploratory_threshold=exploratory_threshold)
+    elif ranking_strategy == "rerank":
+        if rerank is None:
+            raise ValueError("A reranker is required when ranking_strategy is rerank")
+        results = _rank_reranked_entries(
+            query,
+            scored_entries,
+            top_k,
+            rerank=rerank,
+            candidate_limit=rerank_candidate_limit,
+            exploratory_threshold=exploratory_threshold,
+        )
+    else:
+        results = _rank_scored_entries(query, scored_entries, top_k, exploratory_threshold=exploratory_threshold)
     return {
         "query": query,
+        "latency_ms": round((perf_counter() - started) * 1000, 3),
         "query_intent": _query_intent(query),
         "abstained": len(results) == 0,
         "results": results,

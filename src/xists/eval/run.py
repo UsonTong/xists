@@ -57,6 +57,10 @@ def evaluate_dataset(
     llm_judge_config: LLMConfig | None = None,
     records_path: Path | None = None,
     judge_caller: Any | None = None,
+    ranking_strategy: str = "metadata",
+    rerank: Any | None = None,
+    rerank_candidate_limit: int = 50,
+    exploratory_threshold: float = 0.35,
 ) -> dict[str, Any]:
     started_at = datetime.now(timezone.utc)
     started_clock = perf_counter()
@@ -72,7 +76,17 @@ def evaluate_dataset(
     queries = [case["query"] for case in dataset["cases"]]
     rank_many_fn = embed_many if embed_many is not None else rank_many
     if rank_many_fn is rank_many:
-        ranked = rank_many_fn(queries, index, config, top_k=top_k, batch_size=batch_size)
+        ranked = rank_many_fn(
+            queries,
+            index,
+            config,
+            top_k=top_k,
+            batch_size=batch_size,
+            ranking_strategy=ranking_strategy,
+            rerank=rerank,
+            rerank_candidate_limit=rerank_candidate_limit,
+            exploratory_threshold=exploratory_threshold,
+        )
     else:
         ranked = rank_many_fn(queries, index, config, top_k=top_k, batch_size=batch_size)
 
@@ -122,6 +136,8 @@ def evaluate_dataset(
         top_result_diagnostics = top_result.get("diagnostics") if top_result else None
         top_result_matched_terms = top_result.get("matched_terms") if top_result else None
         top_result_score_breakdown = top_result.get("score_breakdown") if top_result else None
+        top_result_rerank_score = top_result.get("rerank_score") if top_result else None
+        top_result_ranking_evidence = top_result.get("ranking_evidence") if top_result else None
         exact_match = top_result_repo_id == expected_repo_id
         acceptable_match = top_result_repo_id in acceptable_set if top_result_repo_id else False
 
@@ -191,6 +207,7 @@ def evaluate_dataset(
             {
                 "id": case["id"],
                 "query": case["query"],
+                "latency_ms": result.get("latency_ms"),
                 "query_intent": result.get("query_intent"),
                 "tags": case["tags"],
                 "abstained": bool(result.get("abstained")),
@@ -200,6 +217,16 @@ def evaluate_dataset(
                 "top_result_diagnostics": top_result_diagnostics if isinstance(top_result_diagnostics, dict) else {},
                 "top_result_matched_terms": top_result_matched_terms if isinstance(top_result_matched_terms, list) else [],
                 "top_result_score_breakdown": top_result_score_breakdown if isinstance(top_result_score_breakdown, dict) else {},
+                "top_result_rerank_score": (
+                    float(top_result_rerank_score)
+                    if isinstance(top_result_rerank_score, (int, float))
+                    else None
+                ),
+                "top_result_ranking_evidence": (
+                    top_result_ranking_evidence
+                    if isinstance(top_result_ranking_evidence, dict)
+                    else {}
+                ),
                 "exact_match": exact_match,
                 "acceptable_match": acceptable_match,
                 "exact_rank": exact_rank,
@@ -278,6 +305,9 @@ def evaluate_dataset(
         "index": str(index_path),
         "top_k": top_k,
         "batch_size": batch_size,
+        "ranking_strategy": ranking_strategy,
+        "rerank_candidate_limit": rerank_candidate_limit if ranking_strategy == "rerank" else None,
+        "exploratory_threshold": exploratory_threshold,
         "case_count": case_count,
         "metrics": metrics,
         "confidence": {

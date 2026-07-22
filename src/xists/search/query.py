@@ -11,6 +11,7 @@ import numpy as np
 
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingConfig, EmbeddingError, call_embeddings, embed_query
+from xists.search.index import decode_vector
 
 HIGH_CONFIDENCE_THRESHOLD = 0.60
 EXPLORATORY_THRESHOLD = 0.35
@@ -511,7 +512,7 @@ def ensure_index_matches_model(index: dict[str, Any], config: EmbeddingConfig) -
         )
 
 
-def _normalized_matrix(vectors: list[list[float]]) -> np.ndarray:
+def _normalized_matrix(vectors: list[Any]) -> np.ndarray:
     matrix = np.asarray(vectors, dtype=np.float32)
     if matrix.ndim != 2:
         raise IndexMismatchError("Index vectors must be a two-dimensional matrix")
@@ -534,12 +535,12 @@ def rank_many(
     if not queries:
         return []
 
-    entries = index.get("vectors", [])
-    vectors = [entry["vector"] for entry in entries]
+    entries = [entry for entry in index.get("vectors", []) if isinstance(entry, dict)]
     dimension = index.get("dimension")
-    if dimension is not None and any(len(vector) != dimension for vector in vectors):
+    vectors = [decode_vector(entry.get("vector"), dimension=dimension) for entry in entries]
+    if any(vector is None for vector in vectors):
         raise IndexMismatchError(
-            f"Index contains vectors that do not match its dimension {dimension}. "
+            f"Index contains invalid vectors that do not match its dimension {dimension}. "
             "Rebuild the index with xists index build."
         )
 
@@ -560,7 +561,7 @@ def rank_many(
             for query in queries
         ]
 
-    index_matrix = _normalized_matrix(vectors)
+    index_matrix = _normalized_matrix([vector for vector in vectors if vector is not None])
     query_matrix = _normalized_matrix(query_vectors)
     scores = query_matrix @ index_matrix.T
     ranked: list[dict[str, Any]] = []
@@ -598,8 +599,18 @@ def rank(
             f"dimension {dimension}. Rebuild the index or check the model."
         )
 
-    entries = index.get("vectors", [])
-    scored_entries = [(entry, cosine_similarity(query_vector, entry["vector"])) for entry in entries]
+    entries = [entry for entry in index.get("vectors", []) if isinstance(entry, dict)]
+    vectors = [decode_vector(entry.get("vector"), dimension=dimension) for entry in entries]
+    if any(vector is None for vector in vectors):
+        raise IndexMismatchError(
+            f"Index contains invalid vectors that do not match its dimension {dimension}. "
+            "Rebuild the index with xists index build."
+        )
+    scored_entries = [
+        (entry, cosine_similarity(query_vector, vector))
+        for entry, vector in zip(entries, vectors)
+        if vector is not None
+    ]
     results = _rank_scored_entries(query, scored_entries, top_k)
     return {
         "query": query,

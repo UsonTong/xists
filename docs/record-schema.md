@@ -395,7 +395,7 @@ fingerprint of the exact embedding input text used to generate the vector:
 
 ```json
 {
-  "index_version": 1,
+  "index_version": 3,
   "record_schema_version": 2,
   "embedding_model": "BAAI/bge-m3",
   "embedding_input_version": 3,
@@ -413,7 +413,7 @@ fingerprint of the exact embedding input text used to generate the vector:
         "ecosystem": ["javascript", "web"],
         "search_text": "JavaScript UI library for building component-based web interfaces..."
       },
-      "vector": [0.01, -0.02]
+      "vector": "base64-float32..."
     }
   ]
 }
@@ -424,3 +424,7 @@ text produced by `embedding_text_from_record()`. During incremental index builds
 xists reuses an existing vector only when the repo id, embedding model, vector
 dimension, and embedding input fingerprint still match. Older indexes without
 fingerprints are treated as stale and re-embedded.
+
+Version 3 stores every vector as little-endian float32 bytes encoded with
+base64. Readers remain compatible with older indexes whose vectors are JSON
+number arrays.

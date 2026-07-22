@@ -52,6 +52,29 @@ def test_transform_queries_rejects_invalid_response_shape():
         )
 
 
+def test_transform_queries_accepts_a_non_json_prefix_before_the_json_object():
+    config = QueryTransformConfig(api_key="key", base_url="https://example.test/v1", model="test-model")
+
+    transformed = transform_queries(
+        config,
+        ["一个查询"],
+        caller=lambda *args, **kwargs: LLMResponse(content='We{"queries": ["one query"]}'),
+    )
+
+    assert transformed == ["one query"]
+
+
+def test_transform_queries_rejects_non_whitespace_after_the_json_object():
+    config = QueryTransformConfig(api_key="key", base_url="https://example.test/v1", model="test-model")
+
+    with pytest.raises(QueryTransformError, match="exactly one JSON object"):
+        transform_queries(
+            config,
+            ["一个查询"],
+            caller=lambda *args, **kwargs: LLMResponse(content='{"queries": ["one query"]} extra'),
+        )
+
+
 def test_transform_queries_uses_small_ordered_batches():
     config = QueryTransformConfig(api_key="key", base_url="https://example.test/v1", model="test-model")
     requests = []

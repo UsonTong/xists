@@ -2517,7 +2517,42 @@ def test_index_build_checkpoint_saves_partial_on_crash(tmp_path, monkeypatch):
         code = index_build(args)
 
     assert code == 1
-    # First batch (64 records) should be saved even though second batch crashed.
-    index = json.loads(output_file.read_text())
+    assert not output_file.exists()
+    checkpoint_file = Path(f"{output_file}.partial.json")
+    index = json.loads(checkpoint_file.read_text())
     assert index["record_count"] == 64
     assert len(index["vectors"]) == 64
+
+
+def test_index_build_resume_completes_partial_checkpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "local")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    records = [_make_record(f"r{i}/repo") for i in range(65)]
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps(records), encoding="utf-8")
+    output_file = tmp_path / "index.json"
+    calls = 0
+
+    def interrupted_embeddings(config, inputs, *, timeout=60):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise EmbeddingError("simulated interruption")
+        return [[float(i)] for i in range(len(inputs))]
+
+    args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file)]
+    )
+    with patch("xists.cli.call_embeddings", side_effect=interrupted_embeddings):
+        assert index_build(args) == 1
+
+    resumed_args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file), "--resume"]
+    )
+    with patch("xists.cli.call_embeddings", side_effect=lambda _config, inputs, **_kwargs: [[1.0] for _ in inputs]):
+        assert index_build(resumed_args) == 0
+
+    index = json.loads(output_file.read_text())
+    assert index["record_count"] == 65
+    assert not Path(f"{output_file}.partial.json").exists()

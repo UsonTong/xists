@@ -658,6 +658,10 @@ def _index_write_checkpoint(
     )
 
 
+def _index_checkpoint_path(output: Path) -> Path:
+    return output.with_name(f"{output.name}.partial.json")
+
+
 def index_build(args: argparse.Namespace) -> int:
     try:
         config = embedding_config_from_env()
@@ -687,14 +691,33 @@ def index_build(args: argparse.Namespace) -> int:
         return 1
     batch_size = 64
 
+    checkpoint_path = _index_checkpoint_path(args.output)
+    if args.resume and not checkpoint_path.exists():
+        print(f"Checkpoint file not found: {checkpoint_path}", file=sys.stderr)
+        return 1
+    if checkpoint_path.exists() and not args.resume:
+        print(
+            f"Checkpoint file already exists: {checkpoint_path}\n"
+            "Next steps:\n"
+            f"  1. Re-run with --resume to continue from the checkpoint\n"
+            f"  2. Delete {checkpoint_path} if you want to restart from scratch",
+            file=sys.stderr,
+        )
+        return 1
+
     # Load existing index for fingerprint-aware incremental update (skip with --force).
     vectors: list[dict[str, Any]] = []
     skipped: list[str] = []
     dimension: int | None = None
     reusable_vectors: dict[str, dict[str, Any]] = {}
 
-    if not args.force and args.output.exists():
-        existing_index = json.loads(args.output.read_text(encoding="utf-8"))
+    source_index_path: Path | None = None
+    if args.resume:
+        source_index_path = checkpoint_path
+    elif not args.force and args.output.exists():
+        source_index_path = args.output
+    if source_index_path is not None:
+        existing_index = json.loads(source_index_path.read_text(encoding="utf-8"))
         if existing_index.get("embedding_model") and existing_index["embedding_model"] != config.model:
             print(
                 f"Index was built with model '{existing_index['embedding_model']}' "
@@ -769,9 +792,9 @@ def index_build(args: argparse.Namespace) -> int:
             )
             new_count += 1
 
-        # Checkpoint: write after each batch.
+        # Keep interrupted builds separate from the last known-good index.
         _index_write_checkpoint(
-            args.output,
+            checkpoint_path,
             index_version=INDEX_VERSION,
             record_schema_version=RECORD_SCHEMA_VERSION,
             embedding_model=config.model,
@@ -783,19 +806,20 @@ def index_build(args: argparse.Namespace) -> int:
             vectors=vectors,
         )
 
-    if not embeddable:
-        _index_write_checkpoint(
-            args.output,
-            index_version=INDEX_VERSION,
-            record_schema_version=RECORD_SCHEMA_VERSION,
-            embedding_model=config.model,
-            embedding_base_url=config.base_url,
-            embedding_input_version=EMBEDDING_INPUT_VERSION,
-            dimension=dimension,
-            record_count=len(vectors),
-            skipped=skipped,
-            vectors=vectors,
-        )
+    _index_write_checkpoint(
+        args.output,
+        index_version=INDEX_VERSION,
+        record_schema_version=RECORD_SCHEMA_VERSION,
+        embedding_model=config.model,
+        embedding_base_url=config.base_url,
+        embedding_input_version=EMBEDDING_INPUT_VERSION,
+        dimension=dimension,
+        record_count=len(vectors),
+        skipped=skipped,
+        vectors=vectors,
+    )
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
 
     print(
         json.dumps(
@@ -2009,6 +2033,7 @@ def build_parser() -> argparse.ArgumentParser:
     index_build_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to index")
     index_build_parser.add_argument("--output", type=Path, default=Path("index.json"), help="Path to write the embedding index")
     index_build_parser.add_argument("--force", action="store_true", help="Ignore existing index.json and rebuild from scratch")
+    index_build_parser.add_argument("--resume", action="store_true", help="Resume from an existing partial index checkpoint")
     index_build_parser.set_defaults(func=index_build)
     index_stats_parser = index_subparsers.add_parser("stats", help="Summarize an embedding index without printing vectors")
     index_stats_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to inspect")

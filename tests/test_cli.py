@@ -2078,7 +2078,7 @@ def test_index_build_rebuilds_legacy_vectors_without_fingerprints(tmp_path, monk
         "vectors": [{"repo_id": "a/b", "vector": [1.0, 0.0, 0.0, 0.0]}],
     }), encoding="utf-8")
 
-    def fake_call_embeddings(config, inputs, *, timeout=60):
+    def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         return [[0.0, 1.0, 0.0, 0.0] for _ in inputs]
 
     args = build_parser().parse_args(
@@ -2152,7 +2152,7 @@ def test_index_build_refreshes_metadata_when_reusing_vector(tmp_path, monkeypatc
         ],
     }), encoding="utf-8")
 
-    def fake_call_embeddings(config, inputs, *, timeout=60):
+    def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         raise AssertionError("unchanged vectors should be reused without embedding calls")
 
     args = build_parser().parse_args(
@@ -2439,7 +2439,7 @@ def test_index_build_force_rebuilds_from_scratch(tmp_path, monkeypatch):
         "vectors": [{"repo_id": "a/b", "vector": [1.0, 0.0, 0.0, 0.0]}],
     }), encoding="utf-8")
 
-    def fake_call_embeddings(config, inputs, *, timeout=60):
+    def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         return [[0.0, 0.0, 1.0, 0.0] for _ in inputs]
 
     args = build_parser().parse_args(
@@ -2469,7 +2469,7 @@ def test_index_build_checkpoint_writes_after_each_batch(tmp_path, monkeypatch):
 
     output_file = tmp_path / "index.json"
 
-    def fake_call_embeddings(config, inputs, *, timeout=60):
+    def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         return [[float(i)] for i in range(len(inputs))]
 
     args = build_parser().parse_args(
@@ -2502,7 +2502,7 @@ def test_index_build_checkpoint_saves_partial_on_crash(tmp_path, monkeypatch):
 
     call_count = 0
 
-    def fake_call_embeddings(config, inputs, *, timeout=60):
+    def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         nonlocal call_count
         call_count += 1
         if call_count == 2:
@@ -2560,7 +2560,7 @@ def test_index_build_resume_completes_partial_checkpoint(tmp_path, monkeypatch):
     output_file = tmp_path / "index.json"
     calls = 0
 
-    def interrupted_embeddings(config, inputs, *, timeout=60):
+    def interrupted_embeddings(config, inputs, *, timeout=60, input_type=None):
         nonlocal calls
         calls += 1
         if calls == 2:

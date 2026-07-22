@@ -62,6 +62,7 @@ def evaluate_dataset(
     rerank_candidate_limit: int = 50,
     exploratory_threshold: float = 0.35,
     rerank_abstain_threshold: float | None = None,
+    confidence_calibration: str = "off",
     query_variants: list[list[str]] | None = None,
     rerank_queries: list[str] | None = None,
     query_transform_mode: str = "off",
@@ -92,6 +93,7 @@ def evaluate_dataset(
             rerank_candidate_limit=rerank_candidate_limit,
             exploratory_threshold=exploratory_threshold,
             rerank_abstain_threshold=rerank_abstain_threshold,
+            confidence_calibration=confidence_calibration,
             query_variants=query_variants,
             rerank_queries=rerank_queries,
         )
@@ -146,6 +148,7 @@ def evaluate_dataset(
         top_result_score_breakdown = top_result.get("score_breakdown") if top_result else None
         top_result_rerank_score = top_result.get("rerank_score") if top_result else None
         top_result_ranking_evidence = top_result.get("ranking_evidence") if top_result else None
+        top_result_confidence_evidence = top_result.get("confidence_evidence") if top_result else None
         exact_match = top_result_repo_id == expected_repo_id
         acceptable_match = top_result_repo_id in acceptable_set if top_result_repo_id else False
 
@@ -235,6 +238,11 @@ def evaluate_dataset(
                     if isinstance(top_result_ranking_evidence, dict)
                     else {}
                 ),
+                "top_result_confidence_evidence": (
+                    top_result_confidence_evidence
+                    if isinstance(top_result_confidence_evidence, dict)
+                    else {}
+                ),
                 "exact_match": exact_match,
                 "acceptable_match": acceptable_match,
                 "exact_rank": exact_rank,
@@ -317,6 +325,7 @@ def evaluate_dataset(
         "rerank_candidate_limit": rerank_candidate_limit if ranking_strategy == "rerank" else None,
         "exploratory_threshold": exploratory_threshold,
         "rerank_abstain_threshold": rerank_abstain_threshold if ranking_strategy == "rerank" else None,
+        "confidence_calibration": confidence_calibration,
         "query_transform_mode": query_transform_mode,
         "query_transform_model": query_transform_model,
         "case_count": case_count,

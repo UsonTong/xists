@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from xists.records import RECORD_SCHEMA_VERSION
+from xists.search.confidence import CONFIDENCE_CALIBRATION_MODES, calibrate_confidence
 from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingConfig, EmbeddingError, call_embeddings, embed_query
 from xists.search.index import decode_vector
 from xists.search.rerank import rerank_text_from_entry
@@ -274,13 +275,13 @@ def _identity_variants(entry: dict[str, Any]) -> set[str]:
     return {variant for variant in variants if variant}
 
 
-def _exact_identity_match(query: str, entry: dict[str, Any]) -> bool:
+def _identity_match_kind(query: str, entry: dict[str, Any]) -> str:
     raw_query = query.strip().lower()
     repo_id = str(entry.get("repo_id") or "").strip().lower()
     if repo_id and repo_id in raw_query:
-        return True
+        return "repo_id"
     if raw_query in {value.strip().lower() for value in _identity_values(entry)}:
-        return True
+        return "exact_value"
     # ASCII tokenization cannot safely represent mixed CJK natural-language queries.
     if any(0x3400 <= ord(char) <= 0x9FFF for char in query):
         metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
@@ -288,9 +289,15 @@ def _exact_identity_match(query: str, entry: dict[str, Any]) -> bool:
         for value in values:
             normalized = value.strip().lower()
             if len(normalized) >= 3 and normalized not in LANGUAGE_TERMS and normalized in raw_query:
-                return True
-        return False
-    return bool(_query_variants(query) & _identity_variants(entry))
+                return "contextual_name_mention"
+        return "none"
+    if _query_variants(query) & _identity_variants(entry):
+        return "name_mention"
+    return "none"
+
+
+def _exact_identity_match(query: str, entry: dict[str, Any]) -> bool:
+    return _identity_match_kind(query, entry) != "none"
 
 
 def _metadata_text(metadata: dict[str, Any]) -> str:
@@ -369,7 +376,8 @@ def _metadata_adjustment(query: str, entry: dict[str, Any], semantic_score: floa
     }
     profile_tokens = _expanded_token_set(profile_tokens)
 
-    exact_identity = _exact_identity_match(query, entry)
+    identity_kind = _identity_match_kind(query, entry)
+    exact_identity = identity_kind != "none"
     matched_terms = sorted(token for token in keyword_tokens if _expanded_token(token) & text_tokens)
     topic_matches = sorted(token for token in keyword_tokens if _expanded_token(token) & topic_tokens)
     profile_matches = sorted(token for token in keyword_tokens if _expanded_token(token) & profile_tokens)
@@ -423,6 +431,7 @@ def _metadata_adjustment(query: str, entry: dict[str, Any], semantic_score: floa
         "matched_terms": matched_terms,
         "diagnostics": {
             "identity_match": "exact" if exact_identity else None,
+            "identity_evidence": {"kind": identity_kind},
             "language_match": language_match,
             "language_mismatch": language_mismatch,
             "topic_matches": topic_matches,
@@ -527,7 +536,7 @@ def _semantic_result(
             final_score=semantic_score,
         ),
         "matched_terms": [],
-        "diagnostics": {"identity_match": None},
+        "diagnostics": {"identity_match": None, "identity_evidence": {"kind": "none"}},
         "why": ["ranked by semantic similarity"],
         "_identity_pin": False,
     }
@@ -566,6 +575,7 @@ def _rank_reranked_entries(
     candidate_limit: int,
     exploratory_threshold: float,
     rerank_abstain_threshold: float | None,
+    confidence_calibration: str,
 ) -> list[dict[str, Any]]:
     if candidate_limit < 1:
         raise ValueError("rerank candidate limit must be at least 1")
@@ -616,7 +626,11 @@ def _rank_reranked_entries(
         top_rerank_score = results[0].get("rerank_score")
         if isinstance(top_rerank_score, (int, float)) and top_rerank_score <= rerank_abstain_threshold:
             return []
-    return _present_ranked_results(results, top_k)
+    return calibrate_confidence(
+        _present_ranked_results(results, top_k),
+        ranking_strategy="rerank",
+        mode=confidence_calibration,
+    )
 
 
 def ensure_index_matches_model(index: dict[str, Any], config: EmbeddingConfig) -> None:
@@ -670,6 +684,7 @@ def rank_many(
     rerank_candidate_limit: int = 50,
     exploratory_threshold: float = EXPLORATORY_THRESHOLD,
     rerank_abstain_threshold: float | None = None,
+    confidence_calibration: str = "off",
     query_variants: list[list[str]] | None = None,
     rerank_queries: list[str] | None = None,
 ) -> list[dict[str, Any]]:
@@ -682,6 +697,8 @@ def rank_many(
         raise ValueError("A reranker is required when ranking_strategy is rerank")
     if not 0.0 <= exploratory_threshold <= 1.0:
         raise ValueError("exploratory threshold must be between 0 and 1")
+    if confidence_calibration not in CONFIDENCE_CALIBRATION_MODES:
+        raise ValueError(f"Unknown confidence calibration mode: {confidence_calibration}")
     if not queries:
         return []
     if query_variants is None:
@@ -747,6 +764,7 @@ def rank_many(
                 candidate_limit=rerank_candidate_limit,
                 exploratory_threshold=exploratory_threshold,
                 rerank_abstain_threshold=rerank_abstain_threshold,
+                confidence_calibration=confidence_calibration,
             )
         else:
             results = _rank_scored_entries(query, scored_entries, top_k, exploratory_threshold=exploratory_threshold)
@@ -776,6 +794,7 @@ def rank(
     rerank_candidate_limit: int = 50,
     exploratory_threshold: float = EXPLORATORY_THRESHOLD,
     rerank_abstain_threshold: float | None = None,
+    confidence_calibration: str = "off",
     query_variants: list[str] | None = None,
     rerank_query: str | None = None,
 ) -> dict[str, Any]:
@@ -787,6 +806,8 @@ def rank(
         raise ValueError(f"Unknown ranking strategy: {ranking_strategy}")
     if not 0.0 <= exploratory_threshold <= 1.0:
         raise ValueError("exploratory threshold must be between 0 and 1")
+    if confidence_calibration not in CONFIDENCE_CALIBRATION_MODES:
+        raise ValueError(f"Unknown confidence calibration mode: {confidence_calibration}")
     if query_variants is None:
         query_variants = [query]
     if not query_variants:
@@ -827,6 +848,7 @@ def rank(
             candidate_limit=rerank_candidate_limit,
             exploratory_threshold=exploratory_threshold,
             rerank_abstain_threshold=rerank_abstain_threshold,
+            confidence_calibration=confidence_calibration,
         )
     else:
         results = _rank_scored_entries(query, scored_entries, top_k, exploratory_threshold=exploratory_threshold)

@@ -467,10 +467,11 @@ def test_eval_run_writes_report(tmp_path, monkeypatch):
         records_path=None,
         judge_caller=None,
         ranking_strategy="metadata",
-            rerank=None,
-            rerank_candidate_limit=50,
-            exploratory_threshold=0.35,
-            rerank_abstain_threshold=None,
+        rerank=None,
+        rerank_candidate_limit=50,
+        exploratory_threshold=0.35,
+        rerank_abstain_threshold=None,
+        confidence_calibration="off",
     ):
         assert cases == cases_file
         assert index == index_file
@@ -484,6 +485,7 @@ def test_eval_run_writes_report(tmp_path, monkeypatch):
         assert rerank_candidate_limit == 50
         assert exploratory_threshold == 0.35
         assert rerank_abstain_threshold is None
+        assert confidence_calibration == "off"
         return {
             "dataset_name": "smoke",
             "case_count": 1,

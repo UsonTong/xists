@@ -24,6 +24,7 @@ from xists.search.query import (
     rank,
     rank_many,
 )
+from xists.search.confidence import calibrate_confidence
 
 CONFIG = EmbeddingConfig(api_key="k", base_url="http://localhost/v1", model="bge-m3")
 
@@ -520,6 +521,121 @@ def test_rerank_strategy_fuses_semantic_recall_and_generic_rerank_evidence():
         "fusion": "reciprocal_rank",
     }
     assert calls == [("general query", ["first/repo\nFirst candidate", "second/repo\nSecond candidate"])]
+
+
+def test_evidence_calibration_keeps_agreeing_rerank_winner_high_confidence():
+    index = make_index(
+        [
+            {"repo_id": "first/repo", "vector": [1.0, 0.0], "metadata": {}},
+            {"repo_id": "second/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+
+    result = rank(
+        "general query",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda _config, _query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=lambda _query, _documents: [0.9, 0.1],
+        rerank_candidate_limit=2,
+        confidence_calibration="evidence-v1",
+    )
+
+    top = result["results"][0]
+    assert top["confidence"] == "high_confidence"
+    assert top["confidence_evidence"]["supporting_signals"] == ["semantic_and_rerank_agree"]
+    assert top["confidence_evidence"]["downgrade_reasons"] == []
+
+
+def test_evidence_calibration_downgrades_conflicting_rerank_without_reordering():
+    index = make_index(
+        [
+            {"repo_id": "first/repo", "vector": [1.0, 0.0], "metadata": {}},
+            {"repo_id": "second/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+    kwargs = {
+        "top_k": 2,
+        "embed": lambda _config, _query: [1.0, 0.0],
+        "ranking_strategy": "rerank",
+        "rerank": lambda _query, _documents: [0.1, 0.9],
+        "rerank_candidate_limit": 2,
+    }
+
+    baseline = rank("general query", index, CONFIG, **kwargs)
+    calibrated = rank("general query", index, CONFIG, confidence_calibration="evidence-v1", **kwargs)
+
+    assert [item["repo_id"] for item in calibrated["results"]] == [
+        item["repo_id"] for item in baseline["results"]
+    ]
+    assert calibrated["abstained"] is baseline["abstained"] is False
+    assert baseline["results"][0]["confidence"] == "high_confidence"
+    assert calibrated["results"][0]["confidence"] == "exploratory"
+    assert set(calibrated["results"][0]["confidence_evidence"]["downgrade_reasons"]) == {
+        "semantic_and_rerank_disagree",
+        "top_candidate_not_separated",
+    }
+
+
+def test_evidence_calibration_downgrades_high_confidence_without_reranker_evidence():
+    result = {"confidence": "high_confidence", "diagnostics": {"identity_evidence": {"kind": "none"}}}
+
+    calibrated = calibrate_confidence([result], ranking_strategy="rerank", mode="evidence-v1")
+
+    assert calibrated == [result]
+    assert result["confidence"] == "exploratory"
+    assert result["confidence_evidence"]["downgrade_reasons"] == ["reranker_evidence_unavailable"]
+
+
+def test_evidence_calibration_downgrades_contextual_identity_without_reordering():
+    index = make_index(
+        [
+            {"repo_id": "nodejs/node", "vector": [1.0, 0.0], "metadata": {"name": "node"}},
+            {"repo_id": "other/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+    kwargs = {
+        "top_k": 2,
+        "embed": lambda _config, _query: [1.0, 0.0],
+        "ranking_strategy": "rerank",
+        "rerank": lambda _query, _documents: [0.1],
+        "rerank_candidate_limit": 2,
+    }
+
+    baseline = rank("Node Web 框架", index, CONFIG, **kwargs)
+    calibrated = rank("Node Web 框架", index, CONFIG, confidence_calibration="evidence-v1", **kwargs)
+
+    assert [item["repo_id"] for item in calibrated["results"]] == [
+        item["repo_id"] for item in baseline["results"]
+    ]
+    assert calibrated["results"][0]["confidence"] == "exploratory"
+    assert calibrated["results"][0]["confidence_evidence"]["identity_evidence"] == "contextual_name_mention"
+
+
+def test_evidence_calibration_preserves_direct_repository_identity():
+    index = make_index(
+        [
+            {"repo_id": "nodejs/node", "vector": [1.0, 0.0], "metadata": {"name": "node"}},
+            {"repo_id": "other/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+
+    result = rank(
+        "nodejs/node",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda _config, _query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=lambda _query, _documents: [0.1],
+        rerank_candidate_limit=2,
+        confidence_calibration="evidence-v1",
+    )
+
+    assert result["results"][0]["confidence"] == "high_confidence"
+    assert result["results"][0]["confidence_evidence"]["identity_evidence"] == "repo_id"
 
 
 def test_rerank_strategy_requires_a_reranker():

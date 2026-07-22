@@ -399,6 +399,21 @@ JSON output exposes the same ranking data for automation:
 
 Weak semantic matches stay hidden unless they are exact identity matches; metadata should help close calls, not replace semantic relevance.
 
+#### Evidence-based confidence calibration
+
+`--confidence-calibration evidence-v1` is an opt-in post-ranking experiment for
+reranked searches. It preserves the candidate list, ordering, and abstention
+decision, but downgrades a `high_confidence` result to `exploratory` when the
+available evidence is contradictory or incomplete. The result includes
+`confidence_evidence` with the calibration version, ranking evidence, supporting
+signals, and any downgrade reasons. Evaluation reports record the selected mode
+and preserve the top result's evidence for reproducible analysis.
+
+```bash
+xists eval run --cases eval-cases.json --index index.json --output eval-calibrated.json \
+  --ranking-strategy rerank --confidence-calibration evidence-v1
+```
+
 #### English canonical queries
 
 For an English-dominant corpus, an optional compatible chat endpoint can turn a query into a concise English retrieval expression while preserving technical identifiers. The original query remains available for exact repository identity matching. `canonical` embeds only the canonical expression; `merge` embeds both expressions and keeps the stronger similarity for each candidate.
@@ -417,6 +432,7 @@ This is disabled by default. It requires `QUERY_TRANSFORM_API_KEY`, `QUERY_TRANS
 | `--index` | `index.json` | Index file to search |
 | `--top-k` | `10` | Maximum results to return |
 | `--query-transform-mode` | `off` | `off`, English `canonical`, or original-plus-canonical `merge` retrieval |
+| `--confidence-calibration` | `off` | `off` or post-ranking `evidence-v1` confidence calibration |
 | `--format` | `text` | Output format: `text` for terminal review, or `json` for scripts and agents |
 
 ### Step 4: Evaluate retrieval quality

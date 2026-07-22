@@ -163,6 +163,11 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
                         "score_breakdown": {"semantic": 0.7, "metadata": 0.1, "final": 0.8},
                         "rerank_score": 2.4,
                         "ranking_evidence": {"semantic_rank": 1, "rerank_rank": 2},
+                        "confidence_evidence": {
+                            "version": "evidence-v1",
+                            "mode": "evidence-v1",
+                            "downgrade_reasons": [],
+                        },
                         "diagnostics": {
                             "query_terms": ["frontend"],
                             "matched_terms": ["frontend"],
@@ -268,6 +273,12 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
         "semantic_rank": 1,
         "rerank_rank": 2,
     }
+    assert report["results"][0]["top_result_confidence_evidence"] == {
+        "version": "evidence-v1",
+        "mode": "evidence-v1",
+        "downgrade_reasons": [],
+    }
+    assert report["confidence_calibration"] == "off"
     assert report["results"][0]["top1_status"] == "exact"
     assert report["results"][1]["top1_status"] == "acceptable"
     assert report["results"][1]["exact_match"] is False

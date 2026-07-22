@@ -54,6 +54,7 @@ from xists.search.embed import (
     probe_embedding_endpoint,
 )
 from xists.search.index import INDEX_VERSION, decode_vector, encode_vector, entry_metadata, load_index
+from xists.search.confidence import CONFIDENCE_CALIBRATION_MODES
 from xists.search.query import RANKING_STRATEGIES, IndexMismatchError, _query_intent, rank
 from xists.search.rerank import (
     RerankerError,
@@ -943,6 +944,7 @@ def search(args: argparse.Namespace) -> int:
             rerank_candidate_limit=args.rerank_candidates,
             exploratory_threshold=args.exploratory_threshold,
             rerank_abstain_threshold=args.rerank_abstain_threshold,
+            confidence_calibration=args.confidence_calibration,
             **rank_kwargs,
         )
     except IndexMismatchError as error:
@@ -2017,6 +2019,7 @@ def eval_run(args: argparse.Namespace) -> int:
             rerank_candidate_limit=args.rerank_candidates,
             exploratory_threshold=args.exploratory_threshold,
             rerank_abstain_threshold=args.rerank_abstain_threshold,
+            confidence_calibration=args.confidence_calibration,
             **transform_kwargs,
         )
     except EmbeddingError as error:
@@ -2280,6 +2283,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional minimum cross-encoder score required for the fused top result",
     )
     search_parser.add_argument(
+        "--confidence-calibration",
+        choices=CONFIDENCE_CALIBRATION_MODES,
+        default="off",
+        help="Post-ranking confidence calibration mode (default: off)",
+    )
+    search_parser.add_argument(
         "--query-transform-mode",
         choices=QUERY_TRANSFORM_MODES,
         default="off",
@@ -2324,6 +2333,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Optional minimum cross-encoder score required for the fused top result",
+    )
+    eval_run_parser.add_argument(
+        "--confidence-calibration",
+        choices=CONFIDENCE_CALIBRATION_MODES,
+        default="off",
+        help="Post-ranking confidence calibration mode (default: off)",
     )
     eval_run_parser.add_argument(
         "--query-transform-mode",

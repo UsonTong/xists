@@ -1,4 +1,5 @@
 import math
+import json
 from urllib.error import URLError
 
 import pytest
@@ -13,7 +14,7 @@ from xists.search.embed import (
     embedding_input_fingerprint,
     embedding_text_from_record,
 )
-from xists.search.index import build_index
+from xists.search.index import INDEX_VERSION, build_index, decode_vector, encode_vector
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.query import (
     IndexMismatchError,
@@ -23,6 +24,7 @@ from xists.search.query import (
     rank,
     rank_many,
 )
+from xists.search.confidence import calibrate_confidence
 
 CONFIG = EmbeddingConfig(api_key="k", base_url="http://localhost/v1", model="bge-m3")
 
@@ -88,6 +90,17 @@ def test_embedding_config_from_env_builds(monkeypatch):
     assert config.embeddings_url == "http://localhost/v1/embeddings"
 
 
+def test_embedding_config_reads_optional_input_type_field(monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embeddings.example/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "dual-encoder")
+    monkeypatch.setenv("EMBEDDING_INPUT_TYPE_FIELD", "input_type")
+
+    config = embedding_config_from_env()
+
+    assert config.input_type_field == "input_type"
+
+
 def test_embedding_text_excludes_not_for():
     text = embedding_text_from_record(make_record())
     assert text.splitlines()[1].startswith("react javascript ui library")
@@ -123,6 +136,75 @@ def test_call_embeddings_empty_input_returns_empty():
     assert call_embeddings(CONFIG, []) == []
 
 
+def test_configured_embedding_request_sets_query_input_type(monkeypatch):
+    from xists.search import embed as embed_module
+
+    captured = {}
+
+    def fake_request_json(url, body, headers, timeout):
+        captured.update(
+            url=url, payload=json.loads(body), headers=headers, timeout=timeout
+        )
+        return {"data": [{"index": 0, "embedding": [1.0, 0.0]}]}
+
+    monkeypatch.setattr(embed_module, "_request_json", fake_request_json)
+
+    vector = embed_module.embed_query(
+        EmbeddingConfig(
+            api_key="service-secret",
+            base_url="https://embeddings.example/v1",
+            model="dual-encoder",
+            input_type_field="input_type",
+        ),
+        "Chinese repository search",
+    )
+
+    assert vector == [1.0, 0.0]
+    assert captured["url"] == "https://embeddings.example/v1/embeddings"
+    assert captured["payload"] == {
+        "model": "dual-encoder",
+        "input": ["Chinese repository search"],
+        "input_type": "query",
+    }
+    assert captured["headers"]["Authorization"] == "Bearer service-secret"
+
+
+def test_build_index_sends_passage_input_type(monkeypatch):
+    captured = []
+
+    def fake_call(config, inputs, *, timeout=60, input_type=None):
+        captured.append(input_type)
+        return [[1.0, 0.0] for _ in inputs]
+
+    monkeypatch.setattr("xists.search.index.call_embeddings", fake_call)
+    build_index(
+        [make_record()],
+        EmbeddingConfig(
+            api_key="k",
+            base_url="https://embeddings.example/v1",
+            model="dual-encoder",
+            input_type_field="input_type",
+        ),
+    )
+
+    assert captured == ["passage"]
+
+
+def test_embedding_request_without_configured_input_type_field_omits_it(monkeypatch):
+    from xists.search import embed as embed_module
+
+    captured = {}
+
+    def fake_request_json(url, body, headers, timeout):
+        captured.update(payload=json.loads(body))
+        return {"data": [{"index": 0, "embedding": [1.0, 0.0]}]}
+
+    monkeypatch.setattr(embed_module, "_request_json", fake_request_json)
+    call_embeddings(CONFIG, ["hello"], input_type="passage")
+
+    assert captured["payload"] == {"model": "bge-m3", "input": ["hello"]}
+
+
 def test_call_embeddings_reports_all_attempted_endpoints(monkeypatch):
     from xists.search import embed as embed_module
 
@@ -155,7 +237,7 @@ def test_cosine_similarity_and_confidence_bucket():
 def test_build_index_includes_search_metadata(monkeypatch):
     records = [make_record("react/react"), make_record("vuejs/core")]
 
-    def fake_call(config, inputs, *, timeout=60):
+    def fake_call(config, inputs, *, timeout=60, input_type=None):
         return [[1.0, 0.0, 0.0] for _ in inputs]
 
     monkeypatch.setattr("xists.search.index.call_embeddings", fake_call)
@@ -179,13 +261,45 @@ def test_build_index_includes_search_metadata(monkeypatch):
 def test_build_index_skips_empty_records(monkeypatch):
     records = [make_record("react/react"), {"repo_id": "empty/empty"}]
 
-    def fake_call(config, inputs, *, timeout=60):
+    def fake_call(config, inputs, *, timeout=60, input_type=None):
         return [[1.0, 0.0] for _ in inputs]
 
     monkeypatch.setattr("xists.search.index.call_embeddings", fake_call)
     index = build_index(records, CONFIG)
     assert index["record_count"] == 1
     assert index["skipped"] == ["empty/empty"]
+
+
+def test_compact_vector_round_trip_and_legacy_rank_compatibility():
+    encoded = encode_vector([1.0, 0.0])
+
+    assert isinstance(encoded, str)
+    assert decode_vector(encoded).tolist() == pytest.approx([1.0, 0.0])
+    assert decode_vector([1.0, 0.0]).tolist() == pytest.approx([1.0, 0.0])
+    index = {
+        **make_index(
+            [
+                {"repo_id": "winner/repo", "vector": encoded, "metadata": {}},
+                {"repo_id": "other/repo", "vector": encode_vector([0.0, 1.0]), "metadata": {}},
+            ]
+        ),
+        "index_version": INDEX_VERSION,
+    }
+
+    result = rank("query", index, CONFIG, embed=lambda *_: [1.0, 0.0])
+
+    assert result["results"][0]["repo_id"] == "winner/repo"
+    __import__("json").dumps(result)
+
+
+def test_build_index_writes_compact_vectors(monkeypatch):
+    monkeypatch.setattr("xists.search.index.call_embeddings", lambda *_args, **_kwargs: [[1.0, 0.0]])
+
+    index = build_index([make_record()], CONFIG)
+
+    assert index["index_version"] == INDEX_VERSION
+    assert isinstance(index["vectors"][0]["vector"], str)
+    assert decode_vector(index["vectors"][0]["vector"]).tolist() == pytest.approx([1.0, 0.0])
 
 
 def test_rank_returns_sorted_semantic_results_with_stable_shape():
@@ -200,6 +314,7 @@ def test_rank_returns_sorted_semantic_results_with_stable_shape():
     top = result["results"][0]
     assert result["abstained"] is False
     assert result["considered"] == 2
+    assert isinstance(result["latency_ms"], float)
     assert top["repo_id"] == "react/react"
     assert top["confidence"] == "high_confidence"
     assert top["semantic_score"] == pytest.approx(1.0)
@@ -351,6 +466,237 @@ def test_identity_falls_back_to_repo_id_parts_for_legacy_indexes():
     assert result["results"][0]["repo_id"] == "vllm-project/vllm"
 
 
+def test_semantic_strategy_does_not_apply_identity_or_metadata_adjustments():
+    index = make_index(
+        [
+            {"repo_id": "react/react", "vector": [0.0, 1.0], "metadata": {"name": "react"}},
+            {"repo_id": "semantic/winner", "vector": [1.0, 0.0], "metadata": {"name": "winner"}},
+        ]
+    )
+
+    result = rank(
+        "react",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="semantic",
+    )
+
+    assert result["results"][0]["repo_id"] == "semantic/winner"
+    assert result["results"][0]["metadata_score"] == 0.0
+    assert result["results"][0]["diagnostics"]["identity_match"] is None
+
+
+def test_rerank_strategy_fuses_semantic_recall_and_generic_rerank_evidence():
+    index = make_index(
+        [
+            {"repo_id": "first/repo", "vector": [1.0, 0.0], "metadata": {"description": "First candidate"}},
+            {"repo_id": "second/repo", "vector": vector_for_cosine(0.8), "metadata": {"description": "Second candidate"}},
+        ]
+    )
+    calls = []
+
+    def fake_rerank(query, documents):
+        calls.append((query, documents))
+        return [0.1, 0.9]
+
+    result = rank(
+        "general query",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=fake_rerank,
+        rerank_candidate_limit=2,
+    )
+
+    assert result["results"][0]["repo_id"] == "first/repo"
+    assert result["results"][0]["rerank_score"] == 0.1
+    assert result["results"][0]["metadata_score"] == 0.0
+    assert result["results"][0]["ranking_evidence"] == {
+        "semantic_rank": 1,
+        "rerank_rank": 2,
+        "fusion": "reciprocal_rank",
+    }
+    assert calls == [("general query", ["first/repo\nFirst candidate", "second/repo\nSecond candidate"])]
+
+
+def test_evidence_calibration_keeps_agreeing_rerank_winner_high_confidence():
+    index = make_index(
+        [
+            {"repo_id": "first/repo", "vector": [1.0, 0.0], "metadata": {}},
+            {"repo_id": "second/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+
+    result = rank(
+        "general query",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda _config, _query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=lambda _query, _documents: [0.9, 0.1],
+        rerank_candidate_limit=2,
+        confidence_calibration="evidence-v1",
+    )
+
+    top = result["results"][0]
+    assert top["confidence"] == "high_confidence"
+    assert top["confidence_evidence"]["supporting_signals"] == ["semantic_and_rerank_agree"]
+    assert top["confidence_evidence"]["downgrade_reasons"] == []
+
+
+def test_evidence_calibration_downgrades_conflicting_rerank_without_reordering():
+    index = make_index(
+        [
+            {"repo_id": "first/repo", "vector": [1.0, 0.0], "metadata": {}},
+            {"repo_id": "second/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+    kwargs = {
+        "top_k": 2,
+        "embed": lambda _config, _query: [1.0, 0.0],
+        "ranking_strategy": "rerank",
+        "rerank": lambda _query, _documents: [0.1, 0.9],
+        "rerank_candidate_limit": 2,
+    }
+
+    baseline = rank("general query", index, CONFIG, **kwargs)
+    calibrated = rank("general query", index, CONFIG, confidence_calibration="evidence-v1", **kwargs)
+
+    assert [item["repo_id"] for item in calibrated["results"]] == [
+        item["repo_id"] for item in baseline["results"]
+    ]
+    assert calibrated["abstained"] is baseline["abstained"] is False
+    assert baseline["results"][0]["confidence"] == "high_confidence"
+    assert calibrated["results"][0]["confidence"] == "exploratory"
+    assert set(calibrated["results"][0]["confidence_evidence"]["downgrade_reasons"]) == {
+        "semantic_and_rerank_disagree",
+        "top_candidate_not_separated",
+    }
+
+
+def test_evidence_calibration_downgrades_high_confidence_without_reranker_evidence():
+    result = {"confidence": "high_confidence", "diagnostics": {"identity_evidence": {"kind": "none"}}}
+
+    calibrated = calibrate_confidence([result], ranking_strategy="rerank", mode="evidence-v1")
+
+    assert calibrated == [result]
+    assert result["confidence"] == "exploratory"
+    assert result["confidence_evidence"]["downgrade_reasons"] == ["reranker_evidence_unavailable"]
+
+
+def test_evidence_calibration_downgrades_contextual_identity_without_reordering():
+    index = make_index(
+        [
+            {"repo_id": "nodejs/node", "vector": [1.0, 0.0], "metadata": {"name": "node"}},
+            {"repo_id": "other/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+    kwargs = {
+        "top_k": 2,
+        "embed": lambda _config, _query: [1.0, 0.0],
+        "ranking_strategy": "rerank",
+        "rerank": lambda _query, _documents: [0.1],
+        "rerank_candidate_limit": 2,
+    }
+
+    baseline = rank("Node Web 框架", index, CONFIG, **kwargs)
+    calibrated = rank("Node Web 框架", index, CONFIG, confidence_calibration="evidence-v1", **kwargs)
+
+    assert [item["repo_id"] for item in calibrated["results"]] == [
+        item["repo_id"] for item in baseline["results"]
+    ]
+    assert calibrated["results"][0]["confidence"] == "exploratory"
+    assert calibrated["results"][0]["confidence_evidence"]["identity_evidence"] == "contextual_name_mention"
+
+
+def test_evidence_calibration_preserves_direct_repository_identity():
+    index = make_index(
+        [
+            {"repo_id": "nodejs/node", "vector": [1.0, 0.0], "metadata": {"name": "node"}},
+            {"repo_id": "other/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+
+    result = rank(
+        "nodejs/node",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda _config, _query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=lambda _query, _documents: [0.1],
+        rerank_candidate_limit=2,
+        confidence_calibration="evidence-v1",
+    )
+
+    assert result["results"][0]["confidence"] == "high_confidence"
+    assert result["results"][0]["confidence_evidence"]["identity_evidence"] == "repo_id"
+
+
+def test_rerank_strategy_requires_a_reranker():
+    index = make_index([{"repo_id": "one/repo", "vector": [1.0, 0.0], "metadata": {}}])
+
+    with pytest.raises(ValueError, match="reranker"):
+        rank(
+            "query",
+            index,
+            CONFIG,
+            embed=lambda config, query: [1.0, 0.0],
+            ranking_strategy="rerank",
+        )
+
+
+def test_rerank_abstain_threshold_rejects_a_query_when_fused_top_score_is_too_low():
+    index = make_index(
+        [
+            {"repo_id": "first/repo", "vector": [1.0, 0.0], "metadata": {}},
+            {"repo_id": "second/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+
+    result = rank(
+        "general query",
+        index,
+        CONFIG,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=lambda query, documents: [-9.0, -10.0],
+        rerank_candidate_limit=2,
+        rerank_abstain_threshold=-8.0,
+    )
+
+    assert result["abstained"] is True
+    assert result["results"] == []
+
+
+def test_rerank_abstain_threshold_preserves_an_exact_repository_identity():
+    index = make_index(
+        [
+            {"repo_id": "owner/project", "vector": [1.0, 0.0], "metadata": {}},
+            {"repo_id": "other/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+        ]
+    )
+
+    result = rank(
+        "owner/project",
+        index,
+        CONFIG,
+        embed=lambda config, query: [1.0, 0.0],
+        ranking_strategy="rerank",
+        rerank=lambda query, documents: [-99.0],
+        rerank_candidate_limit=2,
+        rerank_abstain_threshold=-8.0,
+    )
+
+    assert result["abstained"] is False
+    assert result["results"][0]["repo_id"] == "owner/project"
+
+
 def test_semantic_winner_is_not_overturned_by_ordinary_metadata():
     index = make_index(
         [
@@ -437,6 +783,34 @@ def test_weak_semantic_match_abstains_even_with_loose_metadata_overlap():
     assert result["results"] == []
 
 
+def test_exploratory_threshold_is_configurable_for_any_embedding_score_scale():
+    index = make_index(
+        [
+            {
+                "repo_id": "general/result",
+                "vector": vector_for_cosine(0.34),
+                "metadata": {"description": "General purpose retrieval result."},
+            }
+        ]
+    )
+
+    result = rank(
+        "general retrieval",
+        index,
+        CONFIG,
+        embed=lambda config, query: [1.0, 0.0],
+        exploratory_threshold=0.32,
+    )
+
+    assert result["abstained"] is False
+    assert result["results"][0]["confidence"] == "exploratory"
+
+
+def test_rank_rejects_invalid_exploratory_threshold():
+    with pytest.raises(ValueError, match="exploratory threshold"):
+        rank("query", make_index([]), CONFIG, exploratory_threshold=1.01)
+
+
 def test_rank_many_matches_rank_order():
     index = make_index(
         [
@@ -467,10 +841,66 @@ def test_rank_many_batches_embeddings():
     assert len(results) == 3
 
 
+def test_dual_query_variants_keep_the_stronger_cross_language_candidate():
+    index = make_index(
+        [
+            {"repo_id": "wrong/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+            {"repo_id": "target/repo", "vector": [0.0, 1.0], "metadata": {}},
+        ]
+    )
+    vectors = {"原始查询": [1.0, 0.0], "canonical query": [0.0, 1.0]}
+
+    result = rank(
+        "原始查询",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: vectors[query],
+        query_variants=["原始查询", "canonical query"],
+    )
+
+    assert result["results"][0]["repo_id"] == "target/repo"
+    assert result["query_variants"] == ["原始查询", "canonical query"]
+
+
+def test_rank_many_batches_all_query_variants_and_reranks_with_canonical_query():
+    calls = []
+    rerank_calls = []
+
+    def fake_embed_many(config, queries):
+        calls.append(list(queries))
+        return [[1.0, 0.0] if query == "原始查询" else [0.0, 1.0] for query in queries]
+
+    index = make_index(
+        [
+            {"repo_id": "wrong/repo", "vector": vector_for_cosine(0.8), "metadata": {}},
+            {"repo_id": "target/repo", "vector": [0.0, 1.0], "metadata": {}},
+        ]
+    )
+    results = rank_many(
+        ["原始查询"],
+        index,
+        CONFIG,
+        top_k=2,
+        batch_size=2,
+        embed_many=fake_embed_many,
+        ranking_strategy="rerank",
+        rerank=lambda query, documents: rerank_calls.append(query) or [0.9, 0.1],
+        rerank_candidate_limit=2,
+        query_variants=[["原始查询", "canonical query"]],
+        rerank_queries=["canonical query"],
+    )
+
+    assert calls == [["原始查询", "canonical query"]]
+    assert rerank_calls == ["canonical query"]
+    assert results[0]["query_variants"] == ["原始查询", "canonical query"]
+
+
 def test_rank_abstains_on_empty_index():
     result = rank("anything", make_index([]), CONFIG, embed=lambda config, query: [1.0, 0.0])
     assert result == {
         "query": "anything",
+        "latency_ms": pytest.approx(result["latency_ms"]),
         "query_intent": _query_intent("anything"),
         "abstained": True,
         "results": [],

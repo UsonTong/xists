@@ -53,6 +53,11 @@ LLM_MODEL=deepseek-v4-pro
 EMBEDDING_API_KEY=local
 EMBEDDING_BASE_URL=http://localhost:6597/v1
 EMBEDDING_MODEL=BAAI/bge-m3
+
+# Optional query canonicalization for an English-dominant corpus
+QUERY_TRANSFORM_API_KEY=your_query_transform_api_key_here
+QUERY_TRANSFORM_BASE_URL=https://api.example.com/v1
+QUERY_TRANSFORM_MODEL=your_chat_model
 ```
 
 All three sections are required for the full workflow. `.env` is ignored by Git.
@@ -267,6 +272,7 @@ This reads `records.json`, computes embeddings via the configured endpoint, and 
 | `--records` | `records.json` | Input records file |
 | `--output` | `index.json` | Output index file |
 | `--force` | off | Ignore existing index.json and rebuild from scratch |
+| `--resume` | off | Continue from a partial index checkpoint |
 
 #### Incremental update
 
@@ -274,7 +280,7 @@ By default, `xists index build` is incremental. It reuses an existing vector onl
 
 #### Checkpoint
 
-Each batch (64 records) is written to disk as it completes. If interrupted, completed batches are preserved.
+Completed work is periodically written to a partial index checkpoint. If interrupted, run the same command with the resume option; xists reuses completed vectors and publishes the final index only after the whole build succeeds. Current indexes store vectors as compact float32 base64 data, which reduces memory pressure on large indexes.
 
 #### Model mismatch protection
 
@@ -393,12 +399,40 @@ JSON output exposes the same ranking data for automation:
 
 Weak semantic matches stay hidden unless they are exact identity matches; metadata should help close calls, not replace semantic relevance.
 
+#### Evidence-based confidence calibration
+
+`--confidence-calibration evidence-v1` is an opt-in post-ranking experiment for
+reranked searches. It preserves the candidate list, ordering, and abstention
+decision, but downgrades a `high_confidence` result to `exploratory` when the
+available evidence is contradictory or incomplete. The result includes
+`confidence_evidence` with the calibration version, ranking evidence, supporting
+signals, and any downgrade reasons. Evaluation reports record the selected mode
+and preserve the top result's evidence for reproducible analysis.
+
+```bash
+xists eval run --cases eval-cases.json --index index.json --output eval-calibrated.json \
+  --ranking-strategy rerank --confidence-calibration evidence-v1
+```
+
+#### English canonical queries
+
+For an English-dominant corpus, an optional compatible chat endpoint can turn a query into a concise English retrieval expression while preserving technical identifiers. The original query remains available for exact repository identity matching. `canonical` embeds only the canonical expression; `merge` embeds both expressions and keeps the stronger similarity for each candidate.
+
+```bash
+xists search "查找 Vue 开源项目" --query-transform-mode merge
+xists eval run --cases eval-cases.json --index index.json --output eval-merge.json --query-transform-mode merge
+```
+
+This is disabled by default. It requires `QUERY_TRANSFORM_API_KEY`, `QUERY_TRANSFORM_BASE_URL`, and `QUERY_TRANSFORM_MODEL`. Evaluation reports record the selected mode and model so experiments remain comparable.
+
 #### Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--index` | `index.json` | Index file to search |
 | `--top-k` | `10` | Maximum results to return |
+| `--query-transform-mode` | `off` | `off`, English `canonical`, or original-plus-canonical `merge` retrieval |
+| `--confidence-calibration` | `off` | `off` or post-ranking `evidence-v1` confidence calibration |
 | `--format` | `text` | Output format: `text` for terminal review, or `json` for scripts and agents |
 
 ### Step 4: Evaluate retrieval quality
@@ -528,6 +562,7 @@ This is a semantic expansion from older reports, where `acceptable_top1_rate` on
 | `--output` | `eval-report.json` | Output evaluation report |
 | `--top-k` | `10` | Maximum results to score per query |
 | `--batch-size` | `64` | Number of queries to embed per batch |
+| `--query-transform-mode` | `off` | `off`, English `canonical`, or original-plus-canonical `merge` retrieval |
 | `--records` | (none) | Records JSON used for optional LLM top1-vs-expected judge |
 | `--llm-judge` | off | Run an LLM pairwise judge only on top-1 mismatches |
 

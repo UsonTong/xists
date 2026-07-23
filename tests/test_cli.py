@@ -1063,6 +1063,69 @@ def test_records_validate_reports_schema_and_profile_gaps(tmp_path, capsys):
     assert "records-v2.json" in payload["next_steps"][0]
 
 
+def test_index_build_indexes_abstained_profile_from_collected_metadata(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://test.invalid/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
+
+    record = _make_record("example/abstained")
+    record["github"] = {
+        "description": "A collected project description remains available.",
+        "topics": ["fixture"],
+        "language": "Python",
+    }
+    record["llm_profile"] = {
+        "summary": None,
+        "search_text": None,
+        "confidence": "low",
+        "abstained": True,
+        "prompt_version": PROFILE_PROMPT_VERSION,
+    }
+    records_file = tmp_path / "records.json"
+    output_file = tmp_path / "index.json"
+    records_file.write_text(json.dumps([record]), encoding="utf-8")
+
+    captured_inputs: list[str] = []
+
+    def fake_call_embeddings(_config, inputs, *, timeout=60, input_type=None):
+        assert input_type == "passage"
+        captured_inputs.extend(inputs)
+        return [[1.0, 0.0] for _ in inputs]
+
+    args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file)]
+    )
+    with patch("xists.cli.call_embeddings", side_effect=fake_call_embeddings):
+        assert index_build(args) == 0
+
+    index = json.loads(output_file.read_text(encoding="utf-8"))
+    assert index["record_count"] == 1
+    assert index["vectors"][0]["repo_id"] == "example/abstained"
+    assert captured_inputs == [
+        "example/abstained\nA collected project description remains available.\nfixture\nPython"
+    ]
+
+
+def test_records_validate_requires_profile_fields_without_explicit_abstention(tmp_path, capsys):
+    record = _make_record("example/incomplete")
+    record["llm_profile"] = {
+        "summary": None,
+        "search_text": None,
+        "confidence": "low",
+        "abstained": False,
+        "prompt_version": PROFILE_PROMPT_VERSION,
+    }
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps([record]), encoding="utf-8")
+
+    args = build_parser().parse_args(["records", "validate", "--records", str(records_file), "--format", "json"])
+
+    assert records_validate(args) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["errors"]["missing_summary"] == 1
+    assert payload["errors"]["missing_search_text"] == 1
+
+
 def test_records_validate_reports_quality_warnings_in_text(tmp_path, capsys):
     records_file = tmp_path / "records.json"
     records_file.write_text(

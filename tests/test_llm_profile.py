@@ -89,6 +89,34 @@ def test_call_llm_uses_extended_default_timeout(monkeypatch):
     assert observed["timeout"] == 600
 
 
+def test_call_llm_retries_socket_timeout(monkeypatch):
+    config = LLMConfig(api_key="key", base_url="https://api.example.com/v1", model="test-model")
+    attempts = 0
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def read(self):
+            return b'{"choices": [{"message": {"content": "{}"}}]}'
+
+    def fake_urlopen(request, *, timeout):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise TimeoutError("timed out")
+        return Response()
+
+    monkeypatch.setattr("xists.profile.llm.urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("xists.profile.llm.time.sleep", lambda _: None)
+
+    assert call_llm(config, [{"role": "user", "content": "profile this"}]).content == "{}"
+    assert attempts == 2
+
+
 def test_profile_input_only_includes_collected_evidence():
     profile_input = profile_input_from_record(make_record())
 

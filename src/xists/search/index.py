@@ -8,10 +8,13 @@ were used so search can refuse to run against a mismatched model.
 
 from __future__ import annotations
 
+import base64
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from xists.search.embed import (
     EMBEDDING_INPUT_VERSION,
@@ -23,7 +26,37 @@ from xists.search.embed import (
 )
 from xists.records import RECORD_SCHEMA_VERSION
 
-INDEX_VERSION = 1
+INDEX_VERSION = 3
+VECTOR_ENCODING_FLOAT32_BASE64 = "float32_base64"
+
+
+def encode_vector(vector: list[float]) -> str:
+    """Encode an embedding as compact, portable float32 data."""
+
+    values = np.asarray(vector, dtype="<f4")
+    if values.ndim != 1:
+        raise ValueError("Embedding vectors must be one-dimensional")
+    return base64.b64encode(values.tobytes()).decode("ascii")
+
+
+def decode_vector(value: Any, *, dimension: int | None = None) -> np.ndarray | None:
+    """Decode compact vectors while accepting legacy JSON number arrays."""
+
+    if isinstance(value, str):
+        try:
+            vector = np.frombuffer(base64.b64decode(value.encode("ascii"), validate=True), dtype="<f4")
+        except (ValueError, TypeError):
+            return None
+    elif isinstance(value, list):
+        try:
+            vector = np.asarray(value, dtype=np.float32)
+        except (TypeError, ValueError):
+            return None
+    else:
+        return None
+    if vector.ndim != 1 or (dimension is not None and vector.size != dimension):
+        return None
+    return vector
 
 
 def _string_list(values: Any) -> list[str]:
@@ -93,7 +126,9 @@ def build_index(
     dimension: int | None = None
     for start in range(0, len(embeddable), batch_size):
         batch = embeddable[start : start + batch_size]
-        results = call_embeddings(config, [item["text"] for item in batch])
+        results = call_embeddings(
+            config, [item["text"] for item in batch], input_type="passage"
+        )
         if len(results) != len(batch):
             raise EmbeddingError(
                 f"Embedding count mismatch: sent {len(batch)}, received {len(results)}"
@@ -110,7 +145,7 @@ def build_index(
                     "repo_id": item["repo_id"],
                     "embedding_input_fingerprint": item["fingerprint"],
                     "metadata": item["metadata"],
-                    "vector": vector,
+                    "vector": encode_vector(vector),
                 }
             )
 

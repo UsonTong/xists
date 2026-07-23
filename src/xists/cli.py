@@ -53,8 +53,23 @@ from xists.search.embed import (
     embedding_text_from_record,
     probe_embedding_endpoint,
 )
-from xists.search.index import INDEX_VERSION, entry_metadata, load_index
-from xists.search.query import IndexMismatchError, _query_intent, rank
+from xists.search.index import INDEX_VERSION, decode_vector, encode_vector, entry_metadata, load_index
+from xists.search.confidence import CONFIDENCE_CALIBRATION_MODES
+from xists.search.query import RANKING_STRATEGIES, IndexMismatchError, _query_intent, rank
+from xists.search.rerank import (
+    RerankerError,
+    RerankerNotConfiguredError,
+    rerank_documents,
+    reranker_config_from_env,
+)
+from xists.search.transform import (
+    QUERY_TRANSFORM_MODES,
+    QueryTransformError,
+    QueryTransformNotConfiguredError,
+    query_transform_config_from_env,
+    query_variants,
+    transform_queries,
+)
 
 
 def load_env_file(path: Path) -> None:
@@ -92,6 +107,51 @@ def write_json_atomic(path: Path, data: Any) -> None:
     tmp_path = path.with_name(f"{path.name}.tmp")
     tmp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp_path.replace(path)
+
+
+def _prepare_query_transforms(
+    queries: list[str], mode: str
+) -> tuple[list[list[str]] | None, list[str] | None, str | None]:
+    if mode == "off":
+        return None, None, None
+    config = query_transform_config_from_env()
+    canonical_queries = transform_queries(config, queries)
+    return (
+        [query_variants(query, canonical, mode) for query, canonical in zip(queries, canonical_queries)],
+        canonical_queries,
+        config.model,
+    )
+
+
+def _load_canonical_queries(path: Path, cases: list[dict[str, Any]]) -> list[str]:
+    """Load a complete, case-id keyed canonical-query snapshot for an eval run."""
+
+    try:
+        values = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise QueryTransformError(f"Canonical query file not found: {path}") from error
+    except json.JSONDecodeError as error:
+        raise QueryTransformError(f"Canonical query file is not valid JSON: {error}") from error
+    if not isinstance(values, dict):
+        raise QueryTransformError("Canonical query file must be an object mapping case id to query text")
+
+    expected_ids = [str(case["id"]) for case in cases]
+    expected_id_set = set(expected_ids)
+    actual_id_set = set(values)
+    missing = [case_id for case_id in expected_ids if case_id not in actual_id_set]
+    unexpected = sorted(str(case_id) for case_id in actual_id_set - expected_id_set)
+    if missing or unexpected:
+        details: list[str] = []
+        if missing:
+            details.append(f"missing case ids: {', '.join(missing)}")
+        if unexpected:
+            details.append(f"unexpected case ids: {', '.join(unexpected)}")
+        raise QueryTransformError("Canonical query file must match eval cases exactly; " + "; ".join(details))
+
+    canonical_queries = [values[case_id] for case_id in expected_ids]
+    if any(not isinstance(query, str) or not query.strip() for query in canonical_queries):
+        raise QueryTransformError("Canonical query file values must be non-empty strings")
+    return [query.strip() for query in canonical_queries]
 
 
 def _profile_refresh_checkpoint_path(output: Path) -> Path:
@@ -638,7 +698,10 @@ def _index_write_checkpoint(
     skipped: list[str],
     vectors: list[dict[str, Any]],
 ) -> None:
-    write_json(
+    # Index files can be large enough that a reader may otherwise observe a
+    # partially truncated JSON document while a checkpoint is being rewritten.
+    # Replacing a completed sibling file keeps every visible checkpoint valid.
+    write_json_atomic(
         output,
         {
             "index_version": index_version,
@@ -653,6 +716,10 @@ def _index_write_checkpoint(
             "vectors": vectors,
         },
     )
+
+
+def _index_checkpoint_path(output: Path) -> Path:
+    return output.with_name(f"{output.name}.partial.json")
 
 
 def index_build(args: argparse.Namespace) -> int:
@@ -684,14 +751,33 @@ def index_build(args: argparse.Namespace) -> int:
         return 1
     batch_size = 64
 
+    checkpoint_path = _index_checkpoint_path(args.output)
+    if args.resume and not checkpoint_path.exists():
+        print(f"Checkpoint file not found: {checkpoint_path}", file=sys.stderr)
+        return 1
+    if checkpoint_path.exists() and not args.resume:
+        print(
+            f"Checkpoint file already exists: {checkpoint_path}\n"
+            "Next steps:\n"
+            f"  1. Re-run with --resume to continue from the checkpoint\n"
+            f"  2. Delete {checkpoint_path} if you want to restart from scratch",
+            file=sys.stderr,
+        )
+        return 1
+
     # Load existing index for fingerprint-aware incremental update (skip with --force).
     vectors: list[dict[str, Any]] = []
     skipped: list[str] = []
     dimension: int | None = None
     reusable_vectors: dict[str, dict[str, Any]] = {}
 
-    if not args.force and args.output.exists():
-        existing_index = json.loads(args.output.read_text(encoding="utf-8"))
+    source_index_path: Path | None = None
+    if args.resume:
+        source_index_path = checkpoint_path
+    elif not args.force and args.output.exists():
+        source_index_path = args.output
+    if source_index_path is not None:
+        existing_index = json.loads(source_index_path.read_text(encoding="utf-8"))
         if existing_index.get("embedding_model") and existing_index["embedding_model"] != config.model:
             print(
                 f"Index was built with model '{existing_index['embedding_model']}' "
@@ -724,24 +810,44 @@ def index_build(args: argparse.Namespace) -> int:
         metadata = entry_metadata(record)
         existing = reusable_vectors.get(repo_id)
         if existing and existing.get("embedding_input_fingerprint") == fingerprint:
-            vector = existing.get("vector") or []
+            vector = decode_vector(existing.get("vector"), dimension=dimension)
+            if vector is None:
+                embeddable.append({"repo_id": repo_id, "text": text, "fingerprint": fingerprint, "metadata": metadata})
+                continue
             if dimension is None:
-                dimension = len(vector)
-            if len(vector) == dimension:
+                dimension = int(vector.size)
+            if vector.size == dimension:
                 existing = {**existing, "metadata": metadata}
                 vectors.append(existing)
                 continue
         embeddable.append({"repo_id": repo_id, "text": text, "fingerprint": fingerprint, "metadata": metadata})
 
+    def write_partial_checkpoint() -> None:
+        _index_write_checkpoint(
+            checkpoint_path,
+            index_version=INDEX_VERSION,
+            record_schema_version=RECORD_SCHEMA_VERSION,
+            embedding_model=config.model,
+            embedding_base_url=config.base_url,
+            embedding_input_version=EMBEDDING_INPUT_VERSION,
+            dimension=dimension,
+            record_count=len(vectors),
+            skipped=skipped,
+            vectors=vectors,
+        )
+
     new_count = 0
-    for start in range(0, len(embeddable), batch_size):
+    checkpoint_every_batches = 16
+    for batch_number, start in enumerate(range(0, len(embeddable), batch_size), start=1):
         batch = embeddable[start : start + batch_size]
         try:
-            results = call_embeddings(config, [item["text"] for item in batch])
+            results = call_embeddings(config, [item["text"] for item in batch], input_type="passage")
         except EmbeddingError as error:
+            write_partial_checkpoint()
             _print_embedding_error(error, command="index build")
             return 1
         if len(results) != len(batch):
+            write_partial_checkpoint()
             print(
                 f"Embedding count mismatch: sent {len(batch)}, received {len(results)}",
                 file=sys.stderr,
@@ -751,6 +857,7 @@ def index_build(args: argparse.Namespace) -> int:
             if dimension is None:
                 dimension = len(vector)
             elif len(vector) != dimension:
+                write_partial_checkpoint()
                 print(
                     f"Inconsistent embedding dimension: {len(vector)} vs {dimension}",
                     file=sys.stderr,
@@ -761,38 +868,28 @@ def index_build(args: argparse.Namespace) -> int:
                     "repo_id": item["repo_id"],
                     "embedding_input_fingerprint": item["fingerprint"],
                     "metadata": item["metadata"],
-                    "vector": vector,
+                    "vector": encode_vector(vector),
                 }
             )
             new_count += 1
 
-        # Checkpoint: write after each batch.
-        _index_write_checkpoint(
-            args.output,
-            index_version=INDEX_VERSION,
-            record_schema_version=RECORD_SCHEMA_VERSION,
-            embedding_model=config.model,
-            embedding_base_url=config.base_url,
-            embedding_input_version=EMBEDDING_INPUT_VERSION,
-            dimension=dimension,
-            record_count=len(vectors),
-            skipped=skipped,
-            vectors=vectors,
-        )
+        if batch_number % checkpoint_every_batches == 0:
+            write_partial_checkpoint()
 
-    if not embeddable:
-        _index_write_checkpoint(
-            args.output,
-            index_version=INDEX_VERSION,
-            record_schema_version=RECORD_SCHEMA_VERSION,
-            embedding_model=config.model,
-            embedding_base_url=config.base_url,
-            embedding_input_version=EMBEDDING_INPUT_VERSION,
-            dimension=dimension,
-            record_count=len(vectors),
-            skipped=skipped,
-            vectors=vectors,
-        )
+    _index_write_checkpoint(
+        args.output,
+        index_version=INDEX_VERSION,
+        record_schema_version=RECORD_SCHEMA_VERSION,
+        embedding_model=config.model,
+        embedding_base_url=config.base_url,
+        embedding_input_version=EMBEDDING_INPUT_VERSION,
+        dimension=dimension,
+        record_count=len(vectors),
+        skipped=skipped,
+        vectors=vectors,
+    )
+    if checkpoint_path.exists():
+        checkpoint_path.unlink()
 
     print(
         json.dumps(
@@ -824,13 +921,40 @@ def search(args: argparse.Namespace) -> int:
         return 2
 
     index = load_index(args.index)
+    rerank = None
+    if args.ranking_strategy == "rerank":
+        try:
+            reranker_config = reranker_config_from_env()
+        except RerankerNotConfiguredError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        rerank = lambda query, documents: rerank_documents(reranker_config, query, documents)
     try:
-        result = rank(args.query, index, config, top_k=args.top_k)
+        variants, rerank_queries, _ = _prepare_query_transforms([args.query], args.query_transform_mode)
+        rank_kwargs: dict[str, Any] = {}
+        if variants is not None and rerank_queries is not None:
+            rank_kwargs = {"query_variants": variants[0], "rerank_query": rerank_queries[0]}
+        result = rank(
+            args.query,
+            index,
+            config,
+            top_k=args.top_k,
+            ranking_strategy=args.ranking_strategy,
+            rerank=rerank,
+            rerank_candidate_limit=args.rerank_candidates,
+            exploratory_threshold=args.exploratory_threshold,
+            rerank_abstain_threshold=args.rerank_abstain_threshold,
+            confidence_calibration=args.confidence_calibration,
+            **rank_kwargs,
+        )
     except IndexMismatchError as error:
         print(str(error), file=sys.stderr)
         return 1
     except EmbeddingError as error:
         _print_embedding_error(error, command="search")
+        return 1
+    except (QueryTransformError, QueryTransformNotConfiguredError, RerankerError, ValueError) as error:
+        print(str(error), file=sys.stderr)
         return 1
 
     if getattr(args, "format", "json") == "text":
@@ -1714,9 +1838,11 @@ def _index_verify_report(records: list[dict[str, Any]], index: dict[str, Any]) -
     dimension_mismatches = [
         entry.get("repo_id")
         for entry in vectors
-        if isinstance(entry.get("vector"), list) and isinstance(dimension, int) and len(entry["vector"]) != dimension
+        if isinstance(dimension, int)
+        and (decoded := decode_vector(entry.get("vector"))) is not None
+        and decoded.size != dimension
     ]
-    invalid_vectors = [entry.get("repo_id") for entry in vectors if not isinstance(entry.get("vector"), list)]
+    invalid_vectors = [entry.get("repo_id") for entry in vectors if decode_vector(entry.get("vector")) is None]
     if dimension_mismatches:
         errors["dimension_mismatch"] = len(dimension_mismatches)
     if invalid_vectors:
@@ -1847,7 +1973,39 @@ def eval_run(args: argparse.Namespace) -> int:
         print(f"Index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
         return 2
 
+    rerank = None
+    if args.ranking_strategy == "rerank":
+        try:
+            reranker_config = reranker_config_from_env()
+        except RerankerNotConfiguredError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        rerank = lambda query, documents: rerank_documents(reranker_config, query, documents)
+
     try:
+        transform_kwargs: dict[str, Any] = {}
+        if args.canonical_queries is not None and args.query_transform_mode == "off":
+            raise QueryTransformError("--canonical-queries requires --query-transform-mode canonical or merge")
+        if args.query_transform_mode != "off":
+            cases = load_dataset(args.cases)["cases"]
+            queries = [case["query"] for case in cases]
+            if args.canonical_queries is None:
+                variants, rerank_queries, transform_model = _prepare_query_transforms(
+                    queries, args.query_transform_mode
+                )
+            else:
+                rerank_queries = _load_canonical_queries(args.canonical_queries, cases)
+                variants = [
+                    query_variants(query, canonical, args.query_transform_mode)
+                    for query, canonical in zip(queries, rerank_queries)
+                ]
+                transform_model = "frozen-canonical-queries"
+            transform_kwargs = {
+                "query_variants": variants,
+                "rerank_queries": rerank_queries,
+                "query_transform_mode": args.query_transform_mode,
+                "query_transform_model": transform_model,
+            }
         report = evaluate_dataset(
             args.cases,
             args.index,
@@ -1856,11 +2014,27 @@ def eval_run(args: argparse.Namespace) -> int:
             batch_size=args.batch_size,
             llm_judge_config=llm_judge_config,
             records_path=args.records,
+            ranking_strategy=args.ranking_strategy,
+            rerank=rerank,
+            rerank_candidate_limit=args.rerank_candidates,
+            exploratory_threshold=args.exploratory_threshold,
+            rerank_abstain_threshold=args.rerank_abstain_threshold,
+            confidence_calibration=args.confidence_calibration,
+            **transform_kwargs,
         )
     except EmbeddingError as error:
         _print_embedding_error(error, command="eval run")
         return 1
-    except (EvaluationDatasetError, FileNotFoundError, IndexMismatchError, ValueError, LLMError) as error:
+    except (
+        EvaluationDatasetError,
+        FileNotFoundError,
+        IndexMismatchError,
+        QueryTransformError,
+        QueryTransformNotConfiguredError,
+        ValueError,
+        LLMError,
+        RerankerError,
+    ) as error:
         print(str(error), file=sys.stderr)
         return 1
 
@@ -2006,6 +2180,7 @@ def build_parser() -> argparse.ArgumentParser:
     index_build_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to index")
     index_build_parser.add_argument("--output", type=Path, default=Path("index.json"), help="Path to write the embedding index")
     index_build_parser.add_argument("--force", action="store_true", help="Ignore existing index.json and rebuild from scratch")
+    index_build_parser.add_argument("--resume", action="store_true", help="Resume from an existing partial index checkpoint")
     index_build_parser.set_defaults(func=index_build)
     index_stats_parser = index_subparsers.add_parser("stats", help="Summarize an embedding index without printing vectors")
     index_stats_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to inspect")
@@ -2084,6 +2259,42 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to search")
     search_parser.add_argument("--top-k", type=int, default=10, help="Maximum number of results to return")
     search_parser.add_argument(
+        "--ranking-strategy",
+        choices=RANKING_STRATEGIES,
+        default="metadata",
+        help="Ranking mode: metadata, semantic, or cross-encoder rerank",
+    )
+    search_parser.add_argument(
+        "--rerank-candidates",
+        type=int,
+        default=50,
+        help="Embedding candidates to send to a reranker (default: 50)",
+    )
+    search_parser.add_argument(
+        "--exploratory-threshold",
+        type=float,
+        default=0.35,
+        help="Minimum embedding similarity for a non-identity result (default: 0.35)",
+    )
+    search_parser.add_argument(
+        "--rerank-abstain-threshold",
+        type=float,
+        default=None,
+        help="Optional minimum cross-encoder score required for the fused top result",
+    )
+    search_parser.add_argument(
+        "--confidence-calibration",
+        choices=CONFIDENCE_CALIBRATION_MODES,
+        default="off",
+        help="Post-ranking confidence calibration mode (default: off)",
+    )
+    search_parser.add_argument(
+        "--query-transform-mode",
+        choices=QUERY_TRANSFORM_MODES,
+        default="off",
+        help="Optional English canonical query mode: off, canonical, or merge (default: off)",
+    )
+    search_parser.add_argument(
         "--format",
         choices=("text", "json"),
         default="text",
@@ -2099,6 +2310,48 @@ def build_parser() -> argparse.ArgumentParser:
     eval_run_parser.add_argument("--output", type=Path, default=Path("eval-report.json"), help="Path to write evaluation report JSON")
     eval_run_parser.add_argument("--top-k", type=int, default=10, help="Maximum results to score per query")
     eval_run_parser.add_argument("--batch-size", type=int, default=64, help="Number of queries to embed per batch")
+    eval_run_parser.add_argument(
+        "--ranking-strategy",
+        choices=RANKING_STRATEGIES,
+        default="metadata",
+        help="Ranking mode: metadata, semantic, or cross-encoder rerank",
+    )
+    eval_run_parser.add_argument(
+        "--rerank-candidates",
+        type=int,
+        default=50,
+        help="Embedding candidates to send to a reranker (default: 50)",
+    )
+    eval_run_parser.add_argument(
+        "--exploratory-threshold",
+        type=float,
+        default=0.35,
+        help="Minimum embedding similarity for a non-identity result (default: 0.35)",
+    )
+    eval_run_parser.add_argument(
+        "--rerank-abstain-threshold",
+        type=float,
+        default=None,
+        help="Optional minimum cross-encoder score required for the fused top result",
+    )
+    eval_run_parser.add_argument(
+        "--confidence-calibration",
+        choices=CONFIDENCE_CALIBRATION_MODES,
+        default="off",
+        help="Post-ranking confidence calibration mode (default: off)",
+    )
+    eval_run_parser.add_argument(
+        "--query-transform-mode",
+        choices=QUERY_TRANSFORM_MODES,
+        default="off",
+        help="Optional English canonical query mode: off, canonical, or merge (default: off)",
+    )
+    eval_run_parser.add_argument(
+        "--canonical-queries",
+        type=Path,
+        default=None,
+        help="Optional JSON object mapping every eval case id to a fixed canonical query",
+    )
     eval_run_parser.add_argument("--records", type=Path, default=None, help="Records JSON used for optional LLM judge comparisons")
     eval_run_parser.add_argument("--llm-judge", action="store_true", help="Run an LLM pairwise judge on top-1 mismatches")
     eval_run_parser.set_defaults(func=eval_run)

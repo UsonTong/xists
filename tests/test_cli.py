@@ -7,6 +7,7 @@ import pytest
 
 from xists import __version__
 from xists.cli import (
+    _load_canonical_queries,
     build_parser,
     doctor,
     eval_cases,
@@ -29,7 +30,7 @@ from xists.ingest.github import GitHubAPIError
 from xists.profile.llm import LLMError, PROFILE_PROMPT_VERSION
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingError, embedding_input_fingerprint
-from xists.search.index import INDEX_VERSION
+from xists.search.index import INDEX_VERSION, decode_vector
 
 
 def test_load_env_file_loads_values(tmp_path, monkeypatch):
@@ -235,6 +236,22 @@ def test_eval_run_parser_uses_default_paths():
     assert args.output == Path("eval-report.json")
     assert args.top_k == 10
     assert args.batch_size == 64
+    assert args.ranking_strategy == "metadata"
+    assert args.rerank_candidates == 50
+    assert args.query_transform_mode == "off"
+    assert args.canonical_queries is None
+
+
+def test_load_canonical_queries_requires_an_exact_nonempty_case_map(tmp_path):
+    cases = [{"id": "one"}, {"id": "two"}]
+    queries_file = tmp_path / "canonical.json"
+    queries_file.write_text(json.dumps({"one": "first retrieval query", "two": "second retrieval query"}), encoding="utf-8")
+
+    assert _load_canonical_queries(queries_file, cases) == ["first retrieval query", "second retrieval query"]
+
+    queries_file.write_text(json.dumps({"one": "first retrieval query", "extra": "other"}), encoding="utf-8")
+    with pytest.raises(Exception, match="missing case ids: two; unexpected case ids: extra"):
+        _load_canonical_queries(queries_file, cases)
 
 
 def test_search_parser_uses_default_options():
@@ -243,6 +260,9 @@ def test_search_parser_uses_default_options():
     assert args.index == Path("index.json")
     assert args.top_k == 10
     assert args.format == "text"
+    assert args.ranking_strategy == "metadata"
+    assert args.rerank_candidates == 50
+    assert args.query_transform_mode == "off"
 
 
 def test_search_defaults_to_text_output(tmp_path, monkeypatch, capsys):
@@ -436,7 +456,23 @@ def test_eval_run_writes_report(tmp_path, monkeypatch):
         ]
     )
 
-    def fake_evaluate_dataset(cases, index, config, *, top_k=10, batch_size=64, llm_judge_config=None, records_path=None, judge_caller=None):
+    def fake_evaluate_dataset(
+        cases,
+        index,
+        config,
+        *,
+        top_k=10,
+        batch_size=64,
+        llm_judge_config=None,
+        records_path=None,
+        judge_caller=None,
+        ranking_strategy="metadata",
+        rerank=None,
+        rerank_candidate_limit=50,
+        exploratory_threshold=0.35,
+        rerank_abstain_threshold=None,
+        confidence_calibration="off",
+    ):
         assert cases == cases_file
         assert index == index_file
         assert config.model == "bge-m3"
@@ -444,6 +480,12 @@ def test_eval_run_writes_report(tmp_path, monkeypatch):
         assert batch_size == 8
         assert llm_judge_config is None
         assert records_path is None
+        assert ranking_strategy == "metadata"
+        assert rerank is None
+        assert rerank_candidate_limit == 50
+        assert exploratory_threshold == 0.35
+        assert rerank_abstain_threshold is None
+        assert confidence_calibration == "off"
         return {
             "dataset_name": "smoke",
             "case_count": 1,
@@ -839,6 +881,27 @@ def test_index_stats_prints_compact_summary(tmp_path, capsys):
     assert "vectors" not in payload
 
 
+def test_index_checkpoint_replaces_an_existing_file_atomically(tmp_path):
+    output = tmp_path / "index.json"
+    output.write_text('{"old": true}\n', encoding="utf-8")
+
+    from xists.cli import _index_write_checkpoint
+
+    _index_write_checkpoint(
+        output,
+        index_version=INDEX_VERSION,
+        record_schema_version=RECORD_SCHEMA_VERSION,
+        embedding_model="example/embed",
+        embedding_base_url="https://example.invalid/v1",
+        embedding_input_version=EMBEDDING_INPUT_VERSION,
+        dimension=2,
+        record_count=1,
+        skipped=[],
+        vectors=[{"repo_id": "example/repo", "metadata": {}, "vector": [1.0, 0.0]}],
+    )
+
+    assert not output.with_name("index.json.tmp").exists()
+    assert json.loads(output.read_text(encoding="utf-8"))["index_version"] == INDEX_VERSION
 def test_index_stats_text_is_readable(tmp_path, capsys):
     index_file = tmp_path / "index.json"
     index_file.write_text(
@@ -2057,7 +2120,7 @@ def test_index_build_rebuilds_legacy_vectors_without_fingerprints(tmp_path, monk
         "vectors": [{"repo_id": "a/b", "vector": [1.0, 0.0, 0.0, 0.0]}],
     }), encoding="utf-8")
 
-    def fake_call_embeddings(config, inputs, *, timeout=60):
+    def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         return [[0.0, 1.0, 0.0, 0.0] for _ in inputs]
 
     args = build_parser().parse_args(
@@ -2072,7 +2135,7 @@ def test_index_build_rebuilds_legacy_vectors_without_fingerprints(tmp_path, monk
     assert index["record_count"] == 2
     assert len(index["vectors"]) == 2
     assert index["vectors"][0]["repo_id"] == "a/b"
-    assert index["vectors"][0]["vector"] == [0.0, 1.0, 0.0, 0.0]
+    assert decode_vector(index["vectors"][0]["vector"]).tolist() == [0.0, 1.0, 0.0, 0.0]
     assert index["vectors"][1]["repo_id"] == "c/d"
     assert index["vectors"][1]["embedding_input_fingerprint"]
 
@@ -2131,7 +2194,7 @@ def test_index_build_refreshes_metadata_when_reusing_vector(tmp_path, monkeypatc
         ],
     }), encoding="utf-8")
 
-    def fake_call_embeddings(config, inputs, *, timeout=60):
+    def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         raise AssertionError("unchanged vectors should be reused without embedding calls")
 
     args = build_parser().parse_args(
@@ -2418,7 +2481,7 @@ def test_index_build_force_rebuilds_from_scratch(tmp_path, monkeypatch):
         "vectors": [{"repo_id": "a/b", "vector": [1.0, 0.0, 0.0, 0.0]}],
     }), encoding="utf-8")
 
-    def fake_call_embeddings(config, inputs, *, timeout=60):
+    def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         return [[0.0, 0.0, 1.0, 0.0] for _ in inputs]
 
     args = build_parser().parse_args(
@@ -2431,7 +2494,7 @@ def test_index_build_force_rebuilds_from_scratch(tmp_path, monkeypatch):
     assert code == 0
     index = json.loads(output_file.read_text())
     assert index["record_count"] == 1
-    assert index["vectors"][0]["vector"] == [0.0, 0.0, 1.0, 0.0]
+    assert decode_vector(index["vectors"][0]["vector"]).tolist() == [0.0, 0.0, 1.0, 0.0]
 
 
 def test_index_build_checkpoint_writes_after_each_batch(tmp_path, monkeypatch):
@@ -2448,7 +2511,7 @@ def test_index_build_checkpoint_writes_after_each_batch(tmp_path, monkeypatch):
 
     output_file = tmp_path / "index.json"
 
-    def fake_call_embeddings(config, inputs, *, timeout=60):
+    def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         return [[float(i)] for i in range(len(inputs))]
 
     args = build_parser().parse_args(
@@ -2481,7 +2544,7 @@ def test_index_build_checkpoint_saves_partial_on_crash(tmp_path, monkeypatch):
 
     call_count = 0
 
-    def fake_call_embeddings(config, inputs, *, timeout=60):
+    def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         nonlocal call_count
         call_count += 1
         if call_count == 2:
@@ -2496,7 +2559,68 @@ def test_index_build_checkpoint_saves_partial_on_crash(tmp_path, monkeypatch):
         code = index_build(args)
 
     assert code == 1
-    # First batch (64 records) should be saved even though second batch crashed.
-    index = json.loads(output_file.read_text())
+    assert not output_file.exists()
+    checkpoint_file = Path(f"{output_file}.partial.json")
+    index = json.loads(checkpoint_file.read_text())
     assert index["record_count"] == 64
     assert len(index["vectors"]) == 64
+
+
+def test_index_build_checkpoints_large_builds_in_bounded_intervals(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "local")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    records = [_make_record(f"r{i}/repo") for i in range(17 * 64)]
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps(records), encoding="utf-8")
+    output_file = tmp_path / "index.json"
+    writes: list[Path] = []
+    original_checkpoint = __import__("xists.cli", fromlist=["_index_write_checkpoint"])._index_write_checkpoint
+
+    def record_checkpoint(output, **kwargs):
+        writes.append(output)
+        original_checkpoint(output, **kwargs)
+
+    args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file)]
+    )
+    with patch("xists.cli.call_embeddings", side_effect=lambda _config, inputs, **_kwargs: [[1.0] for _ in inputs]), patch(
+        "xists.cli._index_write_checkpoint", side_effect=record_checkpoint
+    ):
+        assert index_build(args) == 0
+
+    assert writes == [Path(f"{output_file}.partial.json"), output_file]
+
+
+def test_index_build_resume_completes_partial_checkpoint(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "local")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+    records = [_make_record(f"r{i}/repo") for i in range(65)]
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps(records), encoding="utf-8")
+    output_file = tmp_path / "index.json"
+    calls = 0
+
+    def interrupted_embeddings(config, inputs, *, timeout=60, input_type=None):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise EmbeddingError("simulated interruption")
+        return [[float(i)] for i in range(len(inputs))]
+
+    args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file)]
+    )
+    with patch("xists.cli.call_embeddings", side_effect=interrupted_embeddings):
+        assert index_build(args) == 1
+
+    resumed_args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file), "--resume"]
+    )
+    with patch("xists.cli.call_embeddings", side_effect=lambda _config, inputs, **_kwargs: [[1.0] for _ in inputs]):
+        assert index_build(resumed_args) == 0
+
+    index = json.loads(output_file.read_text())
+    assert index["record_count"] == 65
+    assert not Path(f"{output_file}.partial.json").exists()

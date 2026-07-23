@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "dataset_name": "xists-ci-smoke",
+  "families": {},
+  "cases": [
+    {
+      "id": "atlas-identity",
+      "query": "atlas",
+      "expected_repo_id": "acme/atlas",
+      "tags": ["identity"]
+    },
+    {
+      "id": "relay-identity",
+      "query": "relay",
+      "expected_repo_id": "acme/relay",
+      "tags": ["identity"]
+    }
+  ]
+}

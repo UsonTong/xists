@@ -1,0 +1,50 @@
+[
+  {
+    "schema_version": 2,
+    "repo_id": "acme/atlas",
+    "name": "atlas",
+    "url": "https://example.invalid/acme/atlas",
+    "github": {
+      "description": "A fixture project for local semantic search.",
+      "topics": ["search"],
+      "language": "Python",
+      "stars": 1,
+      "forks": 0,
+      "archived": false,
+      "disabled": false
+    },
+    "llm_profile": {
+      "summary": "A small fixture project that demonstrates semantic search.",
+      "aliases": ["atlas"],
+      "project_type": "tool",
+      "ecosystem": ["python", "search"],
+      "search_text": "small fixture project for semantic search testing",
+      "confidence": "high",
+      "abstained": false
+    }
+  },
+  {
+    "schema_version": 2,
+    "repo_id": "acme/relay",
+    "name": "relay",
+    "url": "https://example.invalid/acme/relay",
+    "github": {
+      "description": "A fixture project for message delivery.",
+      "topics": ["messaging"],
+      "language": "Python",
+      "stars": 1,
+      "forks": 0,
+      "archived": false,
+      "disabled": false
+    },
+    "llm_profile": {
+      "summary": "A small fixture project that demonstrates message delivery.",
+      "aliases": ["relay"],
+      "project_type": "service",
+      "ecosystem": ["python", "messaging"],
+      "search_text": "small fixture project for message delivery testing",
+      "confidence": "high",
+      "abstained": false
+    }
+  }
+]

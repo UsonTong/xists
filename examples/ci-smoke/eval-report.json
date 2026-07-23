@@ -1,0 +1,32 @@
+{
+  "dataset_name": "xists-ci-smoke",
+  "case_count": 2,
+  "metrics": {
+    "exact_top1_rate": 1.0,
+    "recall_at_1": 1.0,
+    "recall_at_5": 1.0,
+    "serious_top1_error_rate": 0.0
+  },
+  "confidence": {
+    "wrong_high_confidence_top_1_count": 0
+  },
+  "top1_summary": {
+    "top1_miss_serious_count": 0
+  },
+  "results": [
+    {
+      "id": "atlas-identity",
+      "expected_repo_id": "acme/atlas",
+      "top_result_repo_id": "acme/atlas",
+      "top1_status": "exact",
+      "acceptable_rank": 1
+    },
+    {
+      "id": "relay-identity",
+      "expected_repo_id": "acme/relay",
+      "top_result_repo_id": "acme/relay",
+      "top1_status": "exact",
+      "acceptable_rank": 1
+    }
+  ]
+}

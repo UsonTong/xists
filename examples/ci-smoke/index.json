@@ -1,0 +1,25 @@
+{
+  "index_version": 1,
+  "record_schema_version": 2,
+  "embedding_model": "fixture/identity-2d",
+  "embedding_base_url": "https://example.invalid/v1",
+  "embedding_input_version": 3,
+  "dimension": 2,
+  "built_at": "2026-07-23T00:00:00+00:00",
+  "record_count": 2,
+  "skipped": [],
+  "vectors": [
+    {
+      "repo_id": "acme/atlas",
+      "embedding_input_fingerprint": "fixture-atlas",
+      "metadata": {"name": "atlas"},
+      "vector": [1.0, 0.0]
+    },
+    {
+      "repo_id": "acme/relay",
+      "embedding_input_fingerprint": "fixture-relay",
+      "metadata": {"name": "relay"},
+      "vector": [0.0, 1.0]
+    }
+  ]
+}

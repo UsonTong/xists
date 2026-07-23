@@ -68,11 +68,15 @@ has no serious mismatches on the committed smoke evaluation set only after the
 demo artifacts have been refreshed and rebuilt as described above. Use the
 100-case and extended 112-case files for broader local spot checks.
 
-For a no-network artifact smoke test, run:
+For a no-network CI-fixture smoke test, run:
 
 ```bash
 python scripts/smoke_check.py
 ```
+
+This command validates the small committed fixtures in `examples/ci-smoke/`.
+It does not read the local `demo-*.json` artifacts, which remain ignored
+because they are generated from endpoint-dependent local data.
 
 ## 5. Commit release-prep changes
 

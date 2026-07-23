@@ -1,4 +1,4 @@
-"""Run no-network smoke checks for committed xists demo artifacts."""
+"""Run no-network smoke checks for committed xists CI fixtures."""
 
 from __future__ import annotations
 
@@ -88,16 +88,17 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run no-network smoke checks for xists demo artifacts.")
-    parser.add_argument("--repos", type=Path, default=Path("repos.txt"), help="Repository list to validate")
-    parser.add_argument("--records", type=Path, default=Path("demo-records.json"), help="Demo records JSON")
-    parser.add_argument("--index", type=Path, default=Path("demo-index.json"), help="Demo index JSON")
-    parser.add_argument("--report", type=Path, default=Path("demo-eval-report.json"), help="Demo eval report JSON")
+    fixture_dir = Path("examples/ci-smoke")
+    parser = argparse.ArgumentParser(description="Run no-network smoke checks for committed xists CI fixtures.")
+    parser.add_argument("--repos", type=Path, default=fixture_dir / "repos.txt", help="Repository list to validate")
+    parser.add_argument("--records", type=Path, default=fixture_dir / "records.json", help="Fixture records JSON")
+    parser.add_argument("--index", type=Path, default=fixture_dir / "index.json", help="Fixture index JSON")
+    parser.add_argument("--report", type=Path, default=fixture_dir / "eval-report.json", help="Fixture eval report JSON")
     parser.add_argument(
         "--cases",
         type=Path,
         nargs="+",
-        default=[Path("examples/eval-cases.json"), Path("examples/eval-cases-extended.json")],
+        default=[fixture_dir / "eval-cases.json"],
         help="Evaluation datasets to validate against repos.txt",
     )
     return parser

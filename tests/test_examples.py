@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from xists.cli import load_repo_ids
@@ -58,3 +60,16 @@ def test_smoke_eval_dataset_is_valid_and_matches_example_repos():
     for case in dataset["cases"]:
         assert case["expected_repo_id"] in example_repo_ids
         assert set(case["acceptable_set"]).issubset(example_repo_ids)
+
+
+def test_committed_ci_smoke_fixture_passes_no_network_check():
+    completed = subprocess.run(
+        [sys.executable, "scripts/smoke_check.py"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["ok"] is True

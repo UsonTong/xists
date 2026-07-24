@@ -26,3 +26,13 @@ def test_project_metadata_declares_license_and_public_urls():
     assert project["license-files"] == ["LICENSE"]
     assert project["urls"]["Repository"] == "https://github.com/UsonTong/xists"
     assert (ROOT / "LICENSE").is_file()
+
+
+def test_sdist_build_whitelist_excludes_local_and_private_artifacts():
+    with (ROOT / "pyproject.toml").open("rb") as source:
+        build = tomllib.load(source)["tool"]["hatch"]["build"]
+
+    assert "data" not in build["only-include"]
+    assert ".claude" not in build["only-include"]
+    assert "src/xists" in build["only-include"]
+    assert "LICENSE" in build["only-include"]

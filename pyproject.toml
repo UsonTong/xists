@@ -37,5 +37,20 @@ Issues = "https://github.com/UsonTong/xists/issues"
 [tool.hatch.version]
 path = "src/xists/__init__.py"
 
+[tool.hatch.build]
+only-include = [
+    ".env.example",
+    "LICENSE",
+    "README.md",
+    "README.zh-CN.md",
+    "docs",
+    "examples",
+    "pyproject.toml",
+    "repos.txt",
+    "scripts",
+    "src/xists",
+    "tests",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/xists"]

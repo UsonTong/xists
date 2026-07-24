@@ -6,10 +6,15 @@ index.json
 
 __pycache__/
 *.py[cod]
+build/
+dist/
+*.egg-info/
+.wheel-venv/
 demo-records.json
 demo-index.json
 demo-report.json
 demo-eval-report.json
+demo-eval-report-*.json
 eval-report.json
 repos-top10k.txt
 data/scale-*-records*.json

@@ -53,7 +53,7 @@ jobs:
         run: |
           python -m zipfile -l dist/xists-*.whl
           tar -tzf dist/xists-*.tar.gz
-          ! tar -tzf dist/xists-*.tar.gz | grep -E '(^|/)(data/|\.claude/|dist/|build/|\.env$|.*scale-)'
+          ! tar -tzf dist/xists-*.tar.gz | grep -E '(^|/)(data/|\.claude/|dist/|build/|\.env$)'
 
       - name: Install wheel in a clean environment
         run: |

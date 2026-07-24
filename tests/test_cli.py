@@ -482,6 +482,233 @@ def test_search_cli_json_matches_public_api_core_result(tmp_path, monkeypatch, c
         assert actual[key] == expected[key]
 
 
+@pytest.mark.parametrize(
+    ("command", "handler", "expected_message"),
+    [
+        (["records", "inspect", "--records", "missing.json"], records_inspect, "Records file not found"),
+        (["records", "stats", "--records", "missing.json"], records_stats, "Records file not found"),
+        (["records", "validate", "--records", "missing.json"], records_validate, "Records file not found"),
+        (["index", "stats", "--index", "missing.json"], index_stats, "Index file not found"),
+        (
+            ["index", "verify", "--records", "missing-records.json", "--index", "missing-index.json"],
+            index_verify,
+            "Records file not found",
+        ),
+    ],
+)
+def test_core_inspection_errors_use_stderr_and_exit_two(tmp_path, monkeypatch, capsys, command, handler, expected_message):
+    monkeypatch.chdir(tmp_path)
+
+    assert handler(build_parser().parse_args(command)) == 2
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert expected_message in captured.err
+
+
+def test_search_missing_index_uses_stderr_and_exit_two(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embeddings.example/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
+    missing_index = tmp_path / "missing-index.json"
+
+    args = build_parser().parse_args(["search", "query", "--index", str(missing_index), "--format", "json"])
+
+    assert search(args) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Index file not found" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("command", "handler"),
+    [
+        (["records", "inspect"], records_inspect),
+        (["records", "stats"], records_stats),
+        (["records", "validate"], records_validate),
+        (["index", "verify"], index_verify),
+    ],
+)
+def test_core_commands_report_invalid_records_json_on_stderr(tmp_path, capsys, command, handler):
+    records_file = tmp_path / "records.json"
+    records_file.write_text("{not json", encoding="utf-8")
+    index_file = tmp_path / "index.json"
+    index_file.write_text("{}", encoding="utf-8")
+
+    args = build_parser().parse_args(
+        [*command, "--records", str(records_file), *( ["--index", str(index_file)] if handler is index_verify else [])]
+    )
+
+    assert handler(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Could not read records JSON" in captured.err
+    assert str(records_file) in captured.err
+
+
+@pytest.mark.parametrize(
+    ("command", "handler"),
+    [
+        (["records", "inspect"], records_inspect),
+        (["records", "stats"], records_stats),
+        (["records", "validate"], records_validate),
+        (["index", "verify"], index_verify),
+    ],
+)
+def test_core_commands_reject_records_that_are_not_object_lists(tmp_path, capsys, command, handler):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps(["not an object"]), encoding="utf-8")
+    index_file = tmp_path / "index.json"
+    index_file.write_text("{}", encoding="utf-8")
+
+    args = build_parser().parse_args(
+        [*command, "--records", str(records_file), *( ["--index", str(index_file)] if handler is index_verify else [])]
+    )
+
+    assert handler(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "JSON list of objects" in captured.err
+
+
+def test_records_inspect_tolerates_non_object_optional_sections(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text(
+        json.dumps([{"repo_id": "example/repo", "github": "invalid", "llm_profile": "invalid"}]),
+        encoding="utf-8",
+    )
+
+    args = build_parser().parse_args(["records", "inspect", "--records", str(records_file)])
+
+    assert records_inspect(args) == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert captured.err == ""
+    assert payload["items"][0]["repo_id"] == "example/repo"
+    assert payload["items"][0]["language"] is None
+
+
+@pytest.mark.parametrize(
+    ("command", "handler"),
+    [
+        (["index", "stats"], index_stats),
+        (["index", "verify"], index_verify),
+    ],
+)
+def test_index_commands_report_invalid_index_json_on_stderr(tmp_path, capsys, command, handler):
+    records_file = tmp_path / "records.json"
+    records_file.write_text("[]", encoding="utf-8")
+    index_file = tmp_path / "index.json"
+    index_file.write_text("{not json", encoding="utf-8")
+
+    args = build_parser().parse_args(
+        [*command, "--index", str(index_file), *( ["--records", str(records_file)] if handler is index_verify else [])]
+    )
+
+    assert handler(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Could not read index JSON" in captured.err
+    assert str(index_file) in captured.err
+
+
+@pytest.mark.parametrize(
+    ("command", "handler"),
+    [
+        (["index", "stats"], index_stats),
+        (["index", "verify"], index_verify),
+    ],
+)
+def test_index_commands_reject_non_object_indexes(tmp_path, capsys, command, handler):
+    records_file = tmp_path / "records.json"
+    records_file.write_text("[]", encoding="utf-8")
+    index_file = tmp_path / "index.json"
+    index_file.write_text("[]", encoding="utf-8")
+
+    args = build_parser().parse_args(
+        [*command, "--index", str(index_file), *( ["--records", str(records_file)] if handler is index_verify else [])]
+    )
+
+    assert handler(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "JSON object" in captured.err
+
+
+def test_search_reports_invalid_index_json_on_stderr(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embeddings.example/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
+    index_file = tmp_path / "index.json"
+    index_file.write_text("{not json", encoding="utf-8")
+
+    args = build_parser().parse_args(["search", "query", "--index", str(index_file), "--format", "json"])
+
+    assert search(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Could not read index JSON" in captured.err
+
+
+def test_search_rejects_non_object_index_on_stderr(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embeddings.example/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
+    index_file = tmp_path / "index.json"
+    index_file.write_text("[]", encoding="utf-8")
+
+    args = build_parser().parse_args(["search", "query", "--index", str(index_file), "--format", "json"])
+
+    assert search(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "JSON object" in captured.err
+
+
+def test_index_verify_missing_index_uses_stderr_and_exit_two(tmp_path, capsys):
+    records_file = tmp_path / "records.json"
+    records_file.write_text("[]", encoding="utf-8")
+    missing_index = tmp_path / "missing-index.json"
+
+    args = build_parser().parse_args(
+        ["index", "verify", "--records", str(records_file), "--index", str(missing_index)]
+    )
+
+    assert index_verify(args) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Index file not found" in captured.err
+
+
+def test_doctor_keeps_failed_diagnostics_as_json_on_stdout(tmp_path, monkeypatch, capsys):
+    for name in (
+        "EMBEDDING_API_KEY",
+        "EMBEDDING_BASE_URL",
+        "EMBEDDING_MODEL",
+        "LLM_API_KEY",
+        "LLM_BASE_URL",
+        "LLM_MODEL",
+        "GITHUB_TOKEN",
+        "GITHUB_TOKENS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    args = build_parser().parse_args(
+        [
+            "doctor",
+            "--records", str(tmp_path / "missing-records.json"),
+            "--index", str(tmp_path / "missing-index.json"),
+            "--cases", str(tmp_path / "missing-cases.json"),
+        ]
+    )
+
+    assert doctor(args) == 1
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["ok"] is False
+    assert captured.err == ""
+
+
 def test_eval_run_writes_report(tmp_path, monkeypatch):
     cases_file = tmp_path / "eval-cases.json"
     cases_file.write_text("{}", encoding="utf-8")

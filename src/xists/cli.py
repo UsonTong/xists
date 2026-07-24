@@ -921,7 +921,11 @@ def search(args: argparse.Namespace) -> int:
         print(f"Index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
         return 2
 
-    index = load_index(args.index)
+    try:
+        index = _read_index_file(args.index)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
     rerank = None
     if args.ranking_strategy == "rerank":
         try:
@@ -1131,6 +1135,32 @@ def _print_embedding_error(error: EmbeddingError, *, command: str) -> None:
     )
 
 
+def _read_json_file(path: Path, *, kind: str) -> Any:
+    """Read a JSON file and attach its role and path to parse errors."""
+
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"Could not read {kind} JSON: {path}: {error}") from error
+
+
+def _read_records_file(path: Path) -> list[dict[str, Any]]:
+    records = _read_json_file(path, kind="records")
+    if not isinstance(records, list) or not all(isinstance(record, dict) for record in records):
+        raise ValueError(f"Records file must contain a JSON list of objects: {path}")
+    return records
+
+
+def _read_index_file(path: Path) -> dict[str, Any]:
+    try:
+        index = load_index(path)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"Could not read index JSON: {path}: {error}") from error
+    if not isinstance(index, dict):
+        raise ValueError(f"Index file must contain a JSON object: {path}")
+    return index
+
+
 def version(args: argparse.Namespace) -> int:
     print(json.dumps({"version": __version__}, ensure_ascii=False, indent=2))
     return 0
@@ -1325,7 +1355,11 @@ def index_stats(args: argparse.Namespace) -> int:
         print(f"Index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
         return 2
 
-    index = load_index(args.index)
+    try:
+        index = _read_index_file(args.index)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
     payload = _index_stats_report(index, index_path=args.index, limit=args.limit)
     if getattr(args, "format", "text") == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -1339,11 +1373,11 @@ def records_inspect(args: argparse.Namespace) -> int:
         print(f"Records file not found: {args.records}. Run 'xists ingest github' first.", file=sys.stderr)
         return 2
 
-    records = json.loads(args.records.read_text(encoding="utf-8"))
-    if not isinstance(records, list):
-        print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
+    try:
+        records = _read_records_file(args.records)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
         return 1
-
     filtered = records
     if args.repo:
         needle = args.repo.lower()
@@ -1355,8 +1389,8 @@ def records_inspect(args: argparse.Namespace) -> int:
 
     inspected: list[dict[str, Any]] = []
     for record in filtered[: max(args.limit, 0)]:
-        github = record.get("github") or {}
-        profile = record.get("llm_profile") or {}
+        github = record.get("github") if isinstance(record.get("github"), dict) else {}
+        profile = record.get("llm_profile") if isinstance(record.get("llm_profile"), dict) else {}
         inspected.append(
             {
                 "schema_version": record.get("schema_version"),
@@ -1488,11 +1522,11 @@ def records_stats(args: argparse.Namespace) -> int:
     if not args.records.exists():
         print(f"Records file not found: {args.records}. Run 'xists ingest github' first.", file=sys.stderr)
         return 2
-    records = json.loads(args.records.read_text(encoding="utf-8"))
-    if not isinstance(records, list):
-        print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
+    try:
+        records = _read_records_file(args.records)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
         return 1
-
     report = _records_stats_report(records, limit=args.limit)
     report["records"] = str(args.records)
     if getattr(args, "format", "text") == "json":
@@ -1564,11 +1598,11 @@ def records_validate(args: argparse.Namespace) -> int:
     if not args.records.exists():
         print(f"Records file not found: {args.records}. Run 'xists ingest github' first.", file=sys.stderr)
         return 2
-    records = json.loads(args.records.read_text(encoding="utf-8"))
-    if not isinstance(records, list):
-        print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
+    try:
+        records = _read_records_file(args.records)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
         return 1
-
     report = records_validation_report(records, expected_profile_prompt_version=PROFILE_PROMPT_VERSION)
     report["records"] = str(args.records)
     report["next_steps"] = [] if report["ok"] else _records_next_steps(args.records, report)
@@ -1937,11 +1971,16 @@ def index_verify(args: argparse.Namespace) -> int:
     if not args.index.exists():
         print(f"Index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
         return 2
-    records = json.loads(args.records.read_text(encoding="utf-8"))
-    if not isinstance(records, list):
-        print(f"Records file must contain a JSON list: {args.records}", file=sys.stderr)
+    try:
+        records = _read_records_file(args.records)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
         return 1
-    index = load_index(args.index)
+    try:
+        index = _read_index_file(args.index)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
     report = _index_verify_report(records, index)
     report["records"] = str(args.records)
     report["index"] = str(args.index)

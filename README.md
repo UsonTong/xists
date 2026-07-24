@@ -37,14 +37,47 @@ flowchart LR
 3. **Index**: It builds a local JSON embedding index.
 4. **Search**: You query the index using semantic search.
 
-## Local-first by default
+## Local-first index, explicit model endpoints
 
 `xists` keeps everything transparent and local:
 - `records.json`: Raw metadata, structure signals, and LLM-generated profiles.
 - `index.json`: The embedding index.
 - `eval-report.json`: Search quality test results.
 
-You need a GitHub token for the initial data fetch, plus model endpoints for summaries and search. After repository data is collected, indexing and search can run locally if those model endpoints are local.
+You need a GitHub token for the initial data fetch, plus model endpoints for summaries and embeddings. The records, index, ranking, and evaluation report stay on your machine. An embedding endpoint calculates vectors; xists stores them in local JSON and compares them locally.
+
+## Install and first search
+
+Requires Python 3.11+. PyPI publication is prepared for v0.7.0 but has not
+yet been authorized; until then, install directly from a checked-out source
+tree:
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+After v0.7.0 is published, the equivalent package installation will be:
+
+```bash
+python -m pip install xists
+```
+
+Then create a local configuration file and build an index from repositories
+you control:
+
+```bash
+cp .env.example .env
+# Set the required GitHub, LLM, and embedding variables in .env.
+
+xists ingest github --repos repos.txt --output records.json --report report.json
+xists index build --records records.json --output index.json
+xists search "open source firebase alternative" --index index.json
+```
+
+See [the demo walkthrough](docs/demo.md) for endpoint checks, concurrency,
+evaluation, and troubleshooting. No current-schema demo records/index download
+is published yet; the first Release asset will be created only after it passes
+`records validate` and `index verify`.
 
 ---
 
@@ -80,6 +113,53 @@ xists index build \
 xists search "open source firebase alternative" --index demo-index.json
 xists search "open source firebase alternative" --index demo-index.json --format json
 ```
+
+The commands above generate local files and may call the endpoints configured
+in `.env`; use `records.json` / `index.json` instead if you do not want files
+named as demo artifacts.
+
+---
+
+## Python API
+
+Use the stable API when another Python program needs the same search behavior
+as the CLI. Configuration is always explicit; importing `xists.api` does not
+read `.env` or send network requests.
+
+```python
+from xists.api import load_index, search
+from xists.search.embed import EmbeddingConfig
+
+index = load_index("index.json")
+config = EmbeddingConfig(
+    api_key="your-key",
+    base_url="https://your-embedding-endpoint/v1",
+    model="your-embedding-model",
+)
+result = search("open source firebase alternative", index, embedding_config=config, top_k=5)
+```
+
+`search()` may call the endpoint in `config` to embed the query. It raises
+actionable Python exceptions for invalid indexes, incompatible embedding models,
+and endpoint failures instead of printing or terminating the process.
+
+---
+
+## Data, security, and privacy
+
+- `.env` and token files are read only from your local machine; xists does not
+  commit, print, telemetry-report, or upload their secret values.
+- `ingest github` sends your GitHub token only to GitHub. `profile refresh` and
+  ingest-time profile generation send repository text to the configured LLM
+  endpoint. `index build` sends embeddable repository text to the configured
+  embedding endpoint; `search` and `eval run` send query text to that endpoint.
+- A local endpoint keeps those requests on your machine or network. A remote
+  endpoint receives the corresponding text under that provider's terms; choose
+  it only when you are permitted to send the material. xists does not host the
+  endpoint, upload your index, or perform vector search remotely.
+- If you share records or indexes, you are responsible for checking repository
+  licenses, source content, generated profiles, and any personal or sensitive
+  information before distribution.
 
 ---
 

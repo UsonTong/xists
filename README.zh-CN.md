@@ -37,14 +37,41 @@ flowchart LR
 3. **索引**：在本地构建基于 Embedding 的 JSON 向量索引。
 4. **搜索**：直接在本地进行语义检索。
 
-## 本地优先
+## 本地索引，模型接口显式配置
 
 `xists` 所有的中间产物和结果都透明且受你掌控：
 - `records.json`：存放仓库的基础信息和 LLM 生成的特征画像。
 - `index.json`：本地的 Embedding 索引。
 - `eval-report.json`：检索质量评测报告。
 
-首次采集需要 GitHub token 和 GitHub API；生成摘要与搜索还需要模型接口。仓库数据采集完成后，如果模型接口也部署在本地，后续索引和搜索可以在本地完成。
+首次采集需要 GitHub token；生成摘要与 embedding 还需要模型接口。records、index、排序和评测报告都保留在本机。embedding 接口只负责计算向量；xists 把向量保存为本地 JSON，并在本地完成相似度计算与排序。
+
+## 安装与第一次搜索
+
+环境要求：Python 3.11+。v0.7.0 正在准备 PyPI 首发，但尚未获授权发布；在此之前，请从检出的源码目录安装：
+
+```bash
+python -m pip install -e ".[dev]"
+```
+
+v0.7.0 发布后，对应的安装方式会是：
+
+```bash
+python -m pip install xists
+```
+
+然后创建本地配置，并从你有权处理的仓库清单构建索引：
+
+```bash
+cp .env.example .env
+# 在 .env 中填写 GitHub、LLM 和 embedding 配置。
+
+xists ingest github --repos repos.txt --output records.json --report report.json
+xists index build --records records.json --output index.json
+xists search "open source firebase alternative" --index index.json
+```
+
+完整的接口预检、并发、评测和排错说明请看[演示流程](docs/demo.md)。目前尚未发布符合当前 schema 的 demo records/index 下载包；首个 Release asset 必须先通过 `records validate` 与 `index verify` 才会提供。
 
 ---
 
@@ -80,6 +107,38 @@ xists index build \
 xists search "open source firebase alternative" --index demo-index.json
 xists search "open source firebase alternative" --index demo-index.json --format json
 ```
+
+上面的命令会生成本地文件，并可能调用 `.env` 里配置的接口；若不希望使用 demo 命名，请改用 `records.json` 和 `index.json`。
+
+---
+
+## Python API
+
+其他 Python 程序需要使用和 CLI 相同的搜索逻辑时，可以使用稳定 API。配置必须显式传入；导入 `xists.api` 不会读取 `.env`，也不会发起网络请求。
+
+```python
+from xists.api import load_index, search
+from xists.search.embed import EmbeddingConfig
+
+index = load_index("index.json")
+config = EmbeddingConfig(
+    api_key="your-key",
+    base_url="https://your-embedding-endpoint/v1",
+    model="your-embedding-model",
+)
+result = search("open source firebase alternative", index, embedding_config=config, top_k=5)
+```
+
+`search()` 会按需调用 `config` 指定的接口来计算查询向量。无效 index、embedding 模型不兼容或接口失败会以可捕获的 Python 异常返回，不会打印信息或结束进程。
+
+---
+
+## 数据、安全与隐私
+
+- `.env` 和 token 文件只在本地读取；xists 不会提交、打印、遥测上报或上传其中的密钥。
+- `ingest github` 只会把 GitHub token 发给 GitHub。`profile refresh` 与 ingest 中生成 profile 的步骤会把仓库文本发送给你配置的 LLM 接口。`index build` 会把可 embedding 的仓库文本发送给 embedding 接口；`search` 和 `eval run` 会把查询文本发送给该接口。
+- 选择本地接口时，请求会留在你的机器或网络中；选择远端接口时，对应文本会发送给该提供商，并受其条款约束。xists 不托管接口、不上传你的 index，也不在远端执行向量搜索。
+- 若你分享 records 或 index，需要自行检查仓库许可证、源内容、生成的 profile，以及其中是否包含个人或敏感信息。
 
 ---
 

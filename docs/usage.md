@@ -18,13 +18,24 @@ For the full walkthrough, see [docs/demo.md](demo.md).
 
 ## Installation
 
-Install xists in development mode:
+For development from a source checkout, install xists in editable mode:
 
 ```bash
 python -m pip install -e ".[dev]"
 ```
 
 This makes the `xists` command available globally and installs the test dependency used by CI.
+
+The v0.7.0 PyPI release is prepared but has not yet been authorized. Once it
+is published, users who do not need a source checkout can install it with:
+
+```bash
+python -m pip install xists
+```
+
+The command-line workflow still needs a local records/index pair. Build one
+from your own repository list with the configured endpoints, as described in
+[the demo workflow](demo.md), or download a future validated Release asset.
 
 ## Configuration
 

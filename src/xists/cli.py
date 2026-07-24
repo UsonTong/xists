@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from xists import __version__
+from xists.api import load_index, search as public_search
 from xists.eval.inspect import inspect_report, load_report
 from xists.eval.run import evaluate_dataset
 from xists.eval.schema import EvaluationDatasetError, load_dataset
@@ -53,9 +54,9 @@ from xists.search.embed import (
     embedding_text_from_record,
     probe_embedding_endpoint,
 )
-from xists.search.index import INDEX_VERSION, decode_vector, encode_vector, entry_metadata, load_index
+from xists.search.index import INDEX_VERSION, decode_vector, encode_vector, entry_metadata
 from xists.search.confidence import CONFIDENCE_CALIBRATION_MODES
-from xists.search.query import RANKING_STRATEGIES, IndexMismatchError, _query_intent, rank
+from xists.search.query import RANKING_STRATEGIES, IndexMismatchError, _query_intent
 from xists.search.rerank import (
     RerankerError,
     RerankerNotConfiguredError,
@@ -934,10 +935,10 @@ def search(args: argparse.Namespace) -> int:
         rank_kwargs: dict[str, Any] = {}
         if variants is not None and rerank_queries is not None:
             rank_kwargs = {"query_variants": variants[0], "rerank_query": rerank_queries[0]}
-        result = rank(
+        result = public_search(
             args.query,
             index,
-            config,
+            embedding_config=config,
             top_k=args.top_k,
             ranking_strategy=args.ranking_strategy,
             rerank=rerank,

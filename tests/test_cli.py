@@ -6,6 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from xists import __version__
+from xists.api import search as public_search
 from xists.cli import (
     _load_canonical_queries,
     build_parser,
@@ -29,7 +30,12 @@ from xists.cli import (
 from xists.ingest.github import GitHubAPIError
 from xists.profile.llm import LLMError, PROFILE_PROMPT_VERSION
 from xists.records import RECORD_SCHEMA_VERSION
-from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingError, embedding_input_fingerprint
+from xists.search.embed import (
+    EMBEDDING_INPUT_VERSION,
+    EmbeddingConfig,
+    EmbeddingError,
+    embedding_input_fingerprint,
+)
 from xists.search.index import INDEX_VERSION, decode_vector
 
 
@@ -290,7 +296,7 @@ def test_search_defaults_to_text_output(tmp_path, monkeypatch, capsys):
     args = build_parser().parse_args(["search", "python api framework", "--index", str(index_file)])
 
     with patch(
-        "xists.cli.rank",
+        "xists.cli.public_search",
         return_value={
             "query": "python api framework",
             "query_intent": {"type": "functional"},
@@ -339,7 +345,7 @@ def test_search_json_format_prints_machine_readable_results(tmp_path, monkeypatc
     )
 
     with patch(
-        "xists.cli.rank",
+        "xists.cli.public_search",
         return_value={
             "query": "python api framework",
             "query_intent": {"type": "functional"},
@@ -388,7 +394,7 @@ def test_search_text_format_prints_readable_results(tmp_path, monkeypatch, capsy
     args = build_parser().parse_args(["search", "python api framework", "--index", str(index_file), "--format", "text"])
 
     with patch(
-        "xists.cli.rank",
+        "xists.cli.public_search",
         return_value={
             "query": "python api framework",
             "query_intent": {"type": "functional"},
@@ -426,6 +432,54 @@ def test_search_text_format_prints_readable_results(tmp_path, monkeypatch, capsy
     assert "summary: A modern, fast web framework for building APIs with Python." in output
     assert "why: ranked by semantic similarity; metadata overlap" in output
     assert "diagnostics: topics=api; capabilities=building; types=framework; language=Python; phrase=search_phrases" in output
+
+
+def test_search_cli_json_matches_public_api_core_result(tmp_path, monkeypatch, capsys):
+    index = {
+        "index_version": INDEX_VERSION,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "fixture/embed",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "dimension": 2,
+        "vectors": [
+            {
+                "repo_id": "winner/repo",
+                "vector": [1.0, 0.0],
+                "metadata": {"name": "winner", "summary": "A useful project"},
+            },
+            {
+                "repo_id": "other/repo",
+                "vector": [0.0, 1.0],
+                "metadata": {"name": "other"},
+            },
+        ],
+    }
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(index), encoding="utf-8")
+    config = EmbeddingConfig(
+        api_key="test-key",
+        base_url="https://embeddings.example/v1",
+        model="fixture/embed",
+    )
+
+    def fake_embeddings(_config, inputs, *, timeout=60, input_type=None):
+        assert input_type == "query"
+        return [[1.0, 0.0] for _ in inputs]
+
+    monkeypatch.setattr("xists.search.embed.call_embeddings", fake_embeddings)
+    expected = public_search("useful project", index, embedding_config=config, top_k=1)
+    monkeypatch.setenv("EMBEDDING_API_KEY", config.api_key)
+    monkeypatch.setenv("EMBEDDING_BASE_URL", config.base_url)
+    monkeypatch.setenv("EMBEDDING_MODEL", config.model)
+
+    args = build_parser().parse_args(
+        ["search", "useful project", "--index", str(index_file), "--top-k", "1", "--format", "json"]
+    )
+
+    assert search(args) == 0
+    actual = json.loads(capsys.readouterr().out)
+    for key in ("query", "query_intent", "abstained", "considered", "results"):
+        assert actual[key] == expected[key]
 
 
 def test_eval_run_writes_report(tmp_path, monkeypatch):

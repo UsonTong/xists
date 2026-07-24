@@ -76,3 +76,45 @@ def test_search_preserves_actionable_embedding_endpoint_error(monkeypatch):
 
     with pytest.raises(EmbeddingError, match="check endpoint credentials"):
         search("query", make_index(), embedding_config=CONFIG)
+
+
+def test_search_forwards_explicit_optional_ranking_arguments(monkeypatch):
+    captured = {}
+
+    def fake_rank(query, index, config, **kwargs):
+        captured.update(query=query, index=index, config=config, **kwargs)
+        return {"query": query, "abstained": True, "results": []}
+
+    monkeypatch.setattr("xists.api.rank", fake_rank)
+    reranker = lambda _query, _documents: [0.5]
+
+    result = search(
+        "query",
+        make_index(),
+        embedding_config=CONFIG,
+        top_k=3,
+        ranking_strategy="rerank",
+        rerank=reranker,
+        rerank_candidate_limit=7,
+        exploratory_threshold=0.4,
+        rerank_abstain_threshold=0.2,
+        confidence_calibration="evidence-v1",
+        query_variants=["query", "canonical query"],
+        rerank_query="canonical query",
+    )
+
+    assert result["abstained"] is True
+    assert captured == {
+        "query": "query",
+        "index": make_index(),
+        "config": CONFIG,
+        "top_k": 3,
+        "ranking_strategy": "rerank",
+        "rerank": reranker,
+        "rerank_candidate_limit": 7,
+        "exploratory_threshold": 0.4,
+        "rerank_abstain_threshold": 0.2,
+        "confidence_calibration": "evidence-v1",
+        "query_variants": ["query", "canonical query"],
+        "rerank_query": "canonical query",
+    }

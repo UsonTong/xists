@@ -4,17 +4,38 @@ build-backend = "hatchling.build"
 
 [project]
 name = "xists"
-version = "0.6.0"
+dynamic = ["version"]
 description = "Find what already exists before building from scratch."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["numpy"]
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["build", "pytest"]
 
 [project.scripts]
 xists = "xists.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/UsonTong/xists"
+Repository = "https://github.com/UsonTong/xists"
+Issues = "https://github.com/UsonTong/xists/issues"
+
+[tool.hatch.version]
+path = "src/xists/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/xists"]

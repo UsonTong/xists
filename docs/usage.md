@@ -167,6 +167,29 @@ xists doctor \
   --strict
 ```
 
+## Core CLI output contract
+
+The core inspection and search commands are safe to use from either a terminal
+or a script. Successful command output is written to stdout. Except for the
+JSON-first diagnostic report from `doctor`, failures while opening or parsing
+an input file, missing files, missing configuration, and endpoint failures are
+written to stderr and return a nonzero exit code; no partial JSON is written to
+stdout in those cases. A completed `records validate` or `index verify` report
+remains stdout output even when it reports validation or verification failures.
+
+| Command | Success output | Exit codes |
+|---|---|---|
+| `doctor` | One JSON document on stdout (JSON-first) | `0` when no error checks exist; `1` when a required check fails |
+| `records inspect` | One JSON document on stdout (JSON-first) | `0` on success; `1` for invalid records JSON; `2` when the file is absent |
+| `records validate`, `records stats` | Human-readable text by default; one JSON document with `--format json` | `0` on success; `1` for validation or JSON-read/structure errors; `2` when the file is absent |
+| `index stats`, `index verify` | Human-readable text by default; one JSON document with `--format json` | `0` when valid; `1` when verification or JSON-read/structure validation fails; `2` when an input file is absent |
+| `search` | Human-readable text by default; one JSON result with `--format json` | `0` on success; `1` for index compatibility, endpoint, transform, or ranking errors; `2` for missing embedding configuration or index file |
+
+`doctor` may report missing optional data files as warnings and still return
+`0`; its JSON `ok` field and individual check statuses are the authoritative
+machine-readable result. Evaluation commands retain their existing JSON-first
+reports and are not changed by this contract.
+
 ## Workflow
 
 ### Step 1: Ingest repositories

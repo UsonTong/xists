@@ -123,6 +123,23 @@ search remain local. An `abstained: true` response means the current index did
 not contain a sufficiently credible match and should be treated as that state,
 not as a hidden failure.
 
+### Optional Codex skill
+
+The repository also includes the `xists-project-search` Skill. It tells Codex
+when to use a configured xists MCP server, limits unnecessary tool calls, and
+preserves honest no-result behavior. Install it from GitHub with the bundled
+Codex installer:
+
+```bash
+python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/install-skill-from-github.py" \
+  --repo UsonTong/xists --path skills/xists-project-search
+```
+
+After starting a new Codex turn, requests to find or compare existing
+open-source projects can use the Skill and your configured xists MCP server.
+The Skill contains no index, endpoint, or credential configuration; configure
+the MCP server separately.
+
 ---
 
 ## Quickstart

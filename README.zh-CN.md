@@ -113,6 +113,21 @@ server 的配置优先级与普通 CLI 一致：shell 环境变量、当前目�
 接口以计算向量；index 与相似度检索仍在本地进行。`abstained: true` 表示当前
 index 中没有足够可信的匹配，agent 应如实处理该状态，而不是将其视为隐藏错误。
 
+### 可选 Codex Skill
+
+仓库还包含 `xists-project-search` Skill。它规定 Codex 在何时使用已配置的
+xists MCP server、限制不必要的 tool 调用，并保留诚实的无结果语义。可通过 Codex
+自带 installer 从 GitHub 安装：
+
+```bash
+python "${CODEX_HOME:-$HOME/.codex}/skills/.system/skill-installer/scripts/install-skill-from-github.py" \
+  --repo UsonTong/xists --path skills/xists-project-search
+```
+
+新开一个 Codex turn 后，寻找或比较已有开源项目的请求即可使用该 Skill 与已配置的
+xists MCP server。Skill 不包含 index、endpoint 或凭据配置；这些仍需单独配置
+MCP server。
+
 ---
 
 ## 快速开始

@@ -102,14 +102,13 @@ def test_version_parser_accepts_version_command():
     assert args.func is version
 
 
-def test_version_prints_json(capsys):
+def test_version_prints_plain_version(capsys):
     args = build_parser().parse_args(["version"])
 
     code = version(args)
 
     assert code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload == {"version": __version__}
+    assert capsys.readouterr().out.strip() == f"xists {__version__}"
 
 
 def test_global_version_flag_prints_plain_version(capsys):
@@ -119,6 +118,13 @@ def test_global_version_flag_prints_plain_version(capsys):
         assert error.code == 0
 
     assert capsys.readouterr().out.strip() == f"xists {__version__}"
+
+
+def test_version_help_describes_plain_version_output():
+    help_text = build_parser().format_help()
+
+    assert "Print the xists version" in help_text
+    assert "Print the xists version as JSON" not in help_text
 
 def test_ingest_github_parser_uses_default_paths():
     args = build_parser().parse_args(["ingest", "github"])

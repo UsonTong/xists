@@ -1162,7 +1162,7 @@ def _read_index_file(path: Path) -> dict[str, Any]:
 
 
 def version(args: argparse.Namespace) -> int:
-    print(json.dumps({"version": __version__}, ensure_ascii=False, indent=2))
+    print(f"xists {__version__}")
     return 0
 
 
@@ -2155,7 +2155,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"xists {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    version_parser = subparsers.add_parser("version", help="Print the xists version as JSON")
+    version_parser = subparsers.add_parser("version", help="Print the xists version")
     version_parser.set_defaults(func=version)
 
     doctor_parser = subparsers.add_parser("doctor", help="Check local configuration and expected data files")

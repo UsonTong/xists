@@ -4,6 +4,8 @@ import stat
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from xists.cli import build_parser, doctor, load_workspace_environment, workspace_init
 from xists.workspace import initialize_workspace, resolve_workspace, workspace_root
 
@@ -31,11 +33,12 @@ def test_resolve_workspace_uses_configured_root_in_empty_directory(tmp_path, mon
     assert workspace.eval_report == workspace_root_path / "eval-report.json"
 
 
-def test_resolve_workspace_uses_legacy_directory_for_any_legacy_file(tmp_path, monkeypatch):
+@pytest.mark.parametrize("legacy_filename", ("repos.txt", "records.json", "index.json", "eval-cases.json"))
+def test_resolve_workspace_uses_legacy_directory_for_any_legacy_file(tmp_path, monkeypatch, legacy_filename):
     workspace_root_path = tmp_path / "workspace"
     legacy_directory = tmp_path / "legacy"
     legacy_directory.mkdir()
-    (legacy_directory / "index.json").write_text("{}\n", encoding="utf-8")
+    (legacy_directory / legacy_filename).write_text("{}\n", encoding="utf-8")
     monkeypatch.setenv("XISTS_HOME", str(workspace_root_path))
 
     workspace = resolve_workspace(cwd=legacy_directory)

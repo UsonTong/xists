@@ -42,19 +42,66 @@ Users who do not need a source checkout can install the published package with:
 python -m pip install xists
 ```
 
-The command-line workflow still needs a local records/index pair. Build one
-from your own repository list with the configured endpoints, as described in
-[the demo workflow](demo.md), or download a future validated Release asset.
+The command-line workflow keeps its default files in one local workspace. Build
+your own records/index pair with the configured endpoints, as described below,
+or download a future validated Release asset.
+
+## Local workspace
+
+Run `xists init` once after installation. It creates the default workspace
+without downloading models, contacting an endpoint, or generating data:
+
+```bash
+xists init
+```
+
+By default, xists uses `~/.xists`:
+
+```text
+~/.xists/
+  .env
+  repos.txt
+  records.json
+  index.json
+  report.json
+  eval-cases.json
+  eval-report.json
+```
+
+The normal workflow can then be run from any directory:
+
+```bash
+# Add one GitHub owner/repo or URL per line to ~/.xists/repos.txt.
+xists ingest github
+xists index build
+xists search "self-hosted photo gallery"
+```
+
+Set `XISTS_HOME` to place the whole workspace elsewhere, such as an external
+disk or a larger local volume:
+
+```bash
+export XISTS_HOME=/mnt/xists-data
+xists init
+```
+
+Explicit file arguments always override workspace defaults, for example
+`xists search "query" --index /path/to/experimental-index.json`. For backward
+compatibility, if the current directory already contains `repos.txt`,
+`records.json`, `index.json`, or `eval-cases.json`, commands without explicit
+file arguments keep using that complete legacy working set. xists never moves
+or overwrites those files automatically.
 
 ## Configuration
 
-Create a local `.env` file from the example file:
+`xists init` creates the workspace `.env` template (`~/.xists/.env` by
+default). Edit that file and configure your credentials:
 
 ```bash
-cp .env.example .env
+xists init
 ```
 
-Edit `.env` and configure your credentials:
+Edit `~/.xists/.env` and configure your credentials:
 
 ```env
 # GitHub (required for ingest)
@@ -80,7 +127,10 @@ QUERY_TRANSFORM_BASE_URL=https://api.example.com/v1
 QUERY_TRANSFORM_MODEL=your_chat_model
 ```
 
-All three sections are required for the full workflow. `.env` is ignored by Git.
+All three sections are required for the full workflow. Environment variables
+set by the shell take precedence over a `.env` file in the current directory,
+which in turn takes precedence over the workspace `.env`. `.env` is ignored by
+Git.
 
 The embedding endpoint is a vector calculator, not a query service. During `index build`, xists sends repository texts to the endpoint and stores the returned vectors in local `index.json`. During `search` and `eval run`, xists sends only the query text to get its query vector, then performs vector search and reranking locally against `index.json`. Remote embedding APIs are usable, but only for calculation.
 
@@ -106,7 +156,7 @@ When multiple tokens are configured, each API request rotates to the next token,
 
 ## Create a repository list
 
-Create `repos.txt` in the project root:
+Create `repos.txt` in the workspace (by default `~/.xists/repos.txt`):
 
 ```text
 facebook/react
@@ -121,9 +171,10 @@ Supported formats:
 
 Blank lines and lines starting with `#` are ignored.
 
-## Recommended local file layout
+## Custom file layouts
 
-For local experiments, keep generated files under `data/` so it is obvious which files are inputs and outputs:
+The default workspace keeps generated files out of your source checkout. For a
+one-off experiment, pass explicit paths instead:
 
 ```text
 data/
@@ -134,7 +185,7 @@ data/
   eval-report.json
 ```
 
-The default root-level generated artifacts (`records.json`, `index.json`, `report.json`, `eval-report.json`) are ignored by Git. Do not commit `.env`, token files, or generated demo data unless you are intentionally updating a small fixture.
+Do not commit `.env`, token files, or generated demo data unless you are intentionally updating a small fixture.
 
 ## Preflight check
 
@@ -145,7 +196,14 @@ xists --version
 xists version
 ```
 
-Run `doctor` before a full ingest/index/eval cycle:
+Run `doctor` before a full ingest/index/eval cycle. Without file arguments it
+shows the active workspace and its full default paths:
+
+```bash
+xists doctor
+```
+
+For an explicit demo or custom data set, pass the files directly:
 
 ```bash
 xists doctor \

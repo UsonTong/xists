@@ -63,16 +63,16 @@ with test dependencies:
 python -m pip install -e ".[dev]"
 ```
 
-Then create a local configuration file and build an index from repositories
-you control:
+Then initialize the default local workspace, add repositories you control to
+`~/.xists/repos.txt`, and configure its `.env` file:
 
 ```bash
-cp .env.example .env
-# Set the required GitHub, LLM, and embedding variables in .env.
+xists init
+# Edit ~/.xists/.env and add owner/repo lines to ~/.xists/repos.txt.
 
-xists ingest github --repos repos.txt --output records.json --report report.json
-xists index build --records records.json --output index.json
-xists search "open source firebase alternative" --index index.json
+xists ingest github
+xists index build
+xists search "open source firebase alternative"
 ```
 
 See [the demo walkthrough](docs/demo.md) for endpoint checks, concurrency,
@@ -90,9 +90,9 @@ Requires Python 3.11+.
 # Install
 python -m pip install -e ".[dev]"
 
-# Set up config
-cp .env.example .env
-# Edit .env with your GitHub token, LLM model, and embedding model
+# Set up the default workspace configuration
+xists init
+# Edit ~/.xists/.env with your GitHub token, LLM model, and embedding model
 ```
 
 **Run the pipeline:**

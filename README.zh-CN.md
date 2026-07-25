@@ -62,15 +62,15 @@ python -m pip install xists
 python -m pip install -e ".[dev]"
 ```
 
-然后创建本地配置，并从你有权处理的仓库清单构建索引：
+然后初始化默认本地工作目录，在 `~/.xists/repos.txt` 中填写你有权处理的仓库清单，并配置其中的 `.env`：
 
 ```bash
-cp .env.example .env
-# 在 .env 中填写 GitHub、LLM 和 embedding 配置。
+xists init
+# 编辑 ~/.xists/.env，并在 ~/.xists/repos.txt 中加入 owner/repo 条目。
 
-xists ingest github --repos repos.txt --output records.json --report report.json
-xists index build --records records.json --output index.json
-xists search "open source firebase alternative" --index index.json
+xists ingest github
+xists index build
+xists search "open source firebase alternative"
 ```
 
 完整的接口预检、并发、评测和排错说明请看[演示流程](docs/demo.md)。目前尚未发布符合当前 schema 的 demo records/index 下载包；首个 Release asset 必须先通过 `records validate` 与 `index verify` 才会提供。
@@ -85,9 +85,9 @@ xists search "open source firebase alternative" --index index.json
 # 安装
 python -m pip install -e ".[dev]"
 
-# 配置
-cp .env.example .env
-# 在 .env 中填入你的 GitHub token、LLM 模型和 embedding 模型配置
+# 配置默认工作目录
+xists init
+# 在 ~/.xists/.env 中填入 GitHub token、LLM 模型和 embedding 模型配置
 ```
 
 **跑通全流程：**

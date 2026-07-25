@@ -1,0 +1,4 @@
+interface:
+  display_name: "Xists Project Search"
+  short_description: "Find and compare existing open-source projects with xists."
+  default_prompt: "Find existing open-source projects for my need with xists, then compare the strongest candidates."

@@ -34,6 +34,7 @@ def test_project_declares_mcp_as_an_optional_extra():
 
     assert project["dependencies"] == ["numpy"]
     assert project["optional-dependencies"]["mcp"] == ["mcp>=1.28,<2"]
+    assert "mcp>=1.28,<2" in project["optional-dependencies"]["dev"]
 
 
 def test_sdist_build_whitelist_excludes_local_and_private_artifacts():

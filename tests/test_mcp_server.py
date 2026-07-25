@@ -1,6 +1,8 @@
 import asyncio
 import json
+import os
 from pathlib import Path
+import sys
 
 import pytest
 
@@ -107,3 +109,43 @@ def test_search_projects_rejects_invalid_top_k(monkeypatch):
 
     with pytest.raises(ToolError, match="top_k must be an integer between 1 and 20"):
         asyncio.run(server.call_tool("search_projects", {"query": "project", "top_k": 21}))
+
+
+def test_stdio_server_runs_tools_without_corrupting_protocol(tmp_path):
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    index_path = tmp_path / "index.json"
+    index_path.write_text(json.dumps(_index()), encoding="utf-8")
+    environment = {
+        **os.environ,
+        "EMBEDDING_API_KEY": "key",
+        "EMBEDDING_BASE_URL": "https://example.test/v1",
+        "EMBEDDING_MODEL": "example-model",
+        "MCP_LOG_LEVEL": "CRITICAL",
+    }
+    stderr_path = tmp_path / "server.stderr"
+
+    async def exercise_server(stderr):
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "xists.cli", "mcp", "--index", str(index_path)],
+            env=environment,
+        )
+        async with stdio_client(parameters, errlog=stderr) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                tools = await session.list_tools()
+                stats = await session.call_tool("index_stats")
+                inspected = await session.call_tool("inspect_project", {"repo_id": "owner/project"})
+        return tools, stats, inspected
+
+    with stderr_path.open("w+", encoding="utf-8") as stderr:
+        tools, stats, inspected = asyncio.run(exercise_server(stderr))
+
+    assert {tool.name for tool in tools.tools} == {"search_projects", "inspect_project", "index_stats"}
+    assert stats.isError is False
+    assert stats.structuredContent["indexed_project_count"] == 1
+    assert inspected.isError is False
+    assert inspected.structuredContent["repo_id"] == "owner/project"
+    assert "\x1b" not in stderr_path.read_text(encoding="utf-8")

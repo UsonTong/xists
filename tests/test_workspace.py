@@ -1,8 +1,9 @@
+import json
 import os
 import stat
 from pathlib import Path
 
-from xists.cli import build_parser, load_workspace_environment, workspace_init
+from xists.cli import build_parser, doctor, load_workspace_environment, workspace_init
 from xists.workspace import initialize_workspace, resolve_workspace, workspace_root
 
 
@@ -158,3 +159,38 @@ def test_init_command_creates_only_the_configured_workspace(tmp_path, monkeypatc
     output = capsys.readouterr().out
     assert str(workspace_root_path) in output
     assert "Next steps" in output
+
+
+def test_doctor_reports_workspace_paths_in_text_and_json(tmp_path, monkeypatch, capsys):
+    workspace_root_path = tmp_path / "workspace"
+    current_directory = tmp_path / "current"
+    current_directory.mkdir()
+    monkeypatch.chdir(current_directory)
+    monkeypatch.setenv("XISTS_HOME", str(workspace_root_path))
+    monkeypatch.setenv("EMBEDDING_API_KEY", "embedding-key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://embedding.invalid/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
+    monkeypatch.setenv("LLM_API_KEY", "llm-key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://llm.invalid/v1")
+    monkeypatch.setenv("LLM_MODEL", "fixture/llm")
+
+    args = build_parser().parse_args(["doctor"])
+
+    assert doctor(args) == 0
+    text = capsys.readouterr().out
+    assert "Workspace" in text
+    assert "default workspace" in text
+    assert str(workspace_root_path) in text
+    assert str(workspace_root_path / "records.json") in text
+    assert str(workspace_root_path / "index.json") in text
+
+    args = build_parser().parse_args(["doctor", "--format", "json"])
+    assert doctor(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["workspace"]["mode"] == "workspace"
+    assert payload["workspace"]["root"] == str(workspace_root_path)
+    assert payload["workspace"]["paths"] == {
+        "records": str(workspace_root_path / "records.json"),
+        "index": str(workspace_root_path / "index.json"),
+        "cases": str(workspace_root_path / "eval-cases.json"),
+    }

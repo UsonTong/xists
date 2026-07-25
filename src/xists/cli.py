@@ -1260,6 +1260,7 @@ def _format_command_summary(title: str, rows: list[tuple[str, Any]], *, stream: 
 def _format_doctor_text(payload: dict[str, Any], *, stream: Any = None) -> str:
     stream = stream or sys.stdout
     checks = payload.get("checks") or []
+    workspace = payload.get("workspace") or {}
     check_labels = {
         "embedding_config": "Embedding configuration",
         "embedding_endpoint": "Embedding endpoint",
@@ -1271,6 +1272,21 @@ def _format_doctor_text(payload: dict[str, Any], *, stream: Any = None) -> str:
     }
     lines = [style("Doctor", "title", stream=stream)]
     lines.append(style("Ready" if payload.get("ok") else "Needs attention", "success" if payload.get("ok") else "warning", stream=stream))
+    if isinstance(workspace, dict):
+        mode = "legacy current directory" if workspace.get("mode") == "legacy" else "default workspace"
+        lines.extend(
+            [
+                "",
+                style("Workspace", "title", stream=stream),
+                f"  Mode      {mode}",
+                f"  Location  {workspace.get('root') or 'unknown'}",
+            ]
+        )
+        paths = workspace.get("paths")
+        if isinstance(paths, dict):
+            for label, key in (("Records", "records"), ("Index", "index"), ("Cases", "cases")):
+                if paths.get(key):
+                    lines.append(f"  {label.ljust(9)} {paths[key]}")
     next_steps: list[str] = []
     for check in checks:
         if not isinstance(check, dict):
@@ -1292,6 +1308,7 @@ def _format_doctor_text(payload: dict[str, Any], *, stream: Any = None) -> str:
 def doctor(args: argparse.Namespace) -> int:
     checks: list[dict[str, Any]] = []
     embedding_config = None
+    workspace = getattr(args, "workspace", resolve_workspace())
 
     try:
         config = embedding_config_from_env()
@@ -1376,8 +1393,8 @@ def doctor(args: argparse.Namespace) -> int:
             checks.append(_check_payload(name, "ok", f"{path} exists", path=str(path)))
         else:
             command_hint = {
-                "records_file": "Run xists ingest github to create records.json, or pass --records to point at an existing records file.",
-                "index_file": "Run xists index build to create index.json, or pass --index to point at an existing index file.",
+                "records_file": f"Run xists ingest github to create {path}, or pass --records to point at an existing records file.",
+                "index_file": f"Run xists index build to create {path}, or pass --index to point at an existing index file.",
                 "eval_cases_file": "Pass --cases examples/eval-cases.json for the committed demo evaluation dataset.",
             }[name]
             checks.append(
@@ -1391,7 +1408,20 @@ def doctor(args: argparse.Namespace) -> int:
             )
 
     ok = all(check["status"] != "error" for check in checks)
-    payload = {"ok": ok, "checks": checks}
+    payload = {
+        "ok": ok,
+        "workspace": {
+            "mode": workspace.mode,
+            "root": str(workspace.root),
+            "config_file": str(workspace.env_file),
+            "paths": {
+                "records": str(args.records.expanduser().resolve()),
+                "index": str(args.index.expanduser().resolve()),
+                "cases": str(args.cases.expanduser().resolve()),
+            },
+        },
+        "checks": checks,
+    }
     if getattr(args, "format", "text") == "json":
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
@@ -2341,7 +2371,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="text",
         help="Output format: text (default) or json for scripts and agents",
     )
-    doctor_parser.set_defaults(func=doctor)
+    doctor_parser.set_defaults(func=doctor, workspace=workspace)
 
     ingest = subparsers.add_parser("ingest", help="Collect repository records")
     ingest_subparsers = ingest.add_subparsers(dest="source", required=True)

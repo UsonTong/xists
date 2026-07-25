@@ -2,6 +2,7 @@ import json
 import os
 import stat
 from pathlib import Path
+from unittest.mock import patch
 
 from xists.cli import build_parser, doctor, load_workspace_environment, workspace_init
 from xists.workspace import initialize_workspace, resolve_workspace, workspace_root
@@ -99,6 +100,43 @@ def test_parser_keeps_legacy_defaults_together_and_explicit_paths_win(tmp_path, 
     assert explicit.index == Path("other-index.json")
 
 
+def test_parser_explicit_paths_override_workspace_defaults_for_all_workflows(tmp_path, monkeypatch):
+    workspace_root_path = tmp_path / "workspace"
+    current_directory = tmp_path / "empty"
+    current_directory.mkdir()
+    monkeypatch.chdir(current_directory)
+    monkeypatch.setenv("XISTS_HOME", str(workspace_root_path))
+
+    parser = build_parser()
+    ingest = parser.parse_args(
+        ["ingest", "github", "--repos", "input.txt", "--output", "output.json", "--report", "report.json"]
+    )
+    index = parser.parse_args(
+        ["index", "build", "--records", "input.json", "--output", "index-output.json"]
+    )
+    profile = parser.parse_args(
+        ["profile", "refresh", "--records", "input.json", "--output", "profile-output.json"]
+    )
+    search = parser.parse_args(["search", "query", "--index", "search-index.json"])
+    evaluation = parser.parse_args(
+        ["eval", "run", "--cases", "cases.json", "--index", "eval-index.json", "--output", "evaluation.json"]
+    )
+
+    assert (ingest.repos, ingest.output, ingest.report) == (
+        Path("input.txt"),
+        Path("output.json"),
+        Path("report.json"),
+    )
+    assert (index.records, index.output) == (Path("input.json"), Path("index-output.json"))
+    assert (profile.records, profile.output) == (Path("input.json"), Path("profile-output.json"))
+    assert search.index == Path("search-index.json")
+    assert (evaluation.cases, evaluation.index, evaluation.output) == (
+        Path("cases.json"),
+        Path("eval-index.json"),
+        Path("evaluation.json"),
+    )
+
+
 def test_workspace_environment_priority_is_shell_then_current_directory_then_workspace(tmp_path, monkeypatch):
     workspace_root_path = tmp_path / "workspace"
     current_directory = tmp_path / "current"
@@ -152,7 +190,8 @@ def test_init_command_creates_only_the_configured_workspace(tmp_path, monkeypatc
     args = build_parser().parse_args(["init"])
 
     assert args.func is workspace_init
-    assert workspace_init(args) == 0
+    with patch("urllib.request.urlopen", side_effect=AssertionError("init must not access the network")):
+        assert workspace_init(args) == 0
     assert workspace_root_path.is_dir()
     assert (workspace_root_path / ".env").is_file()
     assert not (current_directory / ".env").exists()

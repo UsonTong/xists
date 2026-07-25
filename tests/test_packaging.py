@@ -15,7 +15,7 @@ def test_project_uses_package_version_as_the_single_source_of_truth():
     assert project["dynamic"] == ["version"]
     assert "version" not in project
     assert pyproject["tool"]["hatch"]["version"]["path"] == "src/xists/__init__.py"
-    assert __version__ == "0.7.1"
+    assert __version__ == "0.7.2"
 
 
 def test_project_metadata_declares_license_and_public_urls():

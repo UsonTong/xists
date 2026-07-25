@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import shutil
@@ -2262,17 +2263,19 @@ class _XistsHelpFormatter(argparse.RawDescriptionHelpFormatter):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="xists",
-        usage="%(prog)s search <QUERY> [OPTIONS]\n       %(prog)s <COMMAND> [ARGS]",
-        description=(
-            "Find what exists. Decide what's next.\n\n"
+    parser_options: dict[str, Any] = {
+        "prog": "xists",
+        "usage": "%(prog)s search <QUERY> [OPTIONS]\n       %(prog)s <COMMAND> [ARGS]",
+        "description": (
             "Start here:\n"
             "  xists search \"self-hosted photo gallery\"\n"
             "  xists doctor"
         ),
-        formatter_class=_XistsHelpFormatter,
-    )
+        "formatter_class": _XistsHelpFormatter,
+    }
+    if "color" in inspect.signature(argparse.ArgumentParser).parameters:
+        parser_options["color"] = False
+    parser = argparse.ArgumentParser(**parser_options)
     parser.add_argument("--version", action="version", version=f"xists {__version__}")
     subparsers = parser.add_subparsers(title="Commands", dest="command", required=True)
 

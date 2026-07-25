@@ -129,16 +129,19 @@ def test_version_help_describes_plain_version_output():
 
 
 def test_root_help_prioritizes_search_and_command_discovery():
-    help_text = build_parser().format_help()
+    parser = build_parser()
+    help_text = parser.format_help()
 
     assert "usage: xists search <QUERY> [OPTIONS]" in help_text
     assert "Start here:" in help_text
     assert "xists search \"self-hosted photo gallery\"" in help_text
+    assert "Find what exists. Decide what's next." not in help_text
     assert "Commands:" in help_text
     assert help_text.index("Start here:") < help_text.index("Commands:")
     assert help_text.index("Commands:") < help_text.index("Options:")
     commands_text = help_text.split("Commands:", maxsplit=1)[1].split("Options:", maxsplit=1)[0]
     assert commands_text.index("search") < commands_text.index("index") < commands_text.index("ingest")
+    assert getattr(parser, "_color", False) is False
 
 def test_ingest_github_parser_uses_default_paths():
     args = build_parser().parse_args(["ingest", "github"])

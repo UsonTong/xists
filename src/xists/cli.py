@@ -2233,20 +2233,48 @@ def eval_cases(args: argparse.Namespace) -> int:
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
+
+def _prioritize_root_command_help(parser: argparse.ArgumentParser, subparsers: Any) -> None:
+    """Order root command help by the user-facing search workflow."""
+
+    preferred_order = ("search", "index", "ingest", "profile", "doctor", "records", "eval", "version")
+    actions = {action.dest: action for action in subparsers._choices_actions}
+    subparsers._choices_actions[:] = [
+        *(actions[name] for name in preferred_order if name in actions),
+        *(action for action in subparsers._choices_actions if action.dest not in preferred_order),
+    ]
+    commands_group = subparsers.container
+    parser._action_groups.remove(commands_group)
+    parser._action_groups.insert(1, commands_group)
+    parser._optionals.title = "Options"
+
+
+class _XistsHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    """Keep root command help focused on the command names themselves."""
+
+    def _format_action(self, action: argparse.Action) -> str:
+        if isinstance(action, argparse._SubParsersAction) and not action.help:
+            return self._join_parts(
+                self._format_action(subaction)
+                for subaction in self._iter_indented_subactions(action)
+            )
+        return super()._format_action(action)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
+        prog="xists",
+        usage="%(prog)s search <QUERY> [OPTIONS]\n       %(prog)s <COMMAND> [ARGS]",
         description=(
-            "Find projects that already exist.\n\n"
-            "Common workflow:\n"
-            "  xists ingest github\n"
-            "  xists profile refresh\n"
-            "  xists index build\n"
-            "  xists search \"self-hosted photo gallery\""
+            "Find what exists. Decide what's next.\n\n"
+            "Start here:\n"
+            "  xists search \"self-hosted photo gallery\"\n"
+            "  xists doctor"
         ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        formatter_class=_XistsHelpFormatter,
     )
     parser.add_argument("--version", action="version", version=f"xists {__version__}")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(title="Commands", dest="command", required=True)
 
     version_parser = subparsers.add_parser("version", help="Print the xists version")
     version_parser.set_defaults(func=version)
@@ -2529,6 +2557,7 @@ def build_parser() -> argparse.ArgumentParser:
     eval_cases_parser.add_argument("--limit", type=int, default=20, help="Maximum cases to print")
     eval_cases_parser.set_defaults(func=eval_cases)
 
+    _prioritize_root_command_help(parser, subparsers)
     return parser
 
 

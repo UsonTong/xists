@@ -16,6 +16,16 @@ xists eval inspect --report demo-eval-report.json
 
 For the full walkthrough, see [docs/demo.md](demo.md).
 
+## Command-line entry
+
+The primary command is search. Once you have an index, start with a natural-language query:
+
+```bash
+xists search "self-hosted photo gallery"
+```
+
+Run `xists doctor` when you need to check local configuration or expected files. The `ingest`, `profile`, and `index` commands maintain the local data source that search uses.
+
 ## Installation
 
 For development from a source checkout, install xists in editable mode:

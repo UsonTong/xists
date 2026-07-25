@@ -128,12 +128,17 @@ def test_version_help_describes_plain_version_output():
     assert "Print the xists version as JSON" not in help_text
 
 
-def test_root_help_prioritizes_the_common_workflow():
+def test_root_help_prioritizes_search_and_command_discovery():
     help_text = build_parser().format_help()
 
-    assert "Common workflow:" in help_text
-    assert "xists ingest github" in help_text
-    assert help_text.index("Common workflow:") < help_text.index("positional arguments:")
+    assert "usage: xists search <QUERY> [OPTIONS]" in help_text
+    assert "Start here:" in help_text
+    assert "xists search \"self-hosted photo gallery\"" in help_text
+    assert "Commands:" in help_text
+    assert help_text.index("Start here:") < help_text.index("Commands:")
+    assert help_text.index("Commands:") < help_text.index("Options:")
+    commands_text = help_text.split("Commands:", maxsplit=1)[1].split("Options:", maxsplit=1)[0]
+    assert commands_text.index("search") < commands_text.index("index") < commands_text.index("ingest")
 
 def test_ingest_github_parser_uses_default_paths():
     args = build_parser().parse_args(["ingest", "github"])

@@ -34,8 +34,8 @@ main CI workflow is green for the exact commit that will be released.
 ## 2. Set and verify the version
 
 Change only `__version__` in `src/xists/__init__.py`, then commit the version
-bump before building. For a v0.7.0 release, the required value is `0.7.0` and
-the later tag is `v0.7.0`.
+bump before building. For a release version `<version>`, the required value is
+`<version>` and the later tag is `v<version>`.
 
 ```bash
 xists version
@@ -104,8 +104,8 @@ Only after the maintainer explicitly authorizes this release:
 
 ```bash
 git push origin main
-git tag -a v0.7.0 -m "v0.7.0"
-git push origin v0.7.0
+git tag -a v<version> -m "v<version>"
+git push origin v<version>
 ```
 
 Create the GitHub Release from that tag, attach only the validated public demo
@@ -116,7 +116,7 @@ tagging: publish the artifacts already checked above.
 ## 7. Verify or recover
 
 After PyPI becomes visible, install the exact version in another clean
-environment and repeat the wheel checks with `pip install xists==0.7.0`.
+environment and repeat the wheel checks with `pip install xists==<version>`.
 Confirm the GitHub Release links the same tag and hashes documented in its
 notes.
 

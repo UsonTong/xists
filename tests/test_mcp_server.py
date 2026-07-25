@@ -49,6 +49,17 @@ def test_run_server_requires_an_existing_index(tmp_path, monkeypatch):
         run_server(tmp_path / "index.json")
 
 
+def test_run_server_rejects_non_object_index(tmp_path, monkeypatch):
+    index_path = tmp_path / "index.json"
+    index_path.write_text("[]", encoding="utf-8")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "example-model")
+
+    with pytest.raises(MCPStartupError, match="index JSON must be an object"):
+        run_server(index_path)
+
+
 def test_missing_optional_sdk_has_actionable_error(monkeypatch):
     import xists.mcp_server as server
 
@@ -109,6 +120,15 @@ def test_search_projects_rejects_invalid_top_k(monkeypatch):
 
     with pytest.raises(ToolError, match="top_k must be an integer between 1 and 20"):
         asyncio.run(server.call_tool("search_projects", {"query": "project", "top_k": 21}))
+
+
+def test_search_projects_rejects_an_empty_query():
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    server = __import__("xists.mcp_server", fromlist=["create_server"]).create_server(_index(), object())
+
+    with pytest.raises(ToolError, match="query must be a non-empty string"):
+        asyncio.run(server.call_tool("search_projects", {"query": "  "}))
 
 
 def test_stdio_server_runs_tools_without_corrupting_protocol(tmp_path):

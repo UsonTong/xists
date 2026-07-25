@@ -62,6 +62,7 @@ def create_server(index: dict[str, Any], embedding_config: EmbeddingConfig) -> A
     def search_projects(query: str, top_k: int = 10) -> dict[str, Any]:
         """Return ranked project candidates for a natural-language query."""
 
+        _validate_query(query)
         _validate_top_k(top_k)
         result = public_search(query, index, embedding_config=embedding_config, top_k=top_k)
         return _enrich_search_result(result, metadata_by_repo)
@@ -116,6 +117,11 @@ def _validate_top_k(top_k: int) -> None:
         raise ValueError(f"top_k must be an integer between 1 and {MAX_TOP_K}")
 
 
+def _validate_query(query: str) -> None:
+    if not isinstance(query, str) or not query.strip():
+        raise ValueError("query must be a non-empty string")
+
+
 def _enrich_search_result(
     result: dict[str, Any], metadata_by_repo: dict[str, dict[str, Any]]
 ) -> dict[str, Any]:
@@ -149,5 +155,7 @@ def run_server(index_path: Path) -> None:
         index = load_index(index_path)
     except (OSError, json.JSONDecodeError, ValueError) as error:
         raise MCPStartupError(f"Could not load index {index_path}: {error}") from error
+    if not isinstance(index, dict):
+        raise MCPStartupError(f"Could not load index {index_path}: index JSON must be an object")
 
     create_server(index, config).run(transport="stdio")

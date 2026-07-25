@@ -461,8 +461,7 @@ class _InteractiveStream:
         return True
 
 
-def test_search_text_explains_an_abstained_result_without_internal_fields(monkeypatch):
-    monkeypatch.delenv("NO_COLOR", raising=False)
+def test_search_text_explains_an_abstained_result_without_internal_fields():
     result = {
         "query": "a project that does not exist here",
         "abstained": True,
@@ -476,10 +475,10 @@ def test_search_text_explains_an_abstained_result_without_internal_fields(monkey
     assert "sufficiently reliable match" in output
     assert "abstained" not in output
     assert "abstain_reason" not in output
-    assert "\x1b[" in output
+    assert "\x1b[" not in output
 
 
-def test_search_text_respects_no_color(monkeypatch):
+def test_search_text_stays_plain_with_no_color(monkeypatch):
     monkeypatch.setenv("NO_COLOR", "1")
     result = {"query": "project", "abstained": False, "results": []}
 
@@ -508,10 +507,8 @@ def test_search_text_wraps_to_a_narrow_terminal(monkeypatch):
     index = {"vectors": [{"repo_id": "example/long-project-name", "metadata": {"summary": "A deliberately detailed project summary for narrow terminals."}}]}
 
     output = _format_search_text(result, index, stream=_InteractiveStream())
-    plain_output = output.replace("\x1b[1m", "").replace("\x1b[2m", "").replace("\x1b[0m", "")
-    plain_output = plain_output.replace("\x1b[38;2;243;240;232m", "").replace("\x1b[38;2;115;144;183m", "")
 
-    assert all(len(line) <= 32 for line in plain_output.splitlines())
+    assert all(len(line) <= 32 for line in output.splitlines())
 
 
 def test_search_cli_json_matches_public_api_core_result(tmp_path, monkeypatch, capsys):

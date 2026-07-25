@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from xists.terminal import color_enabled, style
+import pytest
+
+from xists.terminal import style
 
 
 class _Stream:
@@ -11,32 +13,9 @@ class _Stream:
         return self._isatty
 
 
-def test_style_uses_brand_colors_for_interactive_terminal(monkeypatch):
-    monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.delenv("TERM", raising=False)
+@pytest.mark.parametrize("role", ("title", "body", "link", "success", "warning", "error", "muted"))
+def test_style_never_emits_ansi_sequences(role):
+    rendered = style("xists", role, stream=_Stream(True))
 
-    rendered = style("xists", "link", stream=_Stream(True))
-
-    assert rendered == "\x1b[38;2;115;144;183mxists\x1b[0m"
-
-
-def test_style_is_plain_when_output_is_not_a_terminal(monkeypatch):
-    monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.delenv("TERM", raising=False)
-
-    assert color_enabled(_Stream(False)) is False
-    assert style("xists", "title", stream=_Stream(False)) == "xists"
-
-
-def test_style_respects_no_color_for_interactive_terminal(monkeypatch):
-    monkeypatch.setenv("NO_COLOR", "1")
-
-    assert color_enabled(_Stream(True)) is False
-    assert style("xists", "success", stream=_Stream(True)) == "xists"
-
-
-def test_style_disables_color_for_dumb_terminal(monkeypatch):
-    monkeypatch.delenv("NO_COLOR", raising=False)
-    monkeypatch.setenv("TERM", "dumb")
-
-    assert style("xists", "error", stream=_Stream(True)) == "xists"
+    assert rendered == "xists"
+    assert "\x1b[" not in rendered

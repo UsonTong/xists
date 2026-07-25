@@ -1,7 +1,9 @@
+import os
+import stat
 from pathlib import Path
 
-from xists.cli import build_parser
-from xists.workspace import resolve_workspace, workspace_root
+from xists.cli import build_parser, load_workspace_environment, workspace_init
+from xists.workspace import initialize_workspace, resolve_workspace, workspace_root
 
 
 def test_workspace_root_uses_xists_home_and_expands_user(monkeypatch):
@@ -94,3 +96,65 @@ def test_parser_keeps_legacy_defaults_together_and_explicit_paths_win(tmp_path, 
     assert defaults.index == legacy_directory / "index.json"
     assert explicit.records == Path("other-records.json")
     assert explicit.index == Path("other-index.json")
+
+
+def test_workspace_environment_priority_is_shell_then_current_directory_then_workspace(tmp_path, monkeypatch):
+    workspace_root_path = tmp_path / "workspace"
+    current_directory = tmp_path / "current"
+    workspace_root_path.mkdir()
+    current_directory.mkdir()
+    (workspace_root_path / ".env").write_text(
+        "XISTS_TEST_FROM_WORKSPACE=workspace\n"
+        "XISTS_TEST_CURRENT_WINS=workspace\n"
+        "XISTS_TEST_SHELL_WINS=workspace\n",
+        encoding="utf-8",
+    )
+    (current_directory / ".env").write_text(
+        "XISTS_TEST_CURRENT_WINS=current\n"
+        "XISTS_TEST_SHELL_WINS=current\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("XISTS_TEST_SHELL_WINS", "shell")
+    monkeypatch.delenv("XISTS_TEST_FROM_WORKSPACE", raising=False)
+    monkeypatch.delenv("XISTS_TEST_CURRENT_WINS", raising=False)
+
+    load_workspace_environment(resolve_workspace(cwd=current_directory, environ={"XISTS_HOME": str(workspace_root_path)}), cwd=current_directory)
+
+    assert os.environ["XISTS_TEST_FROM_WORKSPACE"] == "workspace"
+    assert os.environ["XISTS_TEST_CURRENT_WINS"] == "current"
+    assert os.environ["XISTS_TEST_SHELL_WINS"] == "shell"
+
+
+def test_initialize_workspace_is_idempotent_and_preserves_existing_data(tmp_path):
+    root = tmp_path / "workspace"
+
+    assert initialize_workspace(root) == (True, True)
+    (root / "records.json").write_text("[]\n", encoding="utf-8")
+    original_env = (root / ".env").read_text(encoding="utf-8")
+
+    assert initialize_workspace(root) == (False, False)
+    assert (root / "records.json").read_text(encoding="utf-8") == "[]\n"
+    assert (root / ".env").read_text(encoding="utf-8") == original_env
+
+    if os.name == "posix":
+        assert stat.S_IMODE(root.stat().st_mode) == 0o700
+        assert stat.S_IMODE((root / ".env").stat().st_mode) == 0o600
+
+
+def test_init_command_creates_only_the_configured_workspace(tmp_path, monkeypatch, capsys):
+    workspace_root_path = tmp_path / "workspace"
+    current_directory = tmp_path / "current"
+    current_directory.mkdir()
+    monkeypatch.chdir(current_directory)
+    monkeypatch.setenv("XISTS_HOME", str(workspace_root_path))
+
+    args = build_parser().parse_args(["init"])
+
+    assert args.func is workspace_init
+    assert workspace_init(args) == 0
+    assert workspace_root_path.is_dir()
+    assert (workspace_root_path / ".env").is_file()
+    assert not (current_directory / ".env").exists()
+    output = capsys.readouterr().out
+    assert str(workspace_root_path) in output
+    assert "Next steps" in output

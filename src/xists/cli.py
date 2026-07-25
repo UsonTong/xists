@@ -75,10 +75,15 @@ from xists.search.transform import (
     transform_queries,
 )
 from xists.terminal import style
-from xists.workspace import resolve_workspace
+from xists.workspace import initialize_workspace, resolve_workspace, workspace_root
 
 
-def load_env_file(path: Path) -> None:
+def load_env_file(
+    path: Path,
+    *,
+    override: bool = False,
+    protected_keys: set[str] | None = None,
+) -> None:
     if not path.exists():
         return
 
@@ -89,8 +94,17 @@ def load_env_file(path: Path) -> None:
         key, env_value = value.split("=", 1)
         key = key.strip()
         env_value = env_value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
+        if key and key not in (protected_keys or set()) and (override or key not in os.environ):
             os.environ[key] = env_value
+
+
+def load_workspace_environment(workspace: Any, *, cwd: Path | None = None) -> None:
+    """Load workspace and per-directory configuration without replacing shell values."""
+
+    shell_keys = set(os.environ)
+    load_env_file(workspace.env_file)
+    current_env_file = (Path.cwd() if cwd is None else cwd) / ".env"
+    load_env_file(current_env_file, override=True, protected_keys=shell_keys)
 
 
 def load_repo_ids(path: Path) -> list[str]:
@@ -1140,23 +1154,26 @@ def _check_payload(name: str, status: str, message: str, **extra: Any) -> dict[s
 
 
 def _embedding_config_next_steps() -> list[str]:
+    config_file = resolve_workspace().env_file
     return [
-        "Copy .env.example to .env if you have not configured the project yet.",
-        "Set EMBEDDING_API_KEY, EMBEDDING_BASE_URL, and EMBEDDING_MODEL.",
+        f"Run xists init to create {config_file}, if needed.",
+        f"Set EMBEDDING_API_KEY, EMBEDDING_BASE_URL, and EMBEDDING_MODEL in {config_file}.",
         "Run xists doctor --check-endpoints after setting the embedding variables.",
     ]
 
 
 def _llm_config_next_steps() -> list[str]:
+    config_file = resolve_workspace().env_file
     return [
-        "Set LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL in .env or the environment.",
+        f"Set LLM_API_KEY, LLM_BASE_URL, and LLM_MODEL in {config_file} or the environment.",
         "LLM configuration is required for xists ingest github and optional eval --llm-judge runs.",
     ]
 
 
 def _github_token_next_steps() -> list[str]:
+    config_file = resolve_workspace().env_file
     return [
-        "Set GITHUB_TOKEN or GITHUB_TOKENS in .env, or pass --token-file.",
+        f"Set GITHUB_TOKEN or GITHUB_TOKENS in {config_file}, or pass --token-file.",
         "GitHub tokens are required for xists ingest github but not for local search/eval on existing files.",
     ]
 
@@ -1208,6 +1225,21 @@ def _read_index_file(path: Path) -> dict[str, Any]:
 
 def version(args: argparse.Namespace) -> int:
     print(f"xists {__version__}")
+    return 0
+
+
+def workspace_init(args: argparse.Namespace) -> int:
+    root = workspace_root()
+    created_root, created_env_file = initialize_workspace(root)
+    status = "initialized" if created_root or created_env_file else "already exists"
+    print("Workspace")
+    print(f"  Location  {root}")
+    print(f"  Status    {status}")
+    if created_env_file:
+        print(f"  Config    {root / '.env'}")
+    print("\nNext steps")
+    print(f"  1. Edit {root / '.env'}")
+    print("  2. Run xists doctor")
     return 0
 
 
@@ -2239,7 +2271,7 @@ def eval_cases(args: argparse.Namespace) -> int:
 def _prioritize_root_command_help(parser: argparse.ArgumentParser, subparsers: Any) -> None:
     """Order root command help by the user-facing search workflow."""
 
-    preferred_order = ("search", "index", "ingest", "profile", "doctor", "records", "eval", "version")
+    preferred_order = ("init", "search", "index", "ingest", "profile", "doctor", "records", "eval", "version")
     actions = {action.dest: action for action in subparsers._choices_actions}
     subparsers._choices_actions[:] = [
         *(actions[name] for name in preferred_order if name in actions),
@@ -2270,6 +2302,7 @@ def build_parser() -> argparse.ArgumentParser:
         "usage": "%(prog)s search <QUERY> [OPTIONS]\n       %(prog)s <COMMAND> [ARGS]",
         "description": (
             "Start here:\n"
+            "  xists init\n"
             "  xists search \"self-hosted photo gallery\"\n"
             "  xists doctor"
         ),
@@ -2283,6 +2316,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     version_parser = subparsers.add_parser("version", help="Print the xists version")
     version_parser.set_defaults(func=version)
+
+    init_parser = subparsers.add_parser("init", help="Create the default local workspace")
+    init_parser.set_defaults(func=workspace_init)
 
     doctor_parser = subparsers.add_parser("doctor", help="Check local configuration and expected data files")
     doctor_parser.add_argument("--records", type=Path, default=workspace.records, help="Records JSON to check")
@@ -2567,7 +2603,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    load_env_file(Path(".env"))
+    load_workspace_environment(resolve_workspace())
     parser = build_parser()
     args = parser.parse_args()
     return args.func(args)

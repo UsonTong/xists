@@ -1,10 +1,12 @@
 <div align="center"><a name="readme-top"></a>
 
+<img src="./docs/assets/xists-mark.svg" alt="xists" width="120" />
+
 # xists
 
-Find first. Build later.
+Find what exists. Decide what's next.
 
-`xists` is a local semantic search engine for selected lists of GitHub repositories. Check if a similar project already exists before you build it.
+`xists` is a local semantic search engine for selected lists of GitHub repositories. Find existing projects you can use, deploy, adapt, or learn from—then decide what to do next.
 
 **English** · [简体中文](./README.zh-CN.md)
 
@@ -16,7 +18,7 @@ Find first. Build later.
 
 Global GitHub search is often noisy, and traditional keyword matching lacks semantic understanding. `xists` solves this by narrowing the search space: you provide a curated repository list, and `xists` builds a local index for semantic search.
 
-- **Before you build**: check if a similar project or existing solution already exists.
+- **Before you decide**: check if a similar project or existing solution already exists.
 - **Tech decisions**: compare candidates from a curated set using semantic search.
 - **Fast lookups**: quickly find what you need without manually opening dozens of READMEs.
 
@@ -48,18 +50,17 @@ You need a GitHub token for the initial data fetch, plus model endpoints for sum
 
 ## Install and first search
 
-Requires Python 3.11+. PyPI publication is prepared for v0.7.0 but has not
-yet been authorized; until then, install directly from a checked-out source
-tree:
-
-```bash
-python -m pip install -e ".[dev]"
-```
-
-After v0.7.0 is published, the equivalent package installation will be:
+Requires Python 3.11+. Install the published package:
 
 ```bash
 python -m pip install xists
+```
+
+For development from a checked-out source tree, install the editable package
+with test dependencies:
+
+```bash
+python -m pip install -e ".[dev]"
 ```
 
 Then create a local configuration file and build an index from repositories

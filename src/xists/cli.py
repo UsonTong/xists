@@ -2234,7 +2234,17 @@ def eval_cases(args: argparse.Namespace) -> int:
     return 0
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="xists helps developers find what already exists.")
+    parser = argparse.ArgumentParser(
+        description=(
+            "Find projects that already exist.\n\n"
+            "Common workflow:\n"
+            "  xists ingest github\n"
+            "  xists profile refresh\n"
+            "  xists index build\n"
+            "  xists search \"self-hosted photo gallery\""
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--version", action="version", version=f"xists {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 

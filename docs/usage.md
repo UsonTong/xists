@@ -26,8 +26,7 @@ python -m pip install -e ".[dev]"
 
 This makes the `xists` command available globally and installs the test dependency used by CI.
 
-The v0.7.0 PyPI release is prepared but has not yet been authorized. Once it
-is published, users who do not need a source checkout can install it with:
+Users who do not need a source checkout can install the published package with:
 
 ```bash
 python -m pip install xists
@@ -145,7 +144,9 @@ xists doctor \
   --cases examples/eval-cases.json
 ```
 
-It checks whether embedding, LLM, and GitHub configuration are present and whether the expected records, index, and evaluation case files exist. Add `--check-endpoints` to probe the embedding service with a real vector request, or `--strict` to make that probe fail the command. The output is JSON and does not include secret values. Failing or warning checks include `next_steps` when xists can suggest a concrete fix:
+It checks whether embedding, LLM, and GitHub configuration are present and whether the expected records, index, and evaluation case files exist. Add `--check-endpoints` to probe the embedding service with a real vector request, or `--strict` to make that probe fail the command. The default output is a short terminal summary and does not include secret values. Failing or warning checks include concrete next steps.
+
+Use `--format json` only when another program needs the complete structured report:
 
 ```json
 {
@@ -170,7 +171,7 @@ It checks whether embedding, LLM, and GitHub configuration are present and wheth
 Warnings usually mean a file has not been generated yet or an ingest-only token is missing. Errors mean a required endpoint configuration is missing or an endpoint probe failed in strict mode. A good demo preflight is:
 
 ```bash
-xists doctor \
+xists doctor --format json \
   --records demo-records.json \
   --index demo-index.json \
   --cases examples/eval-cases.json \
@@ -181,25 +182,26 @@ xists doctor \
 ## Core CLI output contract
 
 The core inspection and search commands are safe to use from either a terminal
-or a script. Successful command output is written to stdout. Except for the
-JSON-first diagnostic report from `doctor`, failures while opening or parsing
-an input file, missing files, missing configuration, and endpoint failures are
-written to stderr and return a nonzero exit code; no partial JSON is written to
-stdout in those cases. A completed `records validate` or `index verify` report
-remains stdout output even when it reports validation or verification failures.
+or a script. Their default stdout is concise terminal text. Add `--format json`
+when a command supports it and another program needs one structured document.
+Progress, diagnostics, and failures are written to stderr; failures return a
+nonzero exit code and do not write partial JSON to stdout. A completed `records
+validate` or `index verify` report remains stdout output even when it reports
+validation or verification failures.
 
 | Command | Success output | Exit codes |
 |---|---|---|
-| `doctor` | One JSON document on stdout (JSON-first) | `0` when no error checks exist; `1` when a required check fails |
+| `doctor` | Human-readable text by default; one JSON document with `--format json` | `0` when no error checks exist; `1` when a required check fails |
+| `ingest github`, `profile refresh`, `index build` | Human-readable completion summary by default; one JSON document with `--format json` | `0` on success; nonzero when the command cannot complete its selected work |
 | `records inspect` | One JSON document on stdout (JSON-first) | `0` on success; `1` for invalid records JSON; `2` when the file is absent |
 | `records validate`, `records stats` | Human-readable text by default; one JSON document with `--format json` | `0` on success; `1` for validation or JSON-read/structure errors; `2` when the file is absent |
 | `index stats`, `index verify` | Human-readable text by default; one JSON document with `--format json` | `0` when valid; `1` when verification or JSON-read/structure validation fails; `2` when an input file is absent |
 | `search` | Human-readable text by default; one JSON result with `--format json` | `0` on success; `1` for index compatibility, endpoint, transform, or ranking errors; `2` for missing embedding configuration or index file |
 
 `doctor` may report missing optional data files as warnings and still return
-`0`; its JSON `ok` field and individual check statuses are the authoritative
-machine-readable result. Evaluation commands retain their existing JSON-first
-reports and are not changed by this contract.
+`0`; in JSON mode its `ok` field and individual check statuses are the
+authoritative machine-readable result. Evaluation commands retain their
+existing JSON-first reports and are not changed by this contract.
 
 ## Workflow
 
@@ -221,7 +223,7 @@ This fetches data from GitHub, generates LLM profiles, and writes `records.json`
 | `--token-file` | (none) | File containing GitHub token(s), one per line |
 | `--force` | off | Ignore existing records.json and reprocess all repos |
 | `--dry-run` | off | Estimate work without calling GitHub or writing files |
-| `--format` | `text` | Output format for dry-run reports: text or json |
+| `--format` | `text` | Output format: text for terminal review, or json for scripts and agents |
 | `--workers` | `1` | Number of concurrent workers |
 | `--retry-failed` | (none) | Retry only repository ids listed in a previous failure report |
 | `--resume` | off | Resume from an existing partial JSONL checkpoint |
@@ -307,6 +309,7 @@ This reads `records.json`, computes embeddings via the configured endpoint, and 
 | `--output` | `index.json` | Output index file |
 | `--force` | off | Ignore existing index.json and rebuild from scratch |
 | `--resume` | off | Continue from a partial index checkpoint |
+| `--format` | `text` | Output format: text for terminal review, or json for scripts and agents |
 
 #### Incremental update
 

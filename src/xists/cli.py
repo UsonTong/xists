@@ -1228,6 +1228,19 @@ def version(args: argparse.Namespace) -> int:
     return 0
 
 
+def mcp(args: argparse.Namespace) -> int:
+    """Start the optional MCP server without writing protocol data to stdout."""
+
+    from xists.mcp_server import MCPNotInstalledError, MCPStartupError, run_server
+
+    try:
+        run_server(args.index)
+    except (MCPNotInstalledError, MCPStartupError) as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    return 0
+
+
 def workspace_init(args: argparse.Namespace) -> int:
     root = workspace_root()
     created_root, created_env_file = initialize_workspace(root)
@@ -2346,6 +2359,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     version_parser = subparsers.add_parser("version", help="Print the xists version")
     version_parser.set_defaults(func=version)
+
+    mcp_parser = subparsers.add_parser("mcp", help="Start the optional MCP server over stdio")
+    mcp_parser.add_argument("--index", type=Path, default=workspace.index, help="Embedding index to serve")
+    mcp_parser.set_defaults(func=mcp)
 
     init_parser = subparsers.add_parser("init", help="Create the default local workspace")
     init_parser.set_defaults(func=workspace_init)

@@ -28,6 +28,14 @@ def test_project_metadata_declares_license_and_public_urls():
     assert (ROOT / "LICENSE").is_file()
 
 
+def test_project_declares_mcp_as_an_optional_extra():
+    with (ROOT / "pyproject.toml").open("rb") as source:
+        project = tomllib.load(source)["project"]
+
+    assert project["dependencies"] == ["numpy"]
+    assert project["optional-dependencies"]["mcp"] == ["mcp>=1.28,<2"]
+
+
 def test_sdist_build_whitelist_excludes_local_and_private_artifacts():
     with (ROOT / "pyproject.toml").open("rb") as source:
         build = tomllib.load(source)["tool"]["hatch"]["build"]

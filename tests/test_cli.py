@@ -21,6 +21,7 @@ from xists.cli import (
     ingest_github,
     load_env_file,
     load_repo_ids,
+    mcp,
     profile_refresh,
     search,
     records_inspect,
@@ -102,6 +103,13 @@ def test_version_parser_accepts_version_command():
     args = build_parser().parse_args(["version"])
 
     assert args.func is version
+
+
+def test_mcp_parser_uses_workspace_index_default():
+    args = build_parser().parse_args(["mcp"])
+
+    assert args.func is mcp
+    assert args.index == resolve_workspace().index
 
 
 def test_version_prints_plain_version(capsys):

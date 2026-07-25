@@ -143,6 +143,9 @@ def _enrich_search_result(
 def run_server(index_path: Path) -> None:
     """Load local search state and run the MCP stdio transport."""
 
+    # Check the optional integration before local configuration so a core-only
+    # installation always receives its actionable installation instruction.
+    _fastmcp_class()
     try:
         config = embedding_config_from_env()
     except Exception as error:

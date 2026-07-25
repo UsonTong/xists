@@ -72,6 +72,21 @@ def test_missing_optional_sdk_has_actionable_error(monkeypatch):
         server.create_server({}, object())
 
 
+def test_run_server_checks_optional_sdk_before_embedding_config(tmp_path, monkeypatch):
+    import xists.mcp_server as server
+
+    def missing_sdk():
+        raise MCPNotInstalledError('MCP support is not installed. Install it with: pip install "xists[mcp]"')
+
+    monkeypatch.setattr(server, "_fastmcp_class", missing_sdk)
+    monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
+    monkeypatch.delenv("EMBEDDING_BASE_URL", raising=False)
+    monkeypatch.delenv("EMBEDDING_MODEL", raising=False)
+
+    with pytest.raises(MCPNotInstalledError, match='pip install "xists\\[mcp\\]"'):
+        server.run_server(tmp_path / "index.json")
+
+
 def test_server_registers_search_inspect_and_index_tools(monkeypatch):
     import xists.mcp_server as server_module
 

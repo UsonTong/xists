@@ -68,11 +68,18 @@ indexes, reports, checkpoints, test caches, or `dist/` itself.
 This verifies the built artifact rather than an editable checkout:
 
 ```bash
-python -m venv /tmp/xists-release-venv
-/tmp/xists-release-venv/bin/python -m pip install dist/xists-*.whl
-/tmp/xists-release-venv/bin/xists --help
-/tmp/xists-release-venv/bin/xists version
-/tmp/xists-release-venv/bin/python scripts/smoke_check.py
+python -m venv /tmp/xists-release-core-venv
+/tmp/xists-release-core-venv/bin/python -m pip install dist/xists-*.whl
+/tmp/xists-release-core-venv/bin/xists --help
+/tmp/xists-release-core-venv/bin/xists version
+/tmp/xists-release-core-venv/bin/python scripts/smoke_check.py
+
+# When the release includes the MCP integration, verify its optional extra
+# separately. This must not be required by the core wheel installation above.
+python -m venv /tmp/xists-release-mcp-venv
+wheel=$(printf '%s\n' dist/xists-*.whl)
+/tmp/xists-release-mcp-venv/bin/python -m pip install "${wheel}[mcp]"
+/tmp/xists-release-mcp-venv/bin/xists mcp --help
 ```
 
 The reported version must match the package version and intended tag. The smoke

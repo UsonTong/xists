@@ -77,6 +77,44 @@ xists search "open source firebase alternative"
 
 ---
 
+## MCP 与 agent 集成
+
+当 workspace 已有 index 且已配置 embedding 后，安装可选 MCP 集成：
+
+```bash
+python -m pip install "xists[mcp]"
+xists mcp
+```
+
+`xists mcp` 使用 stdio，并读取与 CLI 相同的当前 workspace。server 启动时加载
+index；数据更新或重建 index 后，需要重启 MCP server。它提供
+`search_projects`、`inspect_project` 和 `index_stats` 三个工具。搜索排序和
+未命中语义与 CLI 相同，排查 agent 请求时可运行：
+
+```bash
+xists search "browser automation for agents" --format json
+```
+
+Claude Code、Cursor、Cline 的 MCP 配置均可使用以下 stdio server 结构：
+
+```json
+{
+  "mcpServers": {
+    "xists": {
+      "command": "xists",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+server 的配置优先级与普通 CLI 一致：shell 环境变量、当前目录 `.env`、
+`~/.xists/.env`。若使用远端 embedding 接口，每次搜索的查询文本会发送至该
+接口以计算向量；index 与相似度检索仍在本地进行。`abstained: true` 表示当前
+index 中没有足够可信的匹配，agent 应如实处理该状态，而不是将其视为隐藏错误。
+
+---
+
 ## 快速开始
 
 环境要求：Python 3.11+。

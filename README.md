@@ -82,6 +82,49 @@ is published yet; the first Release asset will be created only after it passes
 
 ---
 
+## MCP and agent integration
+
+Install the optional MCP integration after a workspace has an index and an
+embedding configuration:
+
+```bash
+python -m pip install "xists[mcp]"
+xists mcp
+```
+
+`xists mcp` uses stdio and reads the same active workspace as the CLI. It
+loads the index when the server starts; rebuild the index and restart the MCP
+server when data changes. It exposes `search_projects`, `inspect_project`, and
+`index_stats`. Search results include the same ranking and abstention behavior
+as the CLI, so diagnose an agent request with:
+
+```bash
+xists search "browser automation for agents" --format json
+```
+
+For Claude Code, Cursor, or Cline, add a stdio server entry using this shape in
+that client's MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "xists": {
+      "command": "xists",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+The server follows the normal configuration precedence: shell environment,
+current-directory `.env`, then `~/.xists/.env`. A remote embedding endpoint
+receives each search query to calculate its vector; the index and similarity
+search remain local. An `abstained: true` response means the current index did
+not contain a sufficiently credible match and should be treated as that state,
+not as a hidden failure.
+
+---
+
 ## Quickstart
 
 Requires Python 3.11+.

@@ -92,6 +92,55 @@ compatibility, if the current directory already contains `repos.txt`,
 file arguments keep using that complete legacy working set. xists never moves
 or overwrites those files automatically.
 
+## MCP server
+
+MCP is an optional integration. The regular package and all CLI/API features
+remain usable without it. After `xists init`, embedding configuration, and an
+index are ready, install it and start the stdio server:
+
+```bash
+python -m pip install "xists[mcp]"
+xists mcp
+```
+
+The server loads the selected index once at startup. It uses the same default
+workspace and configuration precedence as every CLI command: shell environment,
+current-directory `.env`, then workspace `.env`. Pass `--index PATH` for an
+explicit index. Rebuild or replace an index only while the server is stopped,
+then restart `xists mcp`; hot reload is not provided.
+
+The stable tools are:
+
+- `search_projects(query, top_k=10)`: agent-ready candidates, with `top_k`
+  limited to 1 through 20.
+- `inspect_project(repo_id)`: the stored, non-vector profile for an indexed
+  project.
+- `index_stats()`: compatibility and size metadata without vectors.
+
+Use `xists search "<query>" --format json` to reproduce a search in the CLI.
+An `abstained: true` result is an honest no-credible-match state, not a retry
+signal. MCP performs the same embedding request as CLI search, so a remote
+embedding endpoint receives the query text; xists keeps the index and vector
+comparison local.
+
+Configure a client as a stdio server. Claude Code, Cursor, and Cline all accept
+an equivalent entry in their respective MCP settings file:
+
+```json
+{
+  "mcpServers": {
+    "xists": {
+      "command": "xists",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+If the optional SDK is missing, run `pip install "xists[mcp]"`. If startup
+reports a missing index or embedding configuration, run `xists doctor`, build
+the index, or edit the active workspace `.env` before starting the client again.
+
 ## Configuration
 
 `xists init` creates the workspace `.env` template (`~/.xists/.env` by

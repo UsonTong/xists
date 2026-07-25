@@ -8,6 +8,7 @@ import pytest
 from xists import __version__
 from xists.api import search as public_search
 from xists.cli import (
+    _format_search_text,
     _load_canonical_queries,
     build_parser,
     doctor,
@@ -322,9 +323,10 @@ def test_search_defaults_to_text_output(tmp_path, monkeypatch, capsys):
 
     assert code == 0
     output = capsys.readouterr().out
-    assert "results: 1" in output
-    assert "repo: fastapi/fastapi" in output
-    assert "confidence: high_confidence" in output
+    assert "Search" in output
+    assert "1 matches" in output
+    assert "1. fastapi/fastapi" in output
+    assert "Match: high confidence (score 0.712)" in output
 
 
 def test_search_json_format_prints_machine_readable_results(tmp_path, monkeypatch, capsys):
@@ -430,14 +432,72 @@ def test_search_text_format_prints_readable_results(tmp_path, monkeypatch, capsy
 
     assert code == 0
     output = capsys.readouterr().out
-    assert "results: 1" in output
-    assert "repo: fastapi/fastapi" in output
-    assert "url: https://github.com/fastapi/fastapi" in output
-    assert "confidence: high_confidence" in output
-    assert "score: 0.712345" in output
-    assert "summary: A modern, fast web framework for building APIs with Python." in output
-    assert "why: ranked by semantic similarity; metadata overlap" in output
-    assert "diagnostics: topics=api; capabilities=building; types=framework; language=Python; phrase=search_phrases" in output
+    assert "1 matches" in output
+    assert "1. fastapi/fastapi" in output
+    assert "Link: https://github.com/fastapi/fastapi" in output
+    assert "Match: high confidence (score 0.712)" in output
+    assert "About: A modern, fast web framework for building APIs with Python." in output
+    assert "Why: ranked by semantic similarity; metadata overlap" in output
+    assert "diagnostics:" not in output
+    assert "score_breakdown:" not in output
+
+
+class _InteractiveStream:
+    def isatty(self) -> bool:
+        return True
+
+
+def test_search_text_explains_an_abstained_result_without_internal_fields(monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    result = {
+        "query": "a project that does not exist here",
+        "abstained": True,
+        "abstain_reason": "below confidence threshold",
+        "results": [],
+    }
+
+    output = _format_search_text(result, {"vectors": []}, stream=_InteractiveStream())
+
+    assert "No confident match" in output
+    assert "sufficiently reliable match" in output
+    assert "abstained" not in output
+    assert "abstain_reason" not in output
+    assert "\x1b[" in output
+
+
+def test_search_text_respects_no_color(monkeypatch):
+    monkeypatch.setenv("NO_COLOR", "1")
+    result = {"query": "project", "abstained": False, "results": []}
+
+    output = _format_search_text(result, {"vectors": []}, stream=_InteractiveStream())
+
+    assert "No matching projects" in output
+    assert "\x1b[" not in output
+
+
+def test_search_text_wraps_to_a_narrow_terminal(monkeypatch):
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("COLUMNS", "32")
+    result = {
+        "query": "a deliberately long query for a narrow terminal",
+        "abstained": False,
+        "results": [
+            {
+                "repo_id": "example/long-project-name",
+                "url": "https://github.com/example/long-project-name",
+                "confidence": "high_confidence",
+                "score": 0.712345,
+                "why": ["ranked by a deliberately detailed semantic explanation"],
+            }
+        ],
+    }
+    index = {"vectors": [{"repo_id": "example/long-project-name", "metadata": {"summary": "A deliberately detailed project summary for narrow terminals."}}]}
+
+    output = _format_search_text(result, index, stream=_InteractiveStream())
+    plain_output = output.replace("\x1b[1m", "").replace("\x1b[2m", "").replace("\x1b[0m", "")
+    plain_output = plain_output.replace("\x1b[38;2;243;240;232m", "").replace("\x1b[38;2;115;144;183m", "")
+
+    assert all(len(line) <= 32 for line in plain_output.splitlines())
 
 
 def test_search_cli_json_matches_public_api_core_result(tmp_path, monkeypatch, capsys):

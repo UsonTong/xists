@@ -5,8 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
+import textwrap
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -71,6 +73,7 @@ from xists.search.transform import (
     query_variants,
     transform_queries,
 )
+from xists.terminal import style
 
 
 def load_env_file(path: Path) -> None:
@@ -963,7 +966,7 @@ def search(args: argparse.Namespace) -> int:
         return 1
 
     if getattr(args, "format", "json") == "text":
-        print(_format_search_text(result, index))
+        print(_format_search_text(result, index, stream=sys.stdout))
     else:
         print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
@@ -998,35 +1001,78 @@ def _index_metadata_by_repo_id(index: dict[str, Any]) -> dict[str, dict[str, Any
 
 def _format_search_number(value: Any) -> str:
     if isinstance(value, (int, float)):
-        return f"{value:.6f}"
+        return f"{value:.3f}"
     return str(value) if value is not None else "n/a"
 
 
-def _format_search_list(values: Any) -> str:
-    if not isinstance(values, list):
-        return ""
-    return ", ".join(str(value) for value in values if str(value).strip())
+def _terminal_width() -> int:
+    return max(20, shutil.get_terminal_size(fallback=(88, 24)).columns)
 
 
-def _format_search_text(result: dict[str, Any], index: dict[str, Any]) -> str:
+def _wrap_terminal_text(value: str, *, width: int, indent: int = 0) -> list[str]:
+    available_width = max(8, width - indent)
+    text = " ".join(value.split())
+    if not text:
+        return [" " * indent]
+    return [
+        " " * indent + line
+        for line in textwrap.wrap(
+            text,
+            width=available_width,
+            break_long_words=True,
+            break_on_hyphens=False,
+        )
+    ]
+
+
+def _append_search_detail(
+    lines: list[str],
+    label: str,
+    value: str,
+    *,
+    width: int,
+    stream: Any,
+    role: str = "body",
+) -> None:
+    prefix = f"   {label}: "
+    wrapped = _wrap_terminal_text(value, width=width, indent=len(prefix))
+    first_line = wrapped[0].lstrip()
+    lines.append(f"   {style(label, 'muted', stream=stream)}: {style(first_line, role, stream=stream)}")
+    lines.extend(style(line, role, stream=stream) for line in wrapped[1:])
+
+
+def _search_confidence_text(value: Any) -> str:
+    return str(value or "unknown").replace("_", " ")
+
+
+def _format_search_text(result: dict[str, Any], index: dict[str, Any], *, stream: Any = None) -> str:
+    stream = stream or sys.stdout
     summaries = _index_summaries_by_repo_id(index)
     metadata_by_repo_id = _index_metadata_by_repo_id(index)
-    intent = result.get("query_intent") or {}
-    intent_type = intent.get("type") if isinstance(intent, dict) else None
     search_results = result.get("results") or []
+    width = _terminal_width()
 
-    lines = [
-        f"query: {result.get('query') or ''}",
-        f"intent: {intent_type or 'unknown'}",
-        f"abstained: {bool(result.get('abstained'))}",
-        f"results: {len(search_results)}",
-    ]
-    if result.get("abstained") and result.get("abstain_reason"):
-        lines.append(f"abstain_reason: {result['abstain_reason']}")
+    lines = [style("Search", "title", stream=stream)]
+    _append_search_detail(lines, "Query", str(result.get("query") or ""), width=width, stream=stream)
 
-    if not search_results:
+    if result.get("abstained") or not search_results:
+        title = "No confident match" if result.get("abstained") else "No matching projects"
+        message = (
+            "The current index does not contain a sufficiently reliable match for this query."
+            if result.get("abstained")
+            else "The current index did not return a project for this query."
+        )
+        lines.extend(["", style(title, "warning", stream=stream)])
+        lines.extend(_wrap_terminal_text(message, width=width))
+        lines.extend(
+            _wrap_terminal_text(
+                "Try a broader description or search an index with more relevant projects.",
+                width=width,
+            )
+        )
         return "\n".join(lines)
 
+    lines.extend(["", style(f"{len(search_results)} matches", "success", stream=stream)])
     for position, item in enumerate(search_results, start=1):
         if not isinstance(item, dict):
             continue
@@ -1039,53 +1085,26 @@ def _format_search_text(result: dict[str, Any], index: dict[str, Any]) -> str:
         else:
             why_text = str(why)
 
+        lines.append("")
         lines.extend(
-            [
-                f"{position}. repo: {repo_id}",
-                f"   url: {url}",
-                f"   confidence: {item.get('confidence') or 'unknown'}",
-                f"   score: {_format_search_number(item.get('score'))}",
-                f"   summary: {summaries.get(repo_id, '(none)')}",
-                f"   why: {why_text or '(none)'}",
-            ]
+            style(line, "title", stream=stream)
+            for line in _wrap_terminal_text(f"{position}. {repo_id}", width=width)
         )
-
-        matched_terms = item.get("matched_terms") or []
-        if matched_terms:
-            lines.append(f"   matched_terms: {', '.join(str(term) for term in matched_terms)}")
-
-        diagnostics = item.get("diagnostics") or {}
-        if isinstance(diagnostics, dict) and diagnostics:
-            evidence_parts = []
-            for label, key in (
-                ("topics", "topic_matches"),
-                ("capabilities", "capability_terms"),
-                ("types", "type_cue_matches"),
-                ("profile", "profile_matches"),
-                ("state", "repository_state"),
-            ):
-                value = _format_search_list(diagnostics.get(key))
-                if value:
-                    evidence_parts.append(f"{label}={value}")
-            for label, key in (
-                ("entity", "entity_match"),
-                ("identity", "identity_match"),
-                ("language", "language_match"),
-                ("language_mismatch", "language_mismatch"),
-                ("phrase", "phrase_match"),
-            ):
-                value = diagnostics.get(key)
-                if value:
-                    evidence_parts.append(f"{label}={value}")
-            if evidence_parts:
-                lines.append(f"   diagnostics: {'; '.join(evidence_parts)}")
-
-        breakdown = item.get("score_breakdown") or {}
-        if isinstance(breakdown, dict) and breakdown:
-            semantic = _format_search_number(breakdown.get("semantic"))
-            metadata = _format_search_number(breakdown.get("metadata"))
-            final = _format_search_number(breakdown.get("final"))
-            lines.append(f"   score_breakdown: semantic={semantic}, metadata={metadata}, final={final}")
+        summary = summaries.get(repo_id) or metadata.get("description") or "No project summary is available."
+        _append_search_detail(lines, "About", str(summary), width=width, stream=stream)
+        _append_search_detail(lines, "Link", str(url), width=width, stream=stream, role="link")
+        confidence = _search_confidence_text(item.get("confidence"))
+        score = _format_search_number(item.get("score"))
+        _append_search_detail(
+            lines,
+            "Match",
+            f"{confidence} (score {score})",
+            width=width,
+            stream=stream,
+            role="success" if confidence == "high confidence" else "body",
+        )
+        if why_text:
+            _append_search_detail(lines, "Why", why_text, width=width, stream=stream)
 
     return "\n".join(lines)
 

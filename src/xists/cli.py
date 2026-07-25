@@ -75,6 +75,7 @@ from xists.search.transform import (
     transform_queries,
 )
 from xists.terminal import style
+from xists.workspace import resolve_workspace
 
 
 def load_env_file(path: Path) -> None:
@@ -2263,6 +2264,7 @@ class _XistsHelpFormatter(argparse.RawDescriptionHelpFormatter):
 
 
 def build_parser() -> argparse.ArgumentParser:
+    workspace = resolve_workspace()
     parser_options: dict[str, Any] = {
         "prog": "xists",
         "usage": "%(prog)s search <QUERY> [OPTIONS]\n       %(prog)s <COMMAND> [ARGS]",
@@ -2283,9 +2285,9 @@ def build_parser() -> argparse.ArgumentParser:
     version_parser.set_defaults(func=version)
 
     doctor_parser = subparsers.add_parser("doctor", help="Check local configuration and expected data files")
-    doctor_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to check")
-    doctor_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to check")
-    doctor_parser.add_argument("--cases", type=Path, default=Path("eval-cases.json"), help="Evaluation cases JSON to check")
+    doctor_parser.add_argument("--records", type=Path, default=workspace.records, help="Records JSON to check")
+    doctor_parser.add_argument("--index", type=Path, default=workspace.index, help="Embedding index to check")
+    doctor_parser.add_argument("--cases", type=Path, default=workspace.eval_cases, help="Evaluation cases JSON to check")
     doctor_parser.add_argument("--token-file", type=Path, default=None, help="Optional file containing GitHub tokens")
     doctor_parser.add_argument(
         "--check-endpoints",
@@ -2309,9 +2311,9 @@ def build_parser() -> argparse.ArgumentParser:
     ingest_subparsers = ingest.add_subparsers(dest="source", required=True)
 
     github = ingest_subparsers.add_parser("github", help="Collect records from GitHub repositories")
-    github.add_argument("--repos", type=Path, default=Path("repos.txt"), help="Text file with one GitHub owner/repo or URL per line")
-    github.add_argument("--output", type=Path, default=Path("records.json"), help="Path to write records JSON")
-    github.add_argument("--report", type=Path, default=Path("report.json"), help="Path to write generation report JSON")
+    github.add_argument("--repos", type=Path, default=workspace.repos, help="Text file with one GitHub owner/repo or URL per line")
+    github.add_argument("--output", type=Path, default=workspace.records, help="Path to write records JSON")
+    github.add_argument("--report", type=Path, default=workspace.ingest_report, help="Path to write generation report JSON")
     github.add_argument("--token-file", type=Path, default=None, help="Optional file containing a GitHub token")
     github.add_argument("--force", action="store_true", help="Ignore existing records.json and reprocess all repos")
     github.add_argument("--resume", action="store_true", help="Resume from an existing partial JSONL checkpoint")
@@ -2347,8 +2349,8 @@ def build_parser() -> argparse.ArgumentParser:
     index = subparsers.add_parser("index", help="Build the embedding index")
     index_subparsers = index.add_subparsers(dest="index_command", required=True)
     index_build_parser = index_subparsers.add_parser("build", help="Build an embedding index from records")
-    index_build_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to index")
-    index_build_parser.add_argument("--output", type=Path, default=Path("index.json"), help="Path to write the embedding index")
+    index_build_parser.add_argument("--records", type=Path, default=workspace.records, help="Records JSON to index")
+    index_build_parser.add_argument("--output", type=Path, default=workspace.index, help="Path to write the embedding index")
     index_build_parser.add_argument("--force", action="store_true", help="Ignore existing index.json and rebuild from scratch")
     index_build_parser.add_argument("--resume", action="store_true", help="Resume from an existing partial index checkpoint")
     index_build_parser.add_argument(
@@ -2359,7 +2361,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     index_build_parser.set_defaults(func=index_build)
     index_stats_parser = index_subparsers.add_parser("stats", help="Summarize an embedding index without printing vectors")
-    index_stats_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to inspect")
+    index_stats_parser.add_argument("--index", type=Path, default=workspace.index, help="Embedding index to inspect")
     index_stats_parser.add_argument("--limit", type=int, default=10, help="Maximum languages/topics to print")
     index_stats_parser.add_argument(
         "--format",
@@ -2369,8 +2371,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     index_stats_parser.set_defaults(func=index_stats)
     index_verify_parser = index_subparsers.add_parser("verify", help="Check that records and index are in sync")
-    index_verify_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to compare")
-    index_verify_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to verify")
+    index_verify_parser.add_argument("--records", type=Path, default=workspace.records, help="Records JSON to compare")
+    index_verify_parser.add_argument("--index", type=Path, default=workspace.index, help="Embedding index to verify")
     index_verify_parser.add_argument(
         "--format",
         choices=("text", "json"),
@@ -2382,12 +2384,12 @@ def build_parser() -> argparse.ArgumentParser:
     records = subparsers.add_parser("records", help="Inspect generated repository records")
     records_subparsers = records.add_subparsers(dest="records_command", required=True)
     records_inspect_parser = records_subparsers.add_parser("inspect", help="Print a compact summary of records")
-    records_inspect_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to inspect")
+    records_inspect_parser.add_argument("--records", type=Path, default=workspace.records, help="Records JSON to inspect")
     records_inspect_parser.add_argument("--repo", default=None, help="Only show records whose owner/repo contains this text")
     records_inspect_parser.add_argument("--limit", type=int, default=20, help="Maximum records to print")
     records_inspect_parser.set_defaults(func=records_inspect)
     records_stats_parser = records_subparsers.add_parser("stats", help="Summarize records quality and metadata")
-    records_stats_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to summarize")
+    records_stats_parser.add_argument("--records", type=Path, default=workspace.records, help="Records JSON to summarize")
     records_stats_parser.add_argument("--limit", type=int, default=10, help="Maximum languages/topics/project types to print")
     records_stats_parser.add_argument(
         "--format",
@@ -2397,7 +2399,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     records_stats_parser.set_defaults(func=records_stats)
     records_validate_parser = records_subparsers.add_parser("validate", help="Validate record schema and profile quality")
-    records_validate_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to validate")
+    records_validate_parser.add_argument("--records", type=Path, default=workspace.records, help="Records JSON to validate")
     records_validate_parser.add_argument(
         "--format",
         choices=("text", "json"),
@@ -2409,8 +2411,8 @@ def build_parser() -> argparse.ArgumentParser:
     profile = subparsers.add_parser("profile", help="Refresh LLM profiles for records")
     profile_subparsers = profile.add_subparsers(dest="profile_command", required=True)
     profile_refresh_parser = profile_subparsers.add_parser("refresh", help="Regenerate LLM profiles and schema v2 fields")
-    profile_refresh_parser.add_argument("--records", type=Path, default=Path("records.json"), help="Records JSON to refresh")
-    profile_refresh_parser.add_argument("--output", type=Path, default=Path("records-v2.json"), help="Path to write refreshed records JSON")
+    profile_refresh_parser.add_argument("--records", type=Path, default=workspace.records, help="Records JSON to refresh")
+    profile_refresh_parser.add_argument("--output", type=Path, default=workspace.refreshed_records, help="Path to write refreshed records JSON")
     profile_refresh_parser.add_argument("--force", action="store_true", help="Refresh every record instead of only outdated ones")
     profile_refresh_parser.add_argument("--workers", type=int, default=1, help="Concurrent LLM refresh workers (default: 1)")
     profile_refresh_parser.add_argument("--resume", action="store_true", help="Resume from an existing partial JSONL checkpoint")
@@ -2432,7 +2434,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     search_parser = subparsers.add_parser("search", help="Search the embedding index")
     search_parser.add_argument("query", help="Natural-language query")
-    search_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to search")
+    search_parser.add_argument("--index", type=Path, default=workspace.index, help="Embedding index to search")
     search_parser.add_argument("--top-k", type=int, default=10, help="Maximum number of results to return")
     search_parser.add_argument(
         "--ranking-strategy",
@@ -2481,9 +2483,9 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser = subparsers.add_parser("eval", help="Evaluate retrieval quality")
     eval_subparsers = eval_parser.add_subparsers(dest="eval_command", required=True)
     eval_run_parser = eval_subparsers.add_parser("run", help="Run retrieval evaluation against an index")
-    eval_run_parser.add_argument("--cases", type=Path, default=Path("eval-cases.json"), help="Evaluation dataset JSON")
-    eval_run_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to evaluate")
-    eval_run_parser.add_argument("--output", type=Path, default=Path("eval-report.json"), help="Path to write evaluation report JSON")
+    eval_run_parser.add_argument("--cases", type=Path, default=workspace.eval_cases, help="Evaluation dataset JSON")
+    eval_run_parser.add_argument("--index", type=Path, default=workspace.index, help="Embedding index to evaluate")
+    eval_run_parser.add_argument("--output", type=Path, default=workspace.eval_report, help="Path to write evaluation report JSON")
     eval_run_parser.add_argument("--top-k", type=int, default=10, help="Maximum results to score per query")
     eval_run_parser.add_argument("--batch-size", type=int, default=64, help="Number of queries to embed per batch")
     eval_run_parser.add_argument(
@@ -2533,7 +2535,7 @@ def build_parser() -> argparse.ArgumentParser:
     eval_run_parser.set_defaults(func=eval_run)
 
     eval_inspect_parser = eval_subparsers.add_parser("inspect", help="Inspect misses and summary from an evaluation report")
-    eval_inspect_parser.add_argument("--report", type=Path, default=Path("eval-report.json"), help="Evaluation report JSON to inspect")
+    eval_inspect_parser.add_argument("--report", type=Path, default=workspace.eval_report, help="Evaluation report JSON to inspect")
     eval_inspect_parser.add_argument("--status", choices=("exact", "acceptable", "serious_mismatch", "insufficient_evidence"), default=None, help="Only show cases with this top-1 status")
     eval_inspect_parser.add_argument("--limit", type=int, default=20, help="Maximum cases to print")
     eval_inspect_parser.add_argument("--include-exact", action="store_true", help="Include exact top-1 cases in the inspection output")
@@ -2548,7 +2550,7 @@ def build_parser() -> argparse.ArgumentParser:
     eval_inspect_parser.set_defaults(func=eval_inspect)
 
     eval_cases_parser = eval_subparsers.add_parser("cases", help="Validate and summarize an evaluation dataset")
-    eval_cases_parser.add_argument("--cases", type=Path, default=Path("eval-cases.json"), help="Evaluation dataset JSON")
+    eval_cases_parser.add_argument("--cases", type=Path, default=workspace.eval_cases, help="Evaluation dataset JSON")
     eval_cases_parser.add_argument("--tag", default=None, help="Only show cases carrying this tag")
     eval_cases_parser.add_argument(
         "--query-intent",

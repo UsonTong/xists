@@ -38,6 +38,7 @@ from xists.search.embed import (
     embedding_input_fingerprint,
 )
 from xists.search.index import INDEX_VERSION, decode_vector
+from xists.workspace import resolve_workspace
 
 
 def test_load_env_file_loads_values(tmp_path, monkeypatch):
@@ -145,10 +146,11 @@ def test_root_help_prioritizes_search_and_command_discovery():
 
 def test_ingest_github_parser_uses_default_paths():
     args = build_parser().parse_args(["ingest", "github"])
+    workspace = resolve_workspace()
 
-    assert args.repos == Path("repos.txt")
-    assert args.output == Path("records.json")
-    assert args.report == Path("report.json")
+    assert args.repos == workspace.repos
+    assert args.output == workspace.records
+    assert args.report == workspace.ingest_report
     assert args.github_api == "rest"
     assert args.github_batch_size == 1
 
@@ -189,10 +191,11 @@ def test_ingest_github_parser_supports_dry_run_and_format():
 
 def test_doctor_parser_uses_default_paths():
     args = build_parser().parse_args(["doctor"])
+    workspace = resolve_workspace()
 
-    assert args.records == Path("records.json")
-    assert args.index == Path("index.json")
-    assert args.cases == Path("eval-cases.json")
+    assert args.records == workspace.records
+    assert args.index == workspace.index
+    assert args.cases == workspace.eval_cases
     assert args.format == "text"
     assert args.check_endpoints is False
     assert args.strict is False
@@ -207,48 +210,54 @@ def test_doctor_parser_accepts_strict_flag():
 
 def test_index_stats_parser_uses_default_path():
     args = build_parser().parse_args(["index", "stats"])
+    workspace = resolve_workspace()
 
-    assert args.index == Path("index.json")
+    assert args.index == workspace.index
     assert args.limit == 10
     assert args.format == "text"
 
 
 def test_index_verify_parser_uses_default_paths():
     args = build_parser().parse_args(["index", "verify"])
+    workspace = resolve_workspace()
 
-    assert args.records == Path("records.json")
-    assert args.index == Path("index.json")
+    assert args.records == workspace.records
+    assert args.index == workspace.index
     assert args.format == "text"
 
 
 def test_records_inspect_parser_uses_default_path():
     args = build_parser().parse_args(["records", "inspect"])
+    workspace = resolve_workspace()
 
-    assert args.records == Path("records.json")
+    assert args.records == workspace.records
     assert args.repo is None
     assert args.limit == 20
 
 
 def test_records_validate_parser_uses_default_path():
     args = build_parser().parse_args(["records", "validate"])
+    workspace = resolve_workspace()
 
-    assert args.records == Path("records.json")
+    assert args.records == workspace.records
     assert args.format == "text"
 
 
 def test_records_stats_parser_uses_default_path():
     args = build_parser().parse_args(["records", "stats"])
+    workspace = resolve_workspace()
 
-    assert args.records == Path("records.json")
+    assert args.records == workspace.records
     assert args.limit == 10
     assert args.format == "text"
 
 
 def test_profile_refresh_parser_uses_default_paths():
     args = build_parser().parse_args(["profile", "refresh"])
+    workspace = resolve_workspace()
 
-    assert args.records == Path("records.json")
-    assert args.output == Path("records-v2.json")
+    assert args.records == workspace.records
+    assert args.output == workspace.refreshed_records
     assert args.force is False
     assert args.only_missing_search_text is False
     assert args.format == "text"
@@ -260,10 +269,11 @@ def test_profile_refresh_parser_uses_default_paths():
 
 def test_eval_run_parser_uses_default_paths():
     args = build_parser().parse_args(["eval", "run"])
+    workspace = resolve_workspace()
 
-    assert args.cases == Path("eval-cases.json")
-    assert args.index == Path("index.json")
-    assert args.output == Path("eval-report.json")
+    assert args.cases == workspace.eval_cases
+    assert args.index == workspace.index
+    assert args.output == workspace.eval_report
     assert args.top_k == 10
     assert args.batch_size == 64
     assert args.ranking_strategy == "metadata"
@@ -286,8 +296,9 @@ def test_load_canonical_queries_requires_an_exact_nonempty_case_map(tmp_path):
 
 def test_search_parser_uses_default_options():
     args = build_parser().parse_args(["search", "python api framework"])
+    workspace = resolve_workspace()
 
-    assert args.index == Path("index.json")
+    assert args.index == workspace.index
     assert args.top_k == 10
     assert args.format == "text"
     assert args.ranking_strategy == "metadata"
@@ -994,8 +1005,9 @@ def test_eval_run_parser_supports_judge_flags():
 
 def test_eval_inspect_parser_uses_default_report_path():
     args = build_parser().parse_args(["eval", "inspect"])
+    workspace = resolve_workspace()
 
-    assert args.report == Path("eval-report.json")
+    assert args.report == workspace.eval_report
     assert args.status is None
     assert args.limit == 20
     assert args.include_exact is False
@@ -1005,8 +1017,9 @@ def test_eval_inspect_parser_uses_default_report_path():
 
 def test_eval_cases_parser_uses_default_path():
     args = build_parser().parse_args(["eval", "cases"])
+    workspace = resolve_workspace()
 
-    assert args.cases == Path("eval-cases.json")
+    assert args.cases == workspace.eval_cases
     assert args.tag is None
     assert args.query_intent is None
     assert args.limit == 20

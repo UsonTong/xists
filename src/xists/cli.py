@@ -675,11 +675,24 @@ def ingest_github(args: argparse.Namespace) -> int:
     if args.report:
         write_json(args.report, report)
 
-    print(json.dumps(
-        {"records": str(args.output), "report": str(args.report) if args.report else None, "total_records": len(merged), **report},
-        ensure_ascii=False,
-        indent=2,
-    ))
+    payload = {"records": str(args.output), "report": str(args.report) if args.report else None, "total_records": len(merged), **report}
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(
+            _format_command_summary(
+                "Ingest complete",
+                [
+                    ("Records", args.output),
+                    ("Projects", len(merged)),
+                    ("Generated", generated),
+                    ("Skipped", len(skipped)),
+                    ("Failed", len(failed)),
+                    ("Report", args.report),
+                ],
+                stream=sys.stdout,
+            )
+        )
     if failed:
         print(
             f"ingest finished with {len(failed)} failed repos; report written to {args.report or 'stdout'}",
@@ -895,21 +908,32 @@ def index_build(args: argparse.Namespace) -> int:
     if checkpoint_path.exists():
         checkpoint_path.unlink()
 
-    print(
-        json.dumps(
-            {
-                "index": str(args.output),
-                "record_schema_version": RECORD_SCHEMA_VERSION,
-                "embedding_model": config.model,
-                "dimension": dimension,
-                "record_count": len(vectors),
-                "new_vectors": new_count,
-                "skipped": skipped,
-            },
-            ensure_ascii=False,
-            indent=2,
+    payload = {
+        "index": str(args.output),
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": config.model,
+        "dimension": dimension,
+        "record_count": len(vectors),
+        "new_vectors": new_count,
+        "skipped": skipped,
+    }
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(
+            _format_command_summary(
+                "Index built",
+                [
+                    ("File", args.output),
+                    ("Projects", len(vectors)),
+                    ("New vectors", new_count),
+                    ("Skipped", len(skipped)),
+                    ("Model", config.model),
+                    ("Dimensions", dimension),
+                ],
+                stream=sys.stdout,
+            )
         )
-    )
     return 0
 
 
@@ -1185,6 +1209,52 @@ def version(args: argparse.Namespace) -> int:
     return 0
 
 
+def _format_command_summary(title: str, rows: list[tuple[str, Any]], *, stream: Any = None) -> str:
+    stream = stream or sys.stdout
+    width = max((len(label) for label, value in rows if value is not None), default=0)
+    lines = [style(title, "title", stream=stream)]
+    for label, value in rows:
+        if value is None:
+            continue
+        lines.append(
+            f"  {style(label.ljust(width), 'muted', stream=stream)}  "
+            f"{style(str(value), 'body', stream=stream)}"
+        )
+    return "\n".join(lines)
+
+
+def _format_doctor_text(payload: dict[str, Any], *, stream: Any = None) -> str:
+    stream = stream or sys.stdout
+    checks = payload.get("checks") or []
+    check_labels = {
+        "embedding_config": "Embedding configuration",
+        "embedding_endpoint": "Embedding endpoint",
+        "llm_config": "LLM configuration",
+        "github_token": "GitHub token",
+        "records_file": "Records file",
+        "index_file": "Index file",
+        "eval_cases_file": "Evaluation cases file",
+    }
+    lines = [style("Doctor", "title", stream=stream)]
+    lines.append(style("Ready" if payload.get("ok") else "Needs attention", "success" if payload.get("ok") else "warning", stream=stream))
+    next_steps: list[str] = []
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        status = str(check.get("status") or "unknown").upper()
+        role = "success" if status == "OK" else "warning" if status == "WARN" else "error"
+        name = str(check.get("name") or "check")
+        label = check_labels.get(name, name.replace("_", " ").title())
+        lines.append(f"  {style(status.ljust(5), role, stream=stream)} {label}: {check.get('message') or ''}")
+        for step in check.get("next_steps") or []:
+            if isinstance(step, str) and step not in next_steps:
+                next_steps.append(step)
+    if next_steps:
+        lines.extend(["", style("Next steps", "title", stream=stream)])
+        lines.extend(f"  {position}. {step}" for position, step in enumerate(next_steps, start=1))
+    return "\n".join(lines)
+
+
 def doctor(args: argparse.Namespace) -> int:
     checks: list[dict[str, Any]] = []
     embedding_config = None
@@ -1287,7 +1357,11 @@ def doctor(args: argparse.Namespace) -> int:
             )
 
     ok = all(check["status"] != "error" for check in checks)
-    print(json.dumps({"ok": ok, "checks": checks}, ensure_ascii=False, indent=2))
+    payload = {"ok": ok, "checks": checks}
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(_format_doctor_text(payload, stream=sys.stdout))
     return 0 if ok else 1
 
 
@@ -1341,31 +1415,20 @@ def _index_stats_report(index: dict[str, Any], *, index_path: Path, limit: int) 
 
 
 def _format_index_stats_text(report: dict[str, Any]) -> str:
-    return "\n".join(
+    return _format_command_summary(
+        "Index",
         [
-            f"index: {report['index']}",
-            f"index_version: {report.get('index_version')}",
-            f"record_schema_version: {report.get('record_schema_version')}",
-            f"embedding_model: {report.get('embedding_model')}",
-            f"embedding_base_url: {report.get('embedding_base_url')}",
-            f"embedding_input_version: {report.get('embedding_input_version')}",
-            f"dimension: {report.get('dimension')}",
-            f"built_at: {report.get('built_at')}",
-            f"record_count: {report.get('record_count')}",
-            f"vector_count: {report.get('vector_count')}",
-            "estimated memory: "
-            + (
-                f"{report['estimated_memory_mb']} MB"
-                if report.get("estimated_memory_mb") is not None
-                else "unknown"
-            ),
-            f"skipped_count: {report.get('skipped_count')}",
-            f"missing_metadata_count: {report.get('missing_metadata_count')}",
-            f"missing_fingerprint_count: {report.get('missing_fingerprint_count')}",
-            "top:",
-            f"  languages: {_format_top_items(report.get('top_languages') or [], 'language')}",
-            f"  topics: {_format_top_items(report.get('top_topics') or [], 'topic')}",
-        ]
+            ("File", report["index"]),
+            ("Projects", report.get("record_count")),
+            ("Vectors", report.get("vector_count")),
+            ("Model", report.get("embedding_model")),
+            ("Dimensions", report.get("dimension")),
+            ("Built", report.get("built_at")),
+            ("Memory", f"{report['estimated_memory_mb']} MB" if report.get("estimated_memory_mb") is not None else "unknown"),
+            ("Skipped", report.get("skipped_count")),
+            ("Languages", _format_top_items(report.get("top_languages") or [], "language")),
+            ("Topics", _format_top_items(report.get("top_topics") or [], "topic")),
+        ],
     )
 
 
@@ -1846,17 +1909,18 @@ def profile_refresh(args: argparse.Namespace) -> int:
         print(json.dumps(summary, ensure_ascii=False, indent=2))
     else:
         print(
-            "\n".join(
+            _format_command_summary(
+                "Profiles refreshed",
                 [
-                    f"records: {args.records}",
-                    f"output: {args.output}",
-                    f"schema: {RECORD_SCHEMA_VERSION}",
-                    f"profile_prompt_version: {PROFILE_PROMPT_VERSION}",
-                    f"refreshed: {refreshed}",
-                    f"resumed: {resumed}",
-                    f"skipped: {skipped}",
-                    f"failed: {len(failed)}",
-                ]
+                    ("Records", args.records),
+                    ("Output", args.output),
+                    ("Refreshed", refreshed),
+                    ("Resumed", resumed),
+                    ("Skipped", skipped),
+                    ("Failed", len(failed)),
+                    ("Report", args.report),
+                ],
+                stream=sys.stdout,
             )
         )
     if failed:
@@ -2192,6 +2256,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Fail when endpoint probes fail; implies --check-endpoints",
     )
+    doctor_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
     doctor_parser.set_defaults(func=doctor)
 
     ingest = subparsers.add_parser("ingest", help="Collect repository records")
@@ -2222,7 +2292,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--format",
         choices=("text", "json"),
         default="text",
-        help="Output format for dry-run reports: text (default) or json for scripts and agents",
+        help="Output format: text (default) or json for scripts and agents",
     )
     github.add_argument("--retry-failed", type=Path, default=None, help="Only process repos listed in a failure report JSON")
     github.add_argument(
@@ -2240,6 +2310,12 @@ def build_parser() -> argparse.ArgumentParser:
     index_build_parser.add_argument("--output", type=Path, default=Path("index.json"), help="Path to write the embedding index")
     index_build_parser.add_argument("--force", action="store_true", help="Ignore existing index.json and rebuild from scratch")
     index_build_parser.add_argument("--resume", action="store_true", help="Resume from an existing partial index checkpoint")
+    index_build_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
     index_build_parser.set_defaults(func=index_build)
     index_stats_parser = index_subparsers.add_parser("stats", help="Summarize an embedding index without printing vectors")
     index_stats_parser.add_argument("--index", type=Path, default=Path("index.json"), help="Embedding index to inspect")

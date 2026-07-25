@@ -177,6 +177,7 @@ def test_doctor_parser_uses_default_paths():
     assert args.records == Path("records.json")
     assert args.index == Path("index.json")
     assert args.cases == Path("eval-cases.json")
+    assert args.format == "text"
     assert args.check_endpoints is False
     assert args.strict is False
 
@@ -746,7 +747,7 @@ def test_index_verify_missing_index_uses_stderr_and_exit_two(tmp_path, capsys):
     assert "Index file not found" in captured.err
 
 
-def test_doctor_keeps_failed_diagnostics_as_json_on_stdout(tmp_path, monkeypatch, capsys):
+def test_doctor_defaults_to_actionable_text_on_stdout(tmp_path, monkeypatch, capsys):
     for name in (
         "EMBEDDING_API_KEY",
         "EMBEDDING_BASE_URL",
@@ -770,9 +771,90 @@ def test_doctor_keeps_failed_diagnostics_as_json_on_stdout(tmp_path, monkeypatch
 
     assert doctor(args) == 1
     captured = capsys.readouterr()
-    payload = json.loads(captured.out)
-    assert payload["ok"] is False
+    assert "Doctor" in captured.out
+    assert "Needs attention" in captured.out
+    assert "Embedding configuration" in captured.out
+    assert "Next steps" in captured.out
+    assert not captured.out.lstrip().startswith("{")
     assert captured.err == ""
+
+
+def test_index_build_defaults_to_a_human_summary(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    output_file = tmp_path / "index.json"
+    records_file.write_text(json.dumps([_make_record("example/project")]), encoding="utf-8")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://test.invalid/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
+    args = build_parser().parse_args(["index", "build", "--records", str(records_file), "--output", str(output_file)])
+
+    with patch("xists.cli.call_embeddings", return_value=[[1.0, 0.0]]):
+        assert index_build(args) == 0
+
+    output = capsys.readouterr().out
+    assert output.startswith("Index built\n")
+    assert "Projects" in output
+    assert not output.lstrip().startswith("{")
+
+
+def test_index_build_json_format_is_machine_readable(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    output_file = tmp_path / "index.json"
+    records_file.write_text(json.dumps([_make_record("example/project")]), encoding="utf-8")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://test.invalid/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
+    args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file), "--format", "json"]
+    )
+
+    with patch("xists.cli.call_embeddings", return_value=[[1.0, 0.0]]):
+        assert index_build(args) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["index"] == str(output_file)
+    assert payload["record_count"] == 1
+
+
+def test_ingest_defaults_to_a_human_summary(tmp_path, monkeypatch, capsys):
+    repos_file = tmp_path / "repos.txt"
+    output_file = tmp_path / "records.json"
+    repos_file.write_text("example/project\n", encoding="utf-8")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test.invalid/v1")
+    monkeypatch.setenv("LLM_MODEL", "fixture/llm")
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    args = build_parser().parse_args(["ingest", "github", "--repos", str(repos_file), "--output", str(output_file)])
+
+    with patch("xists.cli.collect_record", return_value=_make_record("example/project")), patch(
+        "xists.cli.generate_llm_profile", side_effect=lambda record, _config: record["llm_profile"]
+    ):
+        assert ingest_github(args) == 0
+
+    output = capsys.readouterr().out
+    assert output.startswith("Ingest complete\n")
+    assert "Projects" in output
+    assert not output.lstrip().startswith("{")
+
+
+def test_profile_refresh_defaults_to_a_human_summary(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    output_file = tmp_path / "records-v2.json"
+    records_file.write_text(json.dumps([_make_record("example/project")]), encoding="utf-8")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "http://test.invalid/v1")
+    monkeypatch.setenv("LLM_MODEL", "fixture/llm")
+    args = build_parser().parse_args(
+        ["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--force"]
+    )
+
+    with patch("xists.cli.generate_llm_profile", side_effect=lambda record, _config: record["llm_profile"]):
+        assert profile_refresh(args) == 0
+
+    output = capsys.readouterr().out
+    assert output.startswith("Profiles refreshed\n")
+    assert "Refreshed" in output
+    assert not output.lstrip().startswith("{")
 
 
 def test_eval_run_writes_report(tmp_path, monkeypatch):
@@ -1036,6 +1118,7 @@ def test_doctor_reports_config_and_files_without_secrets(tmp_path, monkeypatch, 
     args = build_parser().parse_args(
         [
             "doctor",
+            "--format", "json",
             "--records", str(records_file),
             "--index", str(index_file),
             "--cases", str(tmp_path / "missing-eval-cases.json"),
@@ -1075,6 +1158,7 @@ def test_doctor_reports_actionable_next_steps_for_missing_config(tmp_path, monke
     args = build_parser().parse_args(
         [
             "doctor",
+            "--format", "json",
             "--records", str(tmp_path / "records.json"),
             "--index", str(tmp_path / "index.json"),
             "--cases", str(tmp_path / "eval-cases.json"),
@@ -1117,6 +1201,7 @@ def test_doctor_check_endpoints_reports_embedding_probe(tmp_path, monkeypatch, c
         [
             "doctor",
             "--check-endpoints",
+            "--format", "json",
             "--records", str(records_file),
             "--index", str(index_file),
             "--cases", str(cases_file),
@@ -1164,6 +1249,7 @@ def test_doctor_strict_fails_when_embedding_probe_fails(tmp_path, monkeypatch, c
         [
             "doctor",
             "--strict",
+            "--format", "json",
             "--records", str(records_file),
             "--index", str(index_file),
             "--cases", str(cases_file),
@@ -1282,11 +1368,12 @@ def test_index_stats_text_is_readable(tmp_path, capsys):
 
     assert code == 0
     output = capsys.readouterr().out
-    assert "index:" in output
-    assert "vector_count: 1" in output
-    assert "estimated memory: 0.0 MB" in output
-    assert "missing_fingerprint_count: 0" in output
-    assert "languages: Python (1)" in output
+    assert output.startswith("Index\n")
+    assert "Vectors" in output
+    assert "Memory" in output
+    assert "0.0 MB" in output
+    assert "Languages" in output
+    assert "Python (1)" in output
 
 
 def test_index_stats_estimates_memory(tmp_path, capsys):
@@ -1341,7 +1428,8 @@ def test_index_stats_memory_unknown_without_dimension(tmp_path, capsys):
 
     assert code == 0
     output = capsys.readouterr().out
-    assert "estimated memory: unknown" in output
+    assert "Memory" in output
+    assert "unknown" in output
 
     json_args = build_parser().parse_args(["index", "stats", "--index", str(index_file), "--format", "json"])
     assert index_stats(json_args) == 0

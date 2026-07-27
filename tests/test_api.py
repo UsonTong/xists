@@ -23,6 +23,7 @@ def make_index(*, model: str = "test-embedding"):
         "embedding_model": model,
         "embedding_input_version": EMBEDDING_INPUT_VERSION,
         "dimension": 2,
+        "record_count": 2,
         "vectors": [
             {
                 "repo_id": "winner/repo",

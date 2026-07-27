@@ -540,6 +540,7 @@ def test_search_cli_json_matches_public_api_core_result(tmp_path, monkeypatch, c
         "embedding_model": "fixture/embed",
         "embedding_input_version": EMBEDDING_INPUT_VERSION,
         "dimension": 2,
+        "record_count": 2,
         "vectors": [
             {
                 "repo_id": "winner/repo",

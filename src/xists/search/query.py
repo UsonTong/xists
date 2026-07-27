@@ -14,7 +14,7 @@ import numpy as np
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.confidence import CONFIDENCE_CALIBRATION_MODES, calibrate_confidence
 from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingConfig, EmbeddingError, call_embeddings, embed_query
-from xists.search.index import decode_vector
+from xists.search.index import INDEX_VERSION, decode_vector
 from xists.search.rerank import rerank_text_from_entry
 
 HIGH_CONFIDENCE_THRESHOLD = 0.60
@@ -86,6 +86,12 @@ LANGUAGE_TERMS = {
     for aliases in LANGUAGE_ALIASES.values()
     for alias in aliases
     for token in TOKEN_RE.findall(alias)
+}
+CONTEXTUAL_ECOSYSTEM_TERMS = {
+    "node",
+    "nodejs",
+    "react",
+    "reactjs",
 }
 LANGUAGE_PREFIXES = sorted(
     {
@@ -282,22 +288,24 @@ def _identity_match_kind(query: str, entry: dict[str, Any]) -> str:
         return "repo_id"
     if raw_query in {value.strip().lower() for value in _identity_values(entry)}:
         return "exact_value"
-    # ASCII tokenization cannot safely represent mixed CJK natural-language queries.
-    if any(0x3400 <= ord(char) <= 0x9FFF for char in query):
-        metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
-        values = [str(metadata.get("name") or ""), *_string_list(metadata.get("aliases"))]
-        for value in values:
-            normalized = value.strip().lower()
-            if len(normalized) >= 3 and normalized not in LANGUAGE_TERMS and normalized in raw_query:
-                return "contextual_name_mention"
-        return "none"
-    if _query_variants(query) & _identity_variants(entry):
-        return "name_mention"
+    # A project name embedded in a natural-language request is contextual
+    # evidence, never an exact lookup.  In particular, ecosystem names such as
+    # Node.js and React must not identify their own repositories.
+    for value in _identity_values(entry):
+        normalized = value.strip().lower()
+        value_tokens = _tokenize(normalized)
+        identity_terms = _expanded_token_set(set(value_tokens))
+        if (
+            len(normalized) >= 3
+            and normalized in raw_query
+            and not (identity_terms & (LANGUAGE_TERMS | CONTEXTUAL_ECOSYSTEM_TERMS))
+        ):
+            return "contextual_name_mention"
     return "none"
 
 
 def _exact_identity_match(query: str, entry: dict[str, Any]) -> bool:
-    return _identity_match_kind(query, entry) != "none"
+    return _identity_match_kind(query, entry) in {"repo_id", "exact_value"}
 
 
 def _metadata_text(metadata: dict[str, Any]) -> str:
@@ -377,7 +385,8 @@ def _metadata_adjustment(query: str, entry: dict[str, Any], semantic_score: floa
     profile_tokens = _expanded_token_set(profile_tokens)
 
     identity_kind = _identity_match_kind(query, entry)
-    exact_identity = identity_kind != "none"
+    exact_identity = identity_kind in {"repo_id", "exact_value"}
+    contextual_identity = identity_kind == "contextual_name_mention"
     matched_terms = sorted(token for token in keyword_tokens if _expanded_token(token) & text_tokens)
     topic_matches = sorted(token for token in keyword_tokens if _expanded_token(token) & topic_tokens)
     profile_matches = sorted(token for token in keyword_tokens if _expanded_token(token) & profile_tokens)
@@ -393,6 +402,9 @@ def _metadata_adjustment(query: str, entry: dict[str, Any], semantic_score: floa
     if exact_identity:
         adjustment += max(0.25, HIGH_CONFIDENCE_THRESHOLD + 0.05 - semantic_score)
         why.append("matched exact repository identity")
+    elif contextual_identity:
+        adjustment += 0.015
+        why.append("mentioned project name in query context")
     if primary_language and language_alias == primary_language:
         adjustment += 0.03
         language_match = language
@@ -430,7 +442,7 @@ def _metadata_adjustment(query: str, entry: dict[str, Any], semantic_score: floa
         "exact_identity": exact_identity,
         "matched_terms": matched_terms,
         "diagnostics": {
-            "identity_match": "exact" if exact_identity else None,
+            "identity_match": "exact" if exact_identity else "contextual" if contextual_identity else None,
             "identity_evidence": {"kind": identity_kind},
             "language_match": language_match,
             "language_mismatch": language_mismatch,
@@ -634,6 +646,12 @@ def _rank_reranked_entries(
 
 
 def ensure_index_matches_model(index: dict[str, Any], config: EmbeddingConfig) -> None:
+    index_version = index.get("index_version")
+    if index_version != INDEX_VERSION:
+        raise IndexMismatchError(
+            f"Index index_version is {index_version!r}, but xists expects {INDEX_VERSION}. "
+            "Rebuild the index with xists index build."
+        )
     index_model = index.get("embedding_model")
     if not index_model:
         raise IndexMismatchError(
@@ -661,6 +679,38 @@ def ensure_index_matches_model(index: dict[str, Any], config: EmbeddingConfig) -
             f"{RECORD_SCHEMA_VERSION}. Run xists profile refresh for older records, "
             "then rebuild the index."
         )
+    vectors = index.get("vectors")
+    if not isinstance(vectors, list):
+        raise IndexMismatchError(
+            "Index vectors must be a list. Rebuild the index with xists index build."
+        )
+    record_count = index.get("record_count")
+    if isinstance(record_count, bool) or not isinstance(record_count, int) or record_count != len(vectors):
+        raise IndexMismatchError(
+            "Index record_count does not match vectors. Rebuild the index with xists index build."
+        )
+    dimension = index.get("dimension")
+    if dimension is None and not vectors:
+        return
+    if isinstance(dimension, bool) or not isinstance(dimension, int) or dimension <= 0:
+        raise IndexMismatchError(
+            "Index dimension must be a positive integer. Rebuild the index with xists index build."
+        )
+    for position, entry in enumerate(vectors):
+        if not isinstance(entry, dict):
+            raise IndexMismatchError(
+                f"Index vector entry {position} must be an object. Rebuild the index with xists index build."
+            )
+        repo_id = entry.get("repo_id")
+        if not isinstance(repo_id, str) or not repo_id.strip():
+            raise IndexMismatchError(
+                f"Index vector entry {position} has an invalid repo_id. Rebuild the index with xists index build."
+            )
+        if decode_vector(entry.get("vector"), dimension=dimension) is None:
+            raise IndexMismatchError(
+                f"Index contains invalid vectors that do not match its dimension {dimension}. "
+                "Rebuild the index with xists index build."
+            )
 
 
 def _normalized_matrix(vectors: list[Any]) -> np.ndarray:

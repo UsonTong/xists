@@ -61,11 +61,12 @@ def make_record(repo_id="react/react"):
 
 def make_index(vectors):
     return {
-        "index_version": 1,
+        "index_version": INDEX_VERSION,
         "record_schema_version": RECORD_SCHEMA_VERSION,
         "embedding_model": "bge-m3",
         "embedding_input_version": EMBEDDING_INPUT_VERSION,
         "dimension": 2,
+        "record_count": len(vectors),
         "vectors": vectors,
     }
 
@@ -387,8 +388,16 @@ def test_cjk_context_does_not_pin_an_ascii_name_fragment():
 def test_cjk_context_pins_a_distinct_ascii_name():
     index = make_index(
         [
-            {"repo_id": "kubernetes/kubernetes", "vector": [0.0, 1.0], "metadata": {"name": "kubernetes"}},
-            {"repo_id": "semantic/winner", "vector": [1.0, 0.0], "metadata": {"name": "winner"}},
+            {
+                "repo_id": "kubernetes/kubernetes",
+                "vector": vector_for_cosine(0.82),
+                "metadata": {"name": "kubernetes"},
+            },
+            {
+                "repo_id": "semantic/winner",
+                "vector": vector_for_cosine(0.80),
+                "metadata": {"name": "winner"},
+            },
         ]
     )
 
@@ -401,7 +410,38 @@ def test_cjk_context_pins_a_distinct_ascii_name():
     )
 
     assert result["results"][0]["repo_id"] == "kubernetes/kubernetes"
-    assert result["results"][0]["diagnostics"]["identity_match"] == "exact"
+    assert result["results"][0]["diagnostics"]["identity_match"] == "contextual"
+    assert result["results"][0]["diagnostics"]["identity_evidence"]["kind"] == "contextual_name_mention"
+
+
+def test_cjk_ecosystem_mention_cannot_overturn_a_clear_semantic_winner():
+    index = make_index(
+        [
+            {
+                "repo_id": "nodejs/node",
+                "vector": vector_for_cosine(0.4),
+                "metadata": {"name": "node", "aliases": ["Node.js"]},
+            },
+            {
+                "repo_id": "expressjs/express",
+                "vector": [1.0, 0.0],
+                "metadata": {"name": "express"},
+            },
+        ]
+    )
+
+    result = rank(
+        "轻量级 Node.js Web 应用框架",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda _config, _query: [1.0, 0.0],
+    )
+
+    assert result["results"][0]["repo_id"] == "expressjs/express"
+    node = next(item for item in result["results"] if item["repo_id"] == "nodejs/node")
+    assert node["diagnostics"]["identity_evidence"]["kind"] == "none"
+    assert node["diagnostics"]["identity_match"] is None
 
 
 def test_cjk_context_does_not_pin_a_repo_owner_fragment():
@@ -589,7 +629,7 @@ def test_evidence_calibration_downgrades_high_confidence_without_reranker_eviden
     assert result["confidence_evidence"]["downgrade_reasons"] == ["reranker_evidence_unavailable"]
 
 
-def test_evidence_calibration_downgrades_contextual_identity_without_reordering():
+def test_evidence_calibration_does_not_treat_an_ecosystem_term_as_identity():
     index = make_index(
         [
             {"repo_id": "nodejs/node", "vector": [1.0, 0.0], "metadata": {"name": "node"}},
@@ -600,7 +640,7 @@ def test_evidence_calibration_downgrades_contextual_identity_without_reordering(
         "top_k": 2,
         "embed": lambda _config, _query: [1.0, 0.0],
         "ranking_strategy": "rerank",
-        "rerank": lambda _query, _documents: [0.1],
+        "rerank": lambda _query, _documents: [0.1, 0.9],
         "rerank_candidate_limit": 2,
     }
 
@@ -610,8 +650,9 @@ def test_evidence_calibration_downgrades_contextual_identity_without_reordering(
     assert [item["repo_id"] for item in calibrated["results"]] == [
         item["repo_id"] for item in baseline["results"]
     ]
-    assert calibrated["results"][0]["confidence"] == "exploratory"
-    assert calibrated["results"][0]["confidence_evidence"]["identity_evidence"] == "contextual_name_mention"
+    node = next(item for item in calibrated["results"] if item["repo_id"] == "nodejs/node")
+    assert node["diagnostics"]["identity_evidence"]["kind"] == "none"
+    assert node["confidence_evidence"]["identity_evidence"] == "none"
 
 
 def test_evidence_calibration_preserves_direct_repository_identity():
@@ -933,6 +974,58 @@ def test_rank_rejects_record_schema_version_mismatch():
     index = make_index([])
     index["record_schema_version"] = RECORD_SCHEMA_VERSION + 1
     with pytest.raises(IndexMismatchError, match=r"record_schema_version.*profile refresh"):
+        rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+
+@pytest.mark.parametrize("version", [None, INDEX_VERSION - 1, INDEX_VERSION + 1])
+def test_rank_rejects_missing_or_incompatible_index_version(version):
+    index = make_index([])
+    index["index_version"] = version
+
+    with pytest.raises(IndexMismatchError, match=r"index_version.*Rebuild"):
+        rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+
+def test_rank_rejects_non_list_vectors():
+    index = make_index([])
+    index["vectors"] = {"not": "a list"}
+
+    with pytest.raises(IndexMismatchError, match=r"vectors.*list.*Rebuild"):
+        rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+
+def test_rank_rejects_record_count_not_matching_vectors():
+    index = make_index([{"repo_id": "react/react", "vector": [1.0, 0.0], "metadata": {}}])
+    index["record_count"] = 2
+
+    with pytest.raises(IndexMismatchError, match=r"record_count.*vectors.*Rebuild"):
+        rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+
+@pytest.mark.parametrize("dimension", [0, -1, 2.5, True])
+def test_rank_rejects_invalid_index_dimension(dimension):
+    index = make_index([])
+    index["dimension"] = dimension
+
+    with pytest.raises(IndexMismatchError, match=r"dimension.*positive integer.*Rebuild"):
+        rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+
+def test_rank_accepts_a_valid_empty_index_without_dimension():
+    index = make_index([])
+    index["dimension"] = None
+
+    result = rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+    assert result["abstained"] is True
+    assert result["results"] == []
+
+
+def test_rank_rejects_invalid_vector_entry_before_embedding():
+    index = make_index([{"repo_id": "react/react", "vector": [1.0, 0.0], "metadata": {}}])
+    index["vectors"][0]["repo_id"] = ""
+
+    with pytest.raises(IndexMismatchError, match=r"repo_id.*Rebuild"):
         rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
 
 

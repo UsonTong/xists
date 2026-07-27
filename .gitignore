@@ -22,3 +22,15 @@ data/scale-*-profiled-records*.json
 data/scale-*-index.json
 data/scale-*-report.json
 data/scale-*-result.json
+
+# Generated scale experiments, diagnostics, and interrupted checkpoints.
+data/scale-*.partial.json
+data/scale-*-baseline.json
+data/scale-*-diagnostic.json
+data/scale-*-failures.json
+data/scale-*-retry.json
+data/scale-*-retry-*.json
+data/scale-*-canonical-queries.json
+data/scale-*-metadata-current.json
+data/scale-*-repair-report*.json
+data/scale-*-failure-diagnostics.json

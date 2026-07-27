@@ -226,7 +226,7 @@ and endpoint failures instead of printing or terminating the process.
 
 ## Search Result Example
 
-When you run a search, `xists` returns a compact text view by default for terminal review. Add `--format json` for scripts and agent integrations. v0.2.0 keeps ranking simple: exact repo/name/alias matches are pinned first, then semantic similarity is adjusted by a few explainable metadata signals.
+When you run a search, `xists` returns a compact text view by default for terminal review. Add `--format json` for scripts and agent integrations. Search combines embedding similarity with bounded, explainable metadata signals. Exact `owner/repo` and exact name/alias lookups are pinned first; project names mentioned inside a broader natural-language request remain contextual evidence rather than an exact lookup.
 
 Default text output looks like this:
 

@@ -199,7 +199,7 @@ result = search("open source firebase alternative", index, embedding_config=conf
 
 ## 检索结果示例
 
-每次搜索，`xists` 默认都会输出适合终端阅读的紧凑文本。脚本和 agent 集成可以加 `--format json` 获取结构化结果。v0.2.0 的排序刻意保持简单：先固定精确 repo/name/alias 命中，再用少量可解释 metadata 信号调整语义相似度。
+每次搜索，`xists` 默认都会输出适合终端阅读的紧凑文本。脚本和 agent 集成可以加 `--format json` 获取结构化结果。搜索会结合 embedding 相似度与有界、可解释的 metadata 信号。精确的 `owner/repo` 和精确 name/alias 查询会被置顶；在较长自然语言请求中出现的项目名仅作为上下文证据，不会被当作精确查询。
 
 默认文本输出类似这样：
 

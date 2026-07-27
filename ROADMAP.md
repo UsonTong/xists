@@ -44,7 +44,7 @@ xists 的核心思路是：
 
 ## 1. 当前状态与问题
 
-> **状态更新（2026-07-17）**：v0.2.0、v0.3.0、v0.4.0 已完成，当前版本为 `0.4.0`。本节以下内容描述的是 roadmap 制定时（`0.1.0`）的状态，作为决策背景保留，其中的问题（query.py 过度复杂等）已在对应版本中解决。
+> **状态更新（2026-07-27）**：v0.2.0 至 v0.8.0 的主体路线已完成，随后发布了 `v0.8.1`（project discovery skill）和 `v0.8.2`（identity evidence 与 index 兼容性修复）。当前公开版本为 `0.8.2`。一次新的项目审查发现：纯中文 query intent 不足、正式检索基线尚未收口、10k 单查询和 JSON index 已接近当前架构边界。后续发布路线因此调整为 `v0.9.0 → v0.9.x → v0.10.0 → v1.0.0rcN → v1.0.0`。本节以下内容描述 roadmap 制定时（`0.1.0`）的状态，作为决策背景保留。
 
 本 roadmap 制定时版本是 `0.1.0`，处于 demo 状态。
 
@@ -256,34 +256,60 @@ MCP 很重要，因为它能让 agent 使用 xists。但 MCP 不应该太早成�
 ## 3. 版本路线总览
 
 ```text
-v0.2.0  清理搜索，夺回控制权              [已完成]
+v0.2.0  清理搜索，夺回控制权                         [已完成]
          ↓
-v0.3.0  Schema v2，把智能转移到数据层      [已完成]
+v0.3.0  Schema v2，把智能转移到数据层                 [已完成]
          ↓
-v0.4.0  数据质量工具，让数据源可维护       [已完成]
+v0.4.0  数据质量工具，让数据源可维护                  [已完成]
          ↓
-v0.5.0  本地规模与 index 稳定              [已完成]
+v0.5.x  本地规模与 index 稳定                         [已完成]
          ↓
-v0.6.0  规模化 ingest 与数据更新           [已完成]
+v0.6.x  规模化 ingest、数据更新与 eval                [已完成]
          ↓
-v0.7.0  稳定 Python API + 优秀 CLI + 打包首发
+v0.7.x  Python API、CLI、打包与 workspace              [已完成]
          ↓
-v0.8.0  MCP / agent 集成
+v0.8.0  MCP / agent 集成                              [已完成]
+         ↓
+v0.8.1  Project discovery skill                       [已完成]
+         ↓
+v0.8.2  搜索正确性与索引兼容性补丁                    [当前公开版本]
+         ↓
+v0.9.0  中文检索与正式检索基线
+         ↓
+v0.9.x  中文检索稳定窗口，只接收兼容性修复
+         ↓
+v0.10.0 PreparedIndex、NumPy 与索引/checkpoint 架构
+         ↓
+v1.0.0rc1 / rc2  冻结 API、CLI、schema 与发布证据
          ↓
 v1.0.0  稳定发布
 ```
 
-每个版本都应该有：
+### 3.1 为什么不把本轮整改做成一个版本
 
-- 明确目标
-- 为什么现在做
-- 不做什么
-- CLI 体验要求
-- 验收标准
+本轮问题同时涉及排序正确性、中文 query analysis、检索评测、运行性能、持久化格式、checkpoint、CLI 拆分和 CI。把它们合并到一个版本会让行为变化、性能变化和格式变化互相干扰，也无法在回归时快速定位原因。
 
-**执行规格约定**：v0.5.0 / v0.6.0 的逐任务执行规格见 §11 / §12。v0.7.0、v0.8.0 与 v1.0.0 的执行规格（§13 起）**尚未编写，且刻意不提前编写**——执行规格中的"现状盘点"必须基于开工时的真实代码状态，提前写只会产出过期引用。规则：每个版本开工前，必须先由维护者（或在维护者审阅下）按 §11/§12 的结构补写对应执行规格（现状盘点、任务分解、明确禁止、验收核对表、完成报告模板）；执行规格未补写并通过审阅前，任何 agent 不得开工实现该版本。只有验收清单（§5.7-§5.9）不足以作为开工依据。
+因此采用以下切分原则：
 
----
+- **patch（`0.x.y`）**：修复现有错误，不增加新的数据迁移要求，不改变索引持久化格式。
+- **minor（`0.x.0`）**：增加用户可感知能力、改变默认搜索行为、引入新运行时架构，或要求重建索引。
+- **release candidate（`1.0.0rcN`）**：冻结 1.0 契约并验证发布证据，不再加入计划外功能。
+- **major（`1.0.0`）**：开始正式承担 API、CLI JSON、record schema 和 index 生命周期的兼容性承诺。
+
+软件版本与数据协议版本必须分开：
+
+- `xists 0.10.0` 是软件发布版本。
+- `INDEX_VERSION = 4`（如发生）是索引文件协议版本。
+- 只引入内存态 `PreparedIndex` 而不改变磁盘格式时，不得无理由提升 `INDEX_VERSION`。
+- 改变磁盘结构时必须提升 `INDEX_VERSION`，并提供兼容读取、转换工具或明确的 rebuild 指引。
+
+### 3.2 执行规格约定
+
+v0.5.0 / v0.6.0 的历史执行规格见 §11 / §12；v0.7.0 与 v0.8.0 的历史执行规格见 §13 / §14。自 2026-07-26 起，新的整改与发布执行规格以 §15 为准。
+
+每个版本都必须有明确目标和范围、明确不做什么、对应测试和评测证据、可执行验收标准、独立 release commit/tag，以及 staged 文件清单审查。
+
+行为修改必须先有回归测试；正确性、性能、存储格式和纯重构不得混在同一个功能提交中。若 §15 与开工时的真实代码状态不符，先更新现状盘点和验收标准，不得按照过期假设盲目实现。
 
 # v0.2.0 — 清理搜索，夺回控制权
 
@@ -1411,7 +1437,7 @@ xists search "browser automation for agents" --format json
 - README 或 docs 中的用户路径。
 - `docs/usage.md` 中对应命令说明。
 - `docs/record-schema.md` 或 index/schema 文档（如果涉及格式）。
-- `ROADMAP.md` 状态或后续说明（如果实现偏离本路线）。ROADMAP.md 已纳入本仓库（2026-07-17 起，仓库根目录），执行 agent 应直接更新它，并在完成报告中单列"偏离 roadmap 的事项"供维护者审阅。
+- `ROADMAP.md` 状态或后续说明（如果实现偏离本路线）。ROADMAP.md 位于仓库根目录；执行 agent 应直接更新它，并在完成报告中单列"偏离 roadmap 的事项"供维护者审阅。
 
 不允许代码行为和文档长期不一致。
 
@@ -1996,7 +2022,7 @@ xists 的核心是：
 ### 单人维护
 
 - **风险**：xists 是个人工具，维护者中断投入则项目停滞。
-- **缓解**：这正是本 roadmap 作为决策文档存在的理由——"为什么"和验收清单让任何 agent 或维护者可接手；1.0 前核心包保持零重依赖（MCP SDK 仅为可选 extra，见 v0.8.0 依赖策略）和纯本地文件架构，把项目"复活成本"压到最低。本文档自身必须纳入版本控制——它是接手的前提，丢了它其余缓解都失效。2026-07-17 起本文档已随 xists 仓库版本控制（仓库根目录 `ROADMAP.md`），不得再退回单机目录维护。
+- **缓解**：这正是本 roadmap 作为决策文档存在的理由——"为什么"和验收清单让任何 agent 或维护者可接手；1.0 前核心包保持零重依赖（MCP SDK 仅为可选 extra，见 v0.8.0 依赖策略）和纯本地文件架构，把项目"复活成本"压到最低。本文档自身也必须纳入版本控制（公开或私有仓库均可），不得只存在于单机目录——它是接手的前提，丢了它其余缓解都失效。
 
 ### PyPI 包名被抢注
 
@@ -2032,15 +2058,9 @@ xists 的核心是：
 
 roadmap 是活文档。每次修订在此追加一条：日期、变更内容、原因。
 
-- **2026-07-19** — 2k 实验复测完成：恢复已有的 BAAI/bge-m3 TEI 容器并通过 strict doctor 后，最终结果为 recall@1 78.6%（基线 42.9%）、recall@5 78.6%（基线 64.3%）、wrong high-confidence 由 7 降至 1；两个 no-result case 均为 exploratory。初次 CJK identity 防护过宽造成 Kubernetes/CPython regression，已收窄为只允许候选的 distinct name/alias，语言 alias 不再触发 identity。剩余三项 serious mismatch 已归因，2k 的爬升门槛满足；允许准备 10k，但本次未开始 ingest。完整记录见 `docs/scale-2k-diagnosis.md`。
+- **2026-07-26** — 根据 `v0.8.1` 后项目审查重排发布路线：新增 `v0.8.2` 搜索正确性补丁、`v0.9.0` 中文检索与正式基线、`v0.9.x` 稳定窗口、`v0.10.0` 性能与索引架构版本，以及 `v1.0.0rcN` 发布候选阶段；新增 §15 的范围、禁止项、验收、提交隔离和发布流程。明确本地 `PROJECT_AUDIT.md` 仅作为整改输入，不得进入任何 commit、wheel、sdist 或 release asset。原因：审查问题跨越行为、评测、性能和格式，合并为单一版本会放大回归风险，也不符合语义化发布和可审查提交原则。
 
-- **2026-07-19** — 2k 实验诊断后续：将 LangChain/LlamaIndex、agent framework、关系型数据库和 data store 四个过窄的评测预期改为有理由的 acceptable alternatives；修复完整 `owner/repo` 嵌入自然语言时 identity 漏检、混合中文查询误把 ASCII 短名称当 identity，以及 no-result 分数被标为 high confidence 的通用行为。未添加任何项目/case 特判。诊断记录见 `docs/scale-2k-diagnosis.md`。配置的 embedding endpoint 当前不可用，因此新的 2k 报告尚未实测；10k 实验保持阻塞，直到该报告完成并审阅。
-
-- **2026-07-19** — v0.6.0 完成，§3 标记 [已完成]。T1 为 profile refresh 增加 JSONL checkpoint 和 `--resume`；T2 增加 ingest/profile dry-run；T3 为两者补齐失败隔离、报告和 `--retry-failed`；T4 增加 GitHub rate-limit reset 等待，并将 ingest checkpoint 从逐条重写完整 JSON 快照改为追加式 JSONL（含 resume 和截断尾行恢复）；T5 增加 recall@1/@5；T6 增加规模实验手册。运行时依赖未增加，schema/version 常量未变，`query.py` 在 v0.6 提交和验收改动中均为零行变化。完整验收证据见 `docs/v0.6.0-completion.md`；2k 实验结果属于后续 v1.0 发布前证据，不以其排名分数作为本版本收版条件。
-
-- **2026-07-17** — v0.5.0 完成，§3 标记 [已完成]。按 §11 执行：T1 四项兼容检查核实补全（model/dimension/input_version/schema_version 检查均已存在，新补"index 缺 embedding_model 字段静默通过"的报错与 4 个 mismatch 测试）；T2 `scripts/generate_synthetic_index.py`；T3 `docs/performance.md`（1k/10k 基线，AMD Ryzen 7 7735H）；T4 `index stats` 增加 `estimated_memory_mb`；T5 `tests/test_performance_smoke.py`。两项需维护者知悉：(1) T3 按其"重复工作"例外条款给 `query.py` 的 `_expanded_token` 加了 `lru_cache`（与 `_tokenize`/`_keyword_tokens` 同惯例，纯 memoization 零打分变化，全部测试不变通过），10k 核心搜索从 2.28s/1.62s 降至 1.56s/0.86s（rank/rank_many）；(2) **待决策**：`rank_many`（numpy 矩阵路径）10k 核心 0.86s 达标，但 CLI `search` 实际使用的单查询 `rank()` 用纯 Python cosine 循环打分，10k 时 1.56s 超过 §11 T3 的 1 秒线——非 O(n²)，是线性但常数大的标量实现。统一 `rank()` 到矩阵路径可解决，但 float32 矩阵与 float64 标量的分数差异约 1e-4，属打分行为变更，依 T3 规定不擅自优化，留待维护者裁决（详见 docs/performance.md）。
-
-- **2026-07-17** — 第四次修订（对照代码逐条核查）。(1) 修正 §12 现状盘点：多线程 ingest 实际已在每个 future 完成后写 checkpoint，早前"全部完成后才写"的判断源自 `cli.py` 一行过期注释而非代码行为（该注释已同步改正）；(2) §12 T4 第 5 点从"多线程 checkpoint 空洞二选一"改写为"ingest checkpoint 快照式 O(n²) 写入的 JSONL 追加式改造"，消除与本节禁止事项"禁止每条重写完整快照"的自相矛盾——第二次修订只治了 profile refresh，漏了写入量问题完全相同的 ingest，若不改，v0.6.0 将带着 O(n²) checkpoint 去实现"2 万级 corpus 生产"的目标；(3) §11 硬规则 3 明确 T1 涉及的兼容检查函数不在 query.py 只读范围内，消除可能让执行 agent 卡死的字面歧义；(4) §11 T4 内存估算从 float64（×8 字节）改为 float32（×4 字节），与 `_normalized_matrix` 实际 dtype 一致；(5) 本文档自维护者单机目录（~/Downloads）移入 xists 仓库根目录纳入版本控制，落实 §8"单人维护"条目对本文档自身的要求，§5.1/§6 中"roadmap 不在仓库中"的偏离上报流程同步更新为直接修改。原因：v0.5.0/v0.6.0 开工前按 §11/§12 自身规则逐条核实现状盘点，发现两处与代码不符（会触发 agent 依规停工）及一处未被任何任务覆盖的规模瓶颈。
+- **2026-07-23** — 补写 §13「v0.7.0 执行规格（草案，待维护者审阅）」：以 `origin/main` 的 `d6ebf57`（v0.6.2）为现状基线，冻结 v0.7 的公共 Python API、CLI JSON 契约、打包与首发工作分解、禁止项、验收命令及完成报告模板；同时明确 LICENSE、是否提前占用 PyPI 名称、Release asset 的最终托管与发布权限仍必须由维护者决定。原因：v0.6.x 已完成，按 §3 的执行规格约定，v0.7 开工前必须先有基于真实代码状态、可审阅且可验收的施工规格，不能仅凭版本目标直接编码。
 
 - **2026-07-17** — 第三次修订（1.0.0 就绪性审查）。(1) 裁决阶梯实验归属：v0.6.0 验收只含操作手册，实验执行（至少 2k + 10k 两级）改为 v1.0.0 发布门槛，v1.0.0 新增"发布前置"节，§5.6 / v0.6.0 验收标准同步修改，消除与 §12 T6 的矛盾；(2) v1.0.0 增加首发后至少 4 周真实使用期门槛；(3) §9 安全与隐私三问列入 v0.7.0 packaging 验收，防止按清单执行时漏项；(4) v0.7.0 要求 Release asset 的 demo 数据先刷新到当前 schema 并通过 validate/verify；(5) v0.8.0 新增"依赖策略"：MCP SDK 作为可选 extra（`xists[mcp]`），核心包保持 numpy-only，§8 表述同步；(6) §3 新增执行规格约定：v0.7.0 及以后各版本开工前必须先补写 §11/§12 式执行规格；(7) §12 T4 增加多线程 ingest checkpoint 空洞的处理要求；(8) v0.7.0 补充 License 由维护者选定、发布流程固化进 docs/release.md；(9) §8 新增 PyPI 包名抢注风险，单人维护条目要求本文档纳入版本控制；(10) v0.7.0 API 示例补充 embedding 配置必须显式注入的说明。原因：完整审查发现按原文执行到 1.0.0，会带着未经真实规模验证的可靠性声明、缺失的隐私告知、过期的冷启动数据和未裁决的依赖冲突完成发布。
 - **2026-07-17** — 第二次修订。重写 §12 T1 的 checkpoint 设计：partial 文件从"每刷新一条就整体重写完整 records 快照"改为 JSONL 逐条追加（`<output>.partial.jsonl`），并在 §12 硬规则/禁止事项中同步允许 JSONL、禁止快照式逐条重写。原因：20k 规模下快照方案累计写入约 1.4TB（O(n²)），每次全量 JSON 序列化的 CPU 与 LLM 调用同量级，checkpoint 会成为长任务自身的瓶颈；JSONL 追加使单条落盘成本恒定，且截断的末行天然可检测，最终 output 格式不变。
@@ -2060,7 +2080,7 @@ roadmap 是活文档。每次修订在此追加一条：日期、变更内容、
 1. 按 T1 → T2 → T3 → T4 → T5 的顺序执行，不允许跳步、不允许合并步骤。
 2. 每完成一个任务，必须运行 `python -m pytest tests/ -q`，全部通过才能进入下一个任务。出现失败时必须先修复，不允许注释掉或跳过失败的测试。
 3. **禁止修改以下文件的现有逻辑**（只读参考）：
-   - `src/xists/search/query.py` 的排序/打分逻辑（第 300 行以后的 ranking 部分）。例外：T1 涉及的搜索前兼容性检查（`ensure_index_matches_model` 及相邻检查逻辑）允许按 T1 修改，不受本条限制
+   - `src/xists/search/query.py` 的排序/打分逻辑（第 300 行以后的 ranking 部分）
    - `src/xists/records.py` 的 `RECORD_SCHEMA_VERSION`
    - `src/xists/profile/llm.py` 的 `PROFILE_PROMPT_VERSION`
    - `src/xists/search/embed.py` 的 `EMBEDDING_INPUT_VERSION` 和 fingerprint 逻辑
@@ -2152,7 +2172,7 @@ roadmap 是活文档。每次修订在此追加一条：日期、变更内容、
 **目标**：`index stats` 输出中增加 `estimated_memory_mb`（ROADMAP 标注为可选项，此处正式实现）。
 
 **实现**：
-1. 在 `_index_stats_report` 中计算：`vector_count × dimension × 4 / 1024 / 1024`（搜索时矩阵为 float32，见 `query.py` 的 `_normalized_matrix`），保留 1 位小数。
+1. 在 `_index_stats_report` 中计算：`vector_count × dimension × 8 / 1024 / 1024`（float64 假设），保留 1 位小数。
 2. text 输出加一行 `estimated memory: X.X MB`；JSON 输出加字段 `estimated_memory_mb`。
 3. dimension 或 vector 数据缺失时该字段为 null，text 输出显示 `estimated memory: unknown`，不允许抛异常。
 
@@ -2258,7 +2278,7 @@ ls docs/performance.md                                        # 期望：存在�
 | 已有能力 | 位置 |
 |---|---|
 | ingest 默认增量：已存在于 output 的 repo 会跳过，`--force` 才全量重跑 | `cli.py` ingest |
-| ingest 各模式（单线程 / 多线程 / GraphQL 批量）均在每条或每批完成后写 checkpoint；但写法是快照式全量重写（每次 `write_json(args.output, merged)`），O(n²) 写入问题见 T4 | `cli.py` ingest 主循环 |
+| ingest 单线程模式逐 repo 写 checkpoint；多线程模式全部完成后写 | `cli.py` ~277、~295 行注释 |
 | HTTP 429/5xx 指数退避重试 | `ingest/github.py` `RETRYABLE_HTTP_STATUSES` + `2**attempt` |
 | 多 token 轮换（TokenPool，GITHUB_TOKENS） | `ingest/github.py` |
 | GraphQL 批量模式（低配额消耗）+ rateLimit 查询 | `ingest/github.py` |
@@ -2268,7 +2288,7 @@ ls docs/performance.md                                        # 期望：存在�
 | eval run + `--llm-judge`（top-1 不一致时 LLM 成对裁决） | `eval/` |
 | 分层 eval 生成脚本 | `scripts/generate_stratified_eval.py` |
 
-**因此 v0.6.0 的实际差距是**：profile refresh 的断点续跑、ingest checkpoint 的追加式改造（现为快照式 O(n²)，见 T4）、dry-run 预估、失败隔离与只重试失败项、GitHub 限流的"等到重置"策略（现在只有指数退避，长任务遇到配额耗尽会失败）、recall@k 指标、以及阶梯实验的操作手册。以下任务只做差距部分。
+**因此 v0.6.0 的实际差距是**：profile refresh 的断点续跑、dry-run 预估、失败隔离与只重试失败项、GitHub 限流的"等到重置"策略（现在只有指数退避，长任务遇到配额耗尽会失败）、recall@k 指标、以及阶梯实验的操作手册。以下任务只做差距部分。
 
 ---
 
@@ -2331,7 +2351,7 @@ ls docs/performance.md                                        # 期望：存在�
 2. 若 TokenPool 有其他 token，先换 token；全部 token 都耗尽时，等待最早的 reset 时间 + 5 秒缓冲，期间每 60 秒向 stderr 输出一行 `rate limited, resuming at <ISO时间>`。
 3. 增加 `--max-rate-limit-wait <seconds>` 参数，默认 3600；超过则报错退出（此时单线程模式的 checkpoint 保证已完成部分不丢失）。
 4. sleep 必须可注入（函数参数或 module 级可替换），测试中不真实等待。
-5. **ingest checkpoint 的 O(n²) 写入必须在本任务一并处理**。现状核实（2026-07-17）：所有 ingest 模式（单线程、多线程、GraphQL 批量）都已在每条/每批完成后写 checkpoint（`write_json(args.output, merged)` 在 `as_completed` 循环内；曾误导的"write checkpoint after all complete"注释已于本次修订时改正）。真正的问题是写法：每次全量重写 output JSON 快照。这正是 T1 为 profile refresh 论证过要禁止的 O(n²) 模式（20k repos × ~7KB/条 ≈ 每次 140MB 序列化，累计 ~1.4TB 写入），而大规模 ingest 恰恰是本版本的目标场景。处理方式：把 ingest checkpoint 改造成与 T1 相同的 JSONL 追加设计（`<output>.partial.jsonl`，每成功一条 append 一行，完成后组装最终 records.json 并原子写、删除 partial；`--resume` 语义与 T1 一致——ingest 现有的"已在 output 中则跳过"增量逻辑保留，partial 中的条目同样计入已完成）。多线程模式下 append 必须线程安全（由主线程在 `as_completed` 循环中写入即可，与现有结构吻合）。必须有测试：mock 中断后 partial 含已完成条目、`--resume` 续跑不重复抓取、末行截断可容忍。
+5. **多线程模式的 checkpoint 空洞必须在本任务一并处理**。现状：多线程 ingest 全部完成后才写 checkpoint（cli.py ~277 行注释），数十小时任务中途失败（含超过 max-rate-limit-wait 退出）会丢失全部进度，而大规模 ingest 恰恰最可能开多线程。二选一：(a) 多线程模式每完成约 25 个 repo 落盘一次 checkpoint（写法与单线程 checkpoint 一致，注意线程安全：由主线程或加锁写入）；(b) 不改代码，但 `--help`、`docs/usage.md` 和 `docs/scaling-experiment.md` 明确规定大规模 ingest 必须使用单线程模式，且多线程模式下触发限流等待时 stderr 警告这一点。选择哪种及理由写进完成报告；选 (a) 时必须有测试（mock 中断后 checkpoint 含已完成条目）。
 
 **测试**：
 - mock 响应带 remaining=0 + reset=now+30 → 调用注入的 sleep 且时长约 35 秒（不真等）。
@@ -2409,3 +2429,1193 @@ git status                                          # 无生成物（partial、r
 ```
 
 不允许使用"基本完成""大致可用"等模糊表述。
+
+---
+
+## 13. v0.7.0 执行规格（草案，待维护者审阅）
+
+> 对应章节："v0.7.0 — 稳定 API、优秀 CLI 与 PyPI 首发"。本节不是授权发布，也不是立即开工指令；它把 v0.7 的边界、顺序和验收冻结成可审阅的施工规格。维护者确认本节后，才可开始 T1-T3；下列与发行有关的前置决定必须在 T4 前完成，且授权发布前不得执行 T5。
+>
+> 现状基线：`origin/main` 的 `d6ebf57`（v0.6.2）。不得以已经分叉的本地分支、实验分支或未跟踪 `data/` 产物作为 v0.7 行为基线。
+
+### 0. 开工门槛与必须由维护者决定的事项
+
+开始实现前，维护者必须明确记录以下决定：
+
+1. **LICENSE**：选择许可证名称及完整文本。执行者不得自行猜测或选择。
+2. **PyPI 节奏**：是否先发布一个 0.0.x 占用名称，还是直接等到 v0.7.0。两者都可行，但实际上传一律需要维护者当次明确授权。
+3. **Roadmap 的版本控制归属**：当前权威 Roadmap 位于仓库外的 Downloads；是否迁入仓库并纳入版本控制，须由维护者决定。不得擅自复制、覆盖或移动两份已经分叉的 Roadmap。
+4. **发布权限**：创建 GitHub Release、上传 Release asset、推送 tag、上传 PyPI 均是外部状态变更；仅在所有验收通过且维护者明确授权后执行。
+
+在上述决定未齐全时，允许完成不依赖它们的 API/CLI 测试、文档草稿和打包预检；不得添加 LICENSE、不得上传、不得声称已公开发布。
+
+### 1. v0.7.0 硬规则
+
+1. 按 T1 → T5 顺序执行。每个独立逻辑点一个 Conventional Commit；如果维护者继续采用直接合并工作流，每个任务分支完成验证后由维护者直接合并 main，不创建 PR。
+2. 每个任务至少执行相关离线 pytest 与 `git diff --check`；所有新增测试必须 mock GitHub、LLM 和 embedding endpoint，不能依赖真实凭据或网络。
+3. 运行时依赖继续保持只有 `numpy`。构建工具可以作为开发/发布环境依赖记录，但不得为此引入数据库、ANN、Web 框架或本地模型运行时。
+4. 不改变 `src/xists/search/query.py` 的排名行为，不为 demo、私有 2k/10k、中文、AI、工程或任一领域特化排序规则、阈值或评测答案。
+5. 公共 Python API 不得隐式读取 `.env`、环境变量或当前目录，不得 `print`、`sys.exit`、启动子进程，也不得在 import 时网络访问、读取文件或下载模型。embedding 配置必须显式注入。
+6. CLI、公共 API 与未来 MCP（本版本不实现）必须复用同一核心搜索逻辑；公共 API 不得调用 CLI 或 subprocess，CLI 才能调用公共 API。
+7. 不提交 `.env`、token、私有 records/index/eval 产物、刷新后的 demo 数据或 `data/scale-*`。不触碰 `experiment/multiview-retrieval`。
+8. 任何 index schema、profile prompt、embedding input、模型或格式兼容性变化都必须显式写出迁移/重建影响；不得静默吞掉 model/dimension mismatch。
+
+### 2. 真实代码现状与 v0.7 缺口
+
+执行者先按下表核实。若真实代码与本表不符，停止相关任务并在完成报告说明差异，不要按记忆重写能力。
+
+| 能力 | 当前位置 | v0.7 处理 |
+|---|---|---|
+| 内部 index JSON 加载 | `src/xists/search/index.py:load_index(path)` | 可以包装为公共 API；先冻结输入校验和错误契约 |
+| 内部单/批查询 | `src/xists/search/query.py:rank`、`rank_many` | 保持为核心实现；公共 API 调用它们，不重写排名 |
+| 显式 embedding 配置 | `src/xists/search/embed.py:EmbeddingConfig` | 作为 API 的显式注入配置候选 |
+| CLI 的环境读取 | `src/xists/cli.py:main`、`load_env_file(Path(".env"))` | 仅留在 CLI 装配层，绝不可泄漏到公共 API |
+| CLI 已有 JSON 结果 | `src/xists/cli.py` 各命令 | 冻结核心命令的 JSON 契约及 stdout/stderr/exit code 行为 |
+| 离线 CI fixture | `examples/ci-smoke`、`scripts/smoke_check.py` | 必须保留并覆盖安装后的最小 smoke |
+| 打包元数据与 release 文档 | `pyproject.toml`、`docs/release.md` | 当前不完整：metadata、版本来源、安装路径和 release runbook 都需补齐 |
+
+额外核实项：当前 `src/xists/__init__.py` 与 `pyproject.toml` 仍为 `0.6.0`，而稳定线已存在 v0.6.2 tag。因此 v0.7 必须先定义**单一版本来源或可自动验证的同步关系**；绝不能把互相矛盾的版本号带进 PyPI。根目录 demo artifacts 当前被 git 跟踪，迁移为 Release asset 前必须先提供可下载或可本地重建的路径，不能直接删除。
+
+### 3. 任务分解
+
+#### T1 — 冻结公共 Python API 与错误契约
+
+**目标**：提供一个不依赖 CLI 环境副作用、可被 Python 程序稳定调用的最小搜索 API。具体模块位置可在实现审阅时决定（例如 `xists/api.py`），但名字、输入、输出和错误在实现前必须写进测试并冻结。
+
+最小候选形态：
+
+```python
+from pathlib import Path
+
+from xists import load_index, search
+
+index = load_index(Path("index.json"))
+result = search(
+    "open source firebase alternative",
+    index,
+    embedding_config=embedding_config,
+    top_k=5,
+)
+```
+
+**实现要求**：
+
+1. `load_index` 接受 `str | Path`，返回 JSON-compatible 的已加载 index 对象；损坏 JSON、缺失文件、无效 schema 必须给出明确、可行动的异常。
+2. `search` 接受非空 `query: str`、已加载 index、显式 `EmbeddingConfig` 和受验证的 `top_k`。若审阅时选择 injected embedding callable 而非 `EmbeddingConfig`，必须二选一并在文档、类型和测试中保持一致，不能同时形成两个模糊入口。
+3. API 只公开当前能稳定承诺的基础 `rank` 能力。rerank、query transform 或实验性功能若无法冻结签名、字段与错误，留给后续版本，不得为凑功能公开。
+4. 成功值与 search CLI JSON 的语义一致。顶层至少冻结 `query`、`query_intent`、`abstained`、`results`；如存在 `latency_ms`，明确它的单位和是否稳定。每个结果至少冻结 `repo_id`、`url`、`summary`、`confidence`、`score`、`why`；对可空字段采用一种固定表示。现有 `semantic_score`、`metadata_score`、`entity_match` 等字段必须明确是稳定保留、转换还是内部实现细节。
+5. 无效 query、无效 top_k、index dimension/model mismatch、embedding endpoint/config 失败必须以可捕获异常表示；不得 `print` 或退出进程。错误信息须说明下一步，例如重新 build index 或检查 endpoint/model 配置。
+
+**测试**：使用 fixture index 与 mock embedder/config，覆盖正常搜索、空/非法输入、损坏 index、dimension mismatch、model mismatch、endpoint 失败，以及 API import/search 全程不读取 `.env`、不访问网络。
+
+#### T2 — CLI 复用 API，冻结 search 的 JSON 与文本体验
+
+**目标**：确保 CLI 和 Python API 不会在日后各自演化出不同的搜索语义。
+
+**实现要求**：
+
+1. `xists search` 通过公共 API 或其同一层核心调用执行，不得让 API 调用 CLI。CLI 仍可在最外层读取 `.env` 并把配置显式传入 API。
+2. 默认 text 输出保持面向人类可读；`--format json` 的 stdout 必须是唯一、完整 JSON payload。错误只写 stderr，并使用非零退出码。
+3. 同一 fixture、同一 query、同一配置下，CLI JSON 和 API 的核心字段、结果排序、abstention 语义必须一致。
+4. `why` 只能返回已有、真实的 evidence；如果现有信息不足以支持单独 `--explain`，不要虚构该参数或解释，把它列为后续版本候选。
+
+**测试**：比较 API 与 CLI JSON；覆盖默认 text、JSON 成功、配置/文件失败的 stderr 与 exit code。
+
+#### T3 — 统一核心 CLI 的机器可读契约、帮助与错误体验
+
+**范围**：审计面向脚本或 agent 的核心诊断命令：`doctor`、`records validate/stats/inspect`、`index stats/verify`、`search`。不要求为了形式统一给所有历史命令强加 JSON，但每个核心命令必须有明确、稳定的机器可读策略。
+
+**实现要求**：
+
+1. 在 `docs/usage.md` 说明每个核心命令的 text/JSON 支持、stdout/stderr 分工和成功、validation failure、usage/config/file error 的 exit code 语义。
+2. 参数新增或变更必须有准确 `--help`，并覆盖正常与失败路径测试。
+3. 保持现有 eval 的 JSON-first 行为兼容，不输出 embedding vector、完整 README 或完整 records 等大 payload。
+4. 需要加入 JSON 的地方要定义稳定字段，不得仅把人类文本包进 `message` 后称为 API。
+
+#### T4 — 打包、安全文档与 Release asset 准备
+
+**实现要求**：
+
+1. 仅在维护者决定 LICENSE 后，添加 LICENSE 文件，并在 `pyproject.toml` 补齐正确的 license、classifiers、项目 URL 等 metadata。
+2. 解决版本源不一致：选择单一版本来源，或实现构建前/CI 同步检查；`xists version`、wheel metadata、tag 和 release 文档中的 v0.7.0 必须一致。
+3. 使 `python -m build` 能构建 sdist 与 wheel，并验证二者内容不包含 `.env`、私有数据、token、测试缓存或不应发布的生成物。构建工具安装方式必须写入开发/发布文档。
+4. 更新 README（以及若维护者确认在维护范围内的中文 README）：至少有 `pip install xists`、首次真实搜索的最小 happy path、endpoint 配置方式、index/records 的获得或 build 方式。必须清楚披露远端 endpoint 会接收 query 与用于 embedding 的内容、本地 endpoint 选择、不做遥测、token 只局部读取，以及共享数据的内容责任。
+5. 重写 `docs/release.md`：版本检查、build、clean venv、tag、main CI、Release asset hash/version、上传顺序、回滚/失败处理，以及不发布私有数据和凭据。
+6. 先审计所有根目录 demo artifact 的 tracked 状态与消费者。迁移为 Release asset 前，必须提供准确下载位置和校验方式，或本地可复建路径；release-prep 工具/文档可先完成，但真实生成、GitHub 上传与公开发布属于 T5 的授权动作。
+
+#### T5 — Release candidate 与授权后首发
+
+**前置条件**：T1-T4 已完成、所有验收通过、维护者已决定 LICENSE 与 PyPI 节奏，并明确授权当次 tag / GitHub Release / PyPI 上传。
+
+**执行要求**：
+
+1. 版本、tag `v0.7.0`、package metadata 和 `xists version` 完全一致。
+2. 在新建的临时 venv 中安装**构建出的 wheel**（不得 editable install），运行 `xists --help`、`xists version` 与 committed smoke fixture；如果可构造不访问外部 embedding 的 API smoke，也必须运行。
+3. 将要发布的真实 demo asset 在上传前通过 `records validate` 和 `index verify`，并记录 hash、index/model 兼容性和构建版本。此项需要真实数据/endpoint 时由维护者执行或明确授权。
+4. 仅在授权后上传 PyPI、创建 GitHub Release、上传 assets 并推送 tag。未授权时，完成报告必须写“未执行”，不得暗示已发布。
+5. 授权发布后，从干净环境执行 `pip install xists==0.7.0` 并完成最小 happy path；若公开 PyPI 可见性存在延迟，记录实际状态和复查命令。
+
+### 4. v0.7.0 验收核对表
+
+以下命令是最低验收；执行者应按实际项目工具补足，但不得以真实 credential/生产数据替代离线测试。`build` 如未安装，先依照开发/发布文档安装，而不是假定环境天然具备它。
+
+```bash
+git diff --check
+python -m pytest tests/ -q
+python scripts/smoke_check.py
+python -m build
+
+python -m venv /tmp/xists-v070-venv
+/tmp/xists-v070-venv/bin/python -m pip install dist/xists-*.whl
+/tmp/xists-v070-venv/bin/xists --help
+/tmp/xists-v070-venv/bin/xists version
+```
+
+验收还必须证明：
+
+- 公共 API 与 CLI JSON 使用同一 fixture 时核心字段、排序和 abstention 一致。
+- 所有新增 API/CLI 错误路径均不访问网络、不读取 `.env`，并有明确异常或 stderr/exit code。
+- `git status` 未暂存/提交 `.env`、token、私有 `data/`、刷新后的 demo files、index/eval/partial/report 生成物。
+- main CI 通过。
+- 若进入授权发布阶段：Release asset 已经 validate/verify，PyPI 安装验证已完成；否则这两项必须明确标为“未执行（未获发布授权）”。
+
+### 5. 明确禁止（v0.7.0 特有）
+
+- 禁止实现 MCP server、Web UI、HTTP 服务、数据库、ANN 或本地模型下载。
+- 禁止为打包/API 任务改动 `query.py` 排名规则、评测 case 或 private 2k/10k 的评分标准。
+- 禁止公共 API 调用 CLI/subprocess，或读取 `.env`、环境变量、当前工作目录。
+- 禁止未声明地改变 records/index schema、profile prompt、embedding input、模型或 index 格式版本。
+- 禁止静默回退或吞掉 embedding/index mismatch。
+- 禁止把私有规模评测当公开 benchmark，或默认上传任何 PyPI/GitHub Release 内容。
+
+### 6. v0.7.0 完成报告模板
+
+```md
+### v0.7.0 完成报告
+#### 前置决定
+- LICENSE: [维护者明确决定]
+- PyPI / GitHub Release: [授权与实际动作；未授权则写“未执行”]
+- Roadmap 版本控制归属: [维护者决定]
+
+#### 已完成
+- T1: ...
+- T2: ...
+- T3: ...
+- T4: ...
+- T5: ...
+
+#### 公共契约
+- API signatures: ...
+- CLI JSON 字段与兼容性: ...
+- 错误行为: ...
+- 兼容性 / rebuild 影响: ...
+
+#### 未完成或偏离（没有则写“无”）
+- ...
+
+#### 验收
+- pytest: ...
+- smoke: ...
+- build: ...
+- clean venv: ...
+- main CI: ...
+- Release asset validate/verify: ...
+- PyPI install: ...
+```
+
+不允许使用“基本完成”“大致可用”等模糊表述。
+
+---
+
+## 14. v0.8.0 执行规格（已审阅）
+
+> 对应章节："v0.8.0 - MCP / agent 集成"。本节冻结 v0.8 的范围、实施顺序和验收标准。基线为 `main` 的 `v0.7.2`；当前 workspace 默认位于 `~/.xists`，公共 Python API 位于 `xists.api`。本版本的目标是稳定地包装既有搜索能力，不重新设计搜索、records 或 index。
+
+### 0. 硬规则
+
+1. 新建分支 `feat/mcp`。每个独立逻辑点一个 Conventional Commit；完成前不得 merge、打 tag、推送 release 或上传 PyPI，除非维护者当次明确授权。
+2. MCP SDK 只能作为 optional extra：`pip install "xists[mcp]"`。核心安装 `pip install xists` 的运行时依赖仍然只能是 `numpy`。
+3. 不手写 stdio JSON-RPC 或 MCP 协议实现；必须使用维护中的 MCP Python SDK。SDK import 必须惰性执行，未安装 extra 时 CLI、公共 API、普通 import 与其他所有命令保持可用。
+4. MCP server 必须复用 `xists.api.load_index` 与 `xists.api.search`，不得启动 `xists search` 子进程，不得复制 ranking 逻辑，不得改变 `query.py` 的排名行为。
+5. 只有 CLI/MCP 装配层可加载 workspace `.env` 与环境变量；公共 API 保持显式注入 `EmbeddingConfig` 的无副作用契约。
+6. 不实现 HTTP server、Web UI、daemon、远程多租户服务、数据库、ANN、后台同步、hot reload、多 index 管理或本地模型下载。
+7. 不提交 `.env`、token、私有 records/index/eval 数据、`data/scale-*`、MCP client 本地配置或真实模型调用结果。
+
+### 1. 真实基线与接口边界
+
+| 能力 | v0.7.2 位置 | v0.8 处理 |
+|---|---|---|
+| 公共 index 加载 | `xists.api.load_index` | MCP 启动时加载一次，错误转换为可行动的 MCP 错误 |
+| 公共搜索 | `xists.api.search` | `search_projects` 的唯一搜索实现 |
+| 显式 embedding 配置 | `xists.search.embed.EmbeddingConfig` | MCP 装配层从 workspace 配置构造后显式传入 API |
+| workspace / `.env` 加载 | `xists.workspace`、CLI main | MCP CLI 入口复用同一配置优先级：shell > cwd `.env` > workspace `.env` |
+| CLI JSON | `xists search --format json` | MCP 搜索的核心字段、排序、abstention 语义必须一致 |
+
+MCP server 只支持 stdio transport。用户入口固定为：
+
+```bash
+xists mcp
+```
+
+server 在启动时加载 index 和配置；用户重建或替换 index 后重启 server 生效。本版本不承诺运行时刷新。所有协议日志与诊断必须写 stderr，stdout 专供 MCP transport。
+
+### 2. 任务分解
+
+#### T1 - Optional extra 与 MCP 启动入口
+
+**目标**：提供可安装、可发现、不会破坏核心包的 MCP 入口。
+
+**实现要求**：
+
+1. 在 `pyproject.toml` 定义 `mcp` optional extra，使用一个经过测试的 MCP Python SDK 版本范围；不得把它加入基础 `dependencies`。
+2. 增加 `xists mcp` 命令。它在启动 server 前解析 workspace、加载配置、验证 index 与 embedding 配置；不得把 protocol output、banner 或颜色写到 stdout。
+3. 未安装 extra 时，命令以非零状态退出，stderr 明确包含 `pip install "xists[mcp]"`；`xists --help`、`xists doctor` 和 `import xists.api` 不依赖 MCP SDK。
+4. 启动失败时，缺 workspace/index/config、模型与 index 不匹配、endpoint 初始化失败等错误必须复用或保留现有的可行动原因，不能伪装为空搜索结果。
+
+**测试**：覆盖 extra 缺失、正常 CLI parser/help、配置/文件失败路径；所有测试不得启动真实 MCP client、访问网络或读取真实 `.env`。
+
+#### T2 - 冻结 MCP 工具契约
+
+**目标**：使 agent 获得候选项目理解包，而不是仅有链接和分数。
+
+首批稳定工具：
+
+1. `search_projects(query: str, top_k: int = 10)`：调用公共 API，返回 `query`、`query_intent`、`abstained`、`results`。结果保留 CLI/API 已有的 `repo_id`、`url`、`summary`、`confidence`、`score`、`why`，并在已有 profile 数据存在时提供 `use_cases`、`capabilities`、`best_for`、`not_for`、`related` / `replaces`。不得臆造缺失字段。
+2. `inspect_project(repo_id: str)`：返回单个项目的完整、受限 profile。其数据必须与已加载 index 对应；实现前须核实 index 是否已含足够 profile。若只能读取 `records.json`，必须在启动时验证 records/index 的对应版本或 fingerprint，并在不一致时失败，而不是返回陈旧记录。
+3. `index_stats()`：返回 index 的 schema/version、record count、embedding model、dimension 和可公开的统计信息；不得返回 embedding 向量、token、完整 README 或其他大 payload。
+
+`top_k` 的默认值为 10，接受范围必须有明确上限并在 API/SDK 边界验证。所有工具返回 JSON-compatible 的结构化结果；错误必须区分 invalid input、configuration/index problem 与 upstream embedding failure。
+
+**测试**：使用 fixture index、fixture records 和 mock embedding 配置，证明 `search_projects` 与公共 API/CLI JSON 的核心字段、结果排序和 abstention 一致；覆盖空 query、非法 top_k、缺失 repo、records/index 不一致及 index 损坏。
+
+#### T3 - Server 装配与端到端离线测试
+
+**目标**：确认工具注册、stdio transport 和错误边界真实可用，而不仅是普通 Python 函数测试。
+
+**实现要求**：
+
+1. 采用 MCP SDK 支持的内存或测试 transport 调用 tool，不依赖 Claude Code、Cursor、Cline 或真实网络。
+2. tool handler 只使用启动期构造的 immutable server state（index、EmbeddingConfig、可验证的 profile source）；不得在每次请求中重新读取 `.env` 或当前目录。
+3. stdout 不得包含日志或 ANSI 转义；CLI 的 MCP 进程启动后协议通信正常。
+4. 保持普通 `xists search`、`doctor`、Python API 与所有现有 CLI 命令行为不变。
+
+**测试**：新增 MCP 专项测试；完成后运行完整 pytest、既有 smoke check 和安装后的 MCP smoke。真实 endpoint 一律 mock。
+
+#### T4 - 用户接入文档
+
+**目标**：用户可以从 `pip install` 到 agent 调用完成一次可复现搜索，并在问题发生时用 CLI 排查。
+
+**文档要求**：
+
+1. README 与 `docs/usage.md` 说明 `pip install "xists[mcp]"`、`xists init`、数据/index 前置条件和 `xists mcp`。
+2. 提供 Claude Code、Cursor、Cline 的最小 stdio 配置示例；示例中不包含 token 或绝对的用户私有路径。
+3. 说明 MCP 读取的默认 workspace、配置优先级、index 更新后必须重启 server，以及远端 embedding endpoint 会收到查询文本。
+4. 明确给出 CLI 复现命令：`xists search "<query>" --format json`。
+5. 文档不得承诺所有查询都会命中；当 `abstained: true` 时，agent 应诚实处理未找到足够可信匹配的状态。
+
+#### T5 - 发布候选与授权发布
+
+**前置条件**：T1-T4 完成、所有验收通过、维护者明确批准 merge、`v0.8.0` tag、GitHub Release 与 PyPI 上传。
+
+**执行要求**：
+
+1. 版本源、wheel metadata、`xists version`、tag 和发布说明均为 `0.8.0`。
+2. 在新建临时 venv 分别安装核心 wheel 和 `.[mcp]`，证明核心 CLI 不受 optional extra 影响，MCP 入口可启动并通过离线 smoke。
+3. 构建物不得包含 token、workspace、私有数据、测试缓存或本地 MCP 配置。
+4. 发布后从干净环境执行 `pip install "xists[mcp]==0.8.0"`，完成离线 MCP smoke；公开 PyPI 可见性延迟须如实记录。
+
+### 3. 验收核对表
+
+```bash
+git diff --check
+python -m pytest tests/ -q
+python scripts/smoke_check.py
+python -m build
+
+# 新建临时 venv：分别验证基础 wheel 与 MCP extra
+python -m venv /tmp/xists-v080-venv
+/tmp/xists-v080-venv/bin/python -m pip install dist/xists-*.whl
+/tmp/xists-v080-venv/bin/xists --help
+/tmp/xists-v080-venv/bin/xists doctor --help
+
+/tmp/xists-v080-venv/bin/python -m pip install "xists[mcp]"
+/tmp/xists-v080-venv/bin/xists mcp --help
+```
+
+完成报告必须包含：依赖版本、工具 schema、CLI/API/MCP 一致性证据、基础 wheel 与 extra wheel 的安装结果、全部离线测试结果、数据兼容性结论，以及未执行的外部发布动作。不得使用“基本完成”“大致可用”等模糊表述。
+
+---
+
+
+## 15. v0.8.2 至 v1.0.0 整改与发布执行规格（2026-07-26）
+
+> 本节取代“完成 v0.8.0 后直接发布 v1.0.0”的旧假设，是当前有效的版本发布规格。历史章节继续保留，用来解释项目决策演进。
+
+### 15.0 执行硬规则
+
+1. 修复搜索行为前先增加能复现问题的回归测试，再修改实现。
+2. 正确性、中文 query analysis、性能、索引格式、checkpoint 和纯重构分开提交。
+3. 不为单个 dev/holdout case 添加项目专用规则、特殊仓库列表或不可解释的 magic number。
+4. 不未经 dev/holdout 对比就改变默认 embedding、profile、reranker、阈值或 canonical 配置。
+5. 不删除未跟踪的 `data/` 实验资产；先分类，再由维护者决定保留、忽略或清理。
+6. 不使用 `git add .` 或 `git add -A`。所有提交只按明确路径暂存，并检查 `git diff --cached --name-only`。
+7. 本地 `PROJECT_AUDIT.md` 只作为问题来源，**不得提交，也不得进入 wheel、sdist、GitHub Release asset 或文档包**。
+8. `.env`、token、私有 query、大规模 records/index、partial checkpoint 和 diagnostic 输出不得提交。
+9. 每个 release 必须由独立的 `chore: prepare vX.Y.Z` commit 收口；未经维护者明确授权，不执行 tag push、GitHub Release 或 PyPI 上传。
+10. 每个提交保持测试绿色；不得提交“先红后绿”的中间状态到共享分支。
+
+### 15.1 当前基线
+
+- 当前公开软件版本：`0.8.1`
+- Git tag：`v0.8.1`
+- record schema：`RECORD_SCHEMA_VERSION = 2`
+- embedding input：`EMBEDDING_INPUT_VERSION = 3`
+- index format：`INDEX_VERSION = 3`
+- Python：3.11+
+- 当前已知全量测试基线：307 passed
+- 2k 内部 holdout：Recall@1 约 50%—56.7%，Recall@5 约 73.3%—78.3%
+- 10k 内部 dev：较好结果约 Recall@1 46.7%，Recall@5 75.0%
+- 10k 单查询 `rank()`：约 1.56s；CLI 本地排序与加载合计约 3.1s，另加 endpoint latency
+
+这些数字是内部审查时的本地基线，不得包装成第三方可复现的公开性能承诺。正式公开结论必须按 v0.9.0 的基线文档要求提供 corpus/case 说明、运行命令和环境信息。
+
+### 15.2 v0.8.2 — 搜索正确性与索引兼容性补丁
+
+#### 目标与范围
+
+用最小范围修复当前搜索错误，不混入中文分词、性能或持久化架构改造。
+
+必须完成：
+
+1. 将 identity evidence 分为 `repo_id`、`exact_value`、`contextual_name_mention` 和 `none`。
+2. `repo_id` 和 `exact_value` 属于强身份；`contextual_name_mention` 只能作为较弱证据，不得无条件 pin 到第一名。
+3. 修复“轻量级 Node.js Web 应用框架”把 `nodejs/node` 压过语义上更合适的 `expressjs/express` 的行为。
+4. 保留“Kubernetes 云原生容器编排平台”等明确项目提及的可靠命中。
+5. 搜索入口验证 `index_version`、vectors 类型、record/vector 数量、dimension 和向量维度。
+6. 兼容性问题必须给出明确、可行动错误，不泄漏 `KeyError`、`IndexError` 或含糊异常。
+
+测试至少覆盖：Node.js 生态词、Kubernetes 明确提及、完整 `owner/repo`、owner 片段、Python/React/Rust 等生态词、semantic 明显更高的候选、缺失/过期 index version、非 list vectors、数量不一致和非法维度。
+
+明确不做：完整 CJK tokenizer、`PreparedIndex`、NumPy 排序重写、磁盘 index 格式变更、checkpoint 重写、CLI 拆分，以及默认 embedding/profile/reranker/threshold 变更。
+
+#### 验收与提交
+
+```bash
+python -m pytest tests/test_search.py -q
+python -m pytest tests/ -q
+python scripts/smoke_check.py
+python -m compileall -q src scripts tests
+python -m pip check
+```
+
+此外完成一次冻结的 2k dev/holdout 对比：目标错误修复；Recall@1/Recall@5 不出现无法解释的整体退化；任何指标变化都记录失败分类。
+
+```text
+fix(search): distinguish contextual mentions from exact identity
+fix(search): validate index version and vector structure
+chore: prepare v0.8.2
+```
+
+### 15.3 v0.9.0 — 中文检索与正式检索基线
+
+#### 必须完成
+
+1. 保留 ASCII 技术词解析，单独提取连续 CJK 文本。
+2. 使用轻量 CJK bigram/trigram 或结构化短语提取，不立即增加重型分词依赖。
+3. token 去重并限制数量/长度，避免单字和 n-gram 爆炸。
+4. 纯中文查询不再普遍得到空 `keywords` 和 `specificity = 0.0`。
+5. 中文 term 参与 query intent、metadata overlap、specificity、matched terms 和解释输出。
+6. 保持 `C++`、`C#`、`.NET`、`Node.js`、`owner/repo` 的既有解析能力。
+7. 冻结并区分 2k dev、2k holdout、10k dev、10k holdout；dev 用于调参，holdout 只用于阶段验收。
+8. 确定 canonical retrieval configuration，记录 embedding、profile、multiview、metadata 权重、reranker、candidate top-k 和 threshold。
+9. 新增 `docs/current-retrieval-baseline.md`，记录数据版本、Git commit、命令、环境、Recall@1、Recall@5、MRR、运行时间和已知失败类型。
+10. 修复新评测报告中残留旧 `xists_version` 的问题。
+
+测试至少包括：`自托管大语言模型应用界面`、`轻量级 Node.js Web 应用框架`、`Kubernetes 云原生容器编排平台`，以及含中文标点、重复词和空白的查询；覆盖 exact、functional、ecosystem、ambiguous、no-result 和中文 query family。
+
+#### 发布门槛
+
+- 全量测试、smoke、compileall、pip check、wheel/sdist 构建全部通过；
+- 纯中文 query intent 有可用 term，不再系统性为空；
+- 2k dev/holdout 达到冻结基线，或对下降给出维护者认可的失败归因；
+- 10k 至少完成 dev 验证，未完成 holdout 时必须如实记录；
+- 默认配置和实验配置清楚区分；
+- 文档版本和实际 `__version__` 一致。
+
+```text
+feat(search): add lightweight CJK query term extraction
+fix(eval): record current retrieval configuration
+docs(eval): document the canonical retrieval baseline
+chore: prepare v0.9.0
+```
+
+### 15.4 v0.9.x — 稳定窗口
+
+允许进入：CJK token 边界/标点/去重修复、ranking tie-break、错误信息、文档、评测元数据，以及不改变磁盘格式的小范围指标回归修复。
+
+不得进入：新索引持久化格式、大规模 `rank()` 重写、checkpoint 架构替换、CLI 大拆分和公共 API 类型重设计。可以不强行发布 `v0.9.1`；只有出现需要交付的兼容修复时才发布 patch。
+
+### 15.5 v0.10.0 — 性能、索引和 checkpoint 架构
+
+#### 阶段 A：PreparedIndex 和统一 NumPy 路径
+
+1. 引入内存态 `PreparedIndex`，加载时一次完成 vector 解码、NumPy matrix/normalization、identity mapping、metadata token 缓存和维度校验。
+2. `rank()` 与 `rank_many()` 复用同一核心。
+3. 增加 top-k 顺序、分数容差、稳定 tie-break、零向量、空索引、dimension mismatch 和 metadata rerank 的 parity 测试。
+4. 保存 2k/10k before/after：load、cold query、warm query、rank_many、CLI 总耗时和 peak memory。
+
+#### 阶段 B：持久化和 checkpoint
+
+1. 比较 metadata JSON + `.npy`、memmap、manifest + shards 等方案，以测量结果选择格式。
+2. 改变磁盘格式时提升 `INDEX_VERSION`，提供兼容读取、转换工具或明确 rebuild 指引。
+3. 用 append-only 临时分片或 versioned manifest 替代每 N batch 全量重写。
+4. checkpoint 必须原子提交，能从最后完整 batch 恢复并检测截断/损坏。
+5. 正确性与磁盘格式分开提交；若阶段 B 风险过高，允许延后到 `v0.11.0`。
+
+#### 发布门槛
+
+- 2k/10k 指标不低于 v0.9.x canonical baseline；
+- 排序 parity 通过，浮点差异被量化；
+- warm query 有可复现改善，同时报告 cold load 和 peak memory；
+- checkpoint 中断恢复通过；
+- 迁移/重建提示可行动。
+
+```text
+perf(search): reuse prepared NumPy index data
+feat(index): add versioned vector storage
+fix(index): make checkpoint recovery atomic
+docs(index): document index format and migration
+chore: prepare v0.10.0
+```
+
+### 15.6 v1.0.0rcN — 契约冻结与候选验证
+
+不得从 `v0.10.0` 直接发布 `v1.0.0`。至少发布一个符合 PEP 440 的候选版：Python package 使用 `1.0.0rc1`，Git tag 使用 `v1.0.0rc1`。
+
+RC 前必须完成：
+
+- 公共 Python API、错误契约、CLI 参数/default 和 JSON schema 冻结；
+- record/index/eval schema 生命周期和迁移策略冻结；
+- CLI 领域拆分完成，主入口只负责装配、注册和统一异常处理；
+- search/index/eval 边界的核心 `dict[str, Any]` 收敛为明确类型；
+- demo artifacts 与当前 schema 一致，README 演示可在干净环境运行；
+- lint、type、coverage 和 Python 版本矩阵进入 CI；
+- 2k/10k dev/holdout 结论完整；
+- wheel/sdist、基础安装、MCP extra、CLI、Python API 和 MCP 离线 smoke 通过。
+
+RC 阶段只修 release blocker。如 rc1 有阻断问题，发布 `1.0.0rc2`，不得覆盖或移动公开 tag。
+
+### 15.7 v1.0.0 — 稳定承诺
+
+`v1.0.0` 不代表长期 TODO 全部完成，而代表：CLI/Python API 兼容边界清楚；CLI JSON、record schema、index format、eval report 有版本策略；默认检索配置有正式基线；1k—10k 经过质量和性能验证；用户能判断何时 refresh、rebuild 或 migrate；RC 无未处理 release blocker。
+
+1.0 后，破坏 CLI JSON、公开 API、record schema 或 index format 的变更必须升 major；兼容新增使用 minor；向后兼容修复使用 patch。
+
+### 15.8 提交与发布流程
+
+版本源是 `src/xists/__init__.py` 中的 `__version__`。release commit 必须同步验证 `xists --version`、wheel metadata、报告中的 `xists_version`、文档当前版本、Git tag 和 Release title。
+
+每次只暂存明确路径。禁止 `git add .` 和 `git add -A`。提交前执行：
+
+```bash
+git status --short
+git diff --check
+git diff --cached --stat
+git diff --cached --name-only
+```
+
+staged 清单不得出现 `PROJECT_AUDIT.md`、`data/scale-*`、`.env`、`*.partial.json`、`*-diagnostic.json`。
+
+发布验证：
+
+```bash
+python -m pytest tests/ -q
+python scripts/smoke_check.py
+python -m compileall -q src scripts tests
+python -m pip check
+python -m build
+python -m twine check dist/*
+```
+
+构建后检查 wheel/sdist 内容，并在临时 venv 安装实际 wheel，验证 `xists --version`、`xists --help`；含 MCP 的版本还要验证 `xists[mcp]` 和离线 MCP smoke。未经维护者授权，不执行 tag push、GitHub Release 或 PyPI 上传。
+
+### 15.9 版本选择速查
+
+| 变化 | 版本选择 | 示例 |
+|---|---|---|
+| 向后兼容 bugfix、错误信息或文档修复 | patch | `0.8.1 → 0.8.2` |
+| 新增中文检索等用户可感知能力 | minor | `0.8.2 → 0.9.0` |
+| 0.x 阶段的新持久化格式并有迁移说明 | minor + 提升 `INDEX_VERSION` | `0.9.x → 0.10.0` |
+| 1.0 契约冻结验证 | prerelease | `1.0.0rc1` |
+| 首次稳定兼容承诺 | major | `1.0.0` |
+| 1.0 后破坏公开契约 | major | `1.x → 2.0.0` |
+
+### 15.10 完成报告模板
+
+```text
+### vX.Y.Z 完成报告
+
+#### 范围
+- 本版本完成：
+- 明确未做：
+
+#### 行为与兼容性
+- 用户可见变化：
+- records/index 是否需要 refresh/rebuild：
+- 软件/schema/index 版本：
+
+#### 质量与性能证据
+- pytest / smoke / compileall / pip check：
+- dev / holdout：
+- 已知失败分类：
+- load / cold / warm / rank_many / peak memory（适用时）：
+
+#### 构建与安装
+- wheel/sdist / twine / 临时 venv / MCP extra：
+
+#### 提交隔离
+- staged 文件已审查：
+- PROJECT_AUDIT.md 未提交：
+- data 实验产物未提交：
+
+#### 外部动作
+- tag / GitHub Release / PyPI：
+```
+
+## 附录 A：未排期的长期 TODO
+
+### 建立公开、可复现的检索回归评测集
+
+**状态**：未排期。它不是 v0.6.1 的发布条件，也不是启动 v0.7.0 的前置条件；等项目需要对外发布可审计性能结论或引入外部贡献者时再安排。
+
+**目的**：让公开 PR、release note 和性能说明中的检索质量结论能够被第三方理解、审阅和复跑，而不只依赖维护者本地的私有评测产物。
+
+**原则**：维护者可以使用本地 2k/10k corpus、冻结 query 和 holdout 做内部验收；这对防止回归很有价值。但若 corpus、case、判定规则或运行命令未公开，诸如 `Recall@5`、`wrong high-confidence` 等数字不能被外部独立验证。因此，私有评测应在 PR 中表述为内部回归结论，不应单独作为公开性能宣称的证据。
+
+**将来完成条件**：
+
+- 提交一个规模可控、无私人 records/index、可在 CI 或普通开发机运行的公开 regression fixture。
+- 公开 case 的来源或编写原则、分层方法、`expected` / `acceptable` / no-result 的判定规则，以及 dev 与 holdout 的隔离规则。
+- 提供从 records 到 index 再到 eval 的可复制命令；所有外部服务调用必须能以 fixture 或 mock 替代。
+- 至少覆盖 exact name、functional、ecosystem、ambiguous、no-result 和中文 query；分层按通用意图设计，禁止按 AI、工程或某一特定领域的得分做特化。
+- 在文档中定义并解释公开指标（至少 Recall@1、Recall@5、no-result abstention、错误 high-confidence），并标明每项指标的样本量。
+- PR 或 release note 中引用这些数字时，必须同时指出公开评测文件与复现命令；私有评测结果另行明确标注为内部验收。
+
+**边界**：不提交生产 records、embedding index、含 token 的配置、私有 query 或大规模生成产物。公开 fixture 的目标是可审计的回归保护，不是替代维护者在真实 2k/10k corpus 上进行的规模和泛化验证。
+
+---
+
+## 附录 B：项目审查基线（2026-07-26，完整归档）
+
+> 本附录完整归档原 `PROJECT_AUDIT.md` 的审查内容。其问题排期与发布决策以 §15 为准；保留本附录是为了避免问题证据、复现案例和文件定位在删除独立审查文件后丢失。
+
+### xists 项目审查报告
+
+> 审查日期：2026-07-26
+> 审查版本：`v0.8.1`
+> 审查分支：`main`
+
+#### 一、审查结论
+
+当前项目不是“代码不可用”，而是一个**工程基础较好、功能完整度较高，但检索质量、规模性能和实验资产治理尚未完全收口的 Beta 项目**。
+
+| 维度 | 评价 |
+|---|---|
+| 代码可运行性 | 良好 |
+| 测试完整度 | 良好 |
+| 打包发布能力 | 良好 |
+| CLI/API/MCP 完整度 | 良好 |
+| 搜索正确性 | 中等，存在明确误排序问题 |
+| 中文查询支持 | Embedding 可用，但规则层支持不足 |
+| 10k 规模性能 | 勉强可用，仍有明显瓶颈 |
+| 数据与实验资产管理 | 较乱，尚未收口 |
+| 文档一致性 | 部分过期 |
+| 1.0 就绪度 | 尚未达到 |
+
+#### 二、已执行的检查
+
+本次没有修改项目代码，主要进行了代码、测试、文档、数据和打包审计。
+
+- 当前版本：`0.8.1`
+- 当前分支：`main`
+- 与 `origin/main` 差异：`0/0`
+- 测试结果：**307 passed**
+- `python scripts/smoke_check.py`：通过
+- `python -m compileall`：通过
+- `python -m pip check`：无依赖冲突
+- 从源码重新构建 wheel 和 sdist：成功
+- Wheel 元数据和版本一致
+- 核心依赖保持为 `numpy`
+- MCP 正确作为 optional dependency 提供
+
+项目目前的基础工程质量不错。
+
+#### 三、优先级最高的问题
+
+##### P0/P1：混合中文查询中的项目名会被错误当成“精确仓库匹配”
+
+相关代码：
+
+- `src/xists/search/query.py:278`
+- `src/xists/search/query.py:299`
+- `src/xists/search/query.py:379`
+
+当前逻辑中，只要中文查询包含一个英文项目名或别名，就可能返回：
+
+```python
+"contextual_name_mention"
+```
+
+但后续代码直接把所有非 `none` 的身份匹配都视作：
+
+```python
+exact_identity = identity_kind != "none"
+```
+
+于是“在自然语言中提到某个名字”与“用户明确搜索这个项目”被同等处理，并获得较大的身份加分和置顶资格。
+
+例如查询：
+
+```text
+轻量级 Node.js Web 应用框架
+```
+
+用户意图显然是找 Express 一类 Web 框架，但 `nodejs/node` 的别名包含 `Node.js`，因此会被认为是身份匹配。最小复现中，即使：
+
+```text
+nodejs/node        semantic=0.1
+expressjs/express  semantic=1.0
+```
+
+最终仍可能得到：
+
+```text
+nodejs/node        semantic=0.1  metadata=+0.57
+expressjs/express  semantic=1.0  metadata=+0.04
+```
+
+真实评测报告中也出现了同类问题：
+
+```text
+查询：Node.js Web 框架生态
+期望：expressjs/express
+结果：nodejs/node
+```
+
+建议将身份匹配分级：
+
+1. `repo_id` / 完整别名精确查询：允许置顶。
+2. 独立项目名明确提及：有限加分。
+3. `contextual_name_mention`：不能视作 exact，更不能无条件置顶。
+
+例如：
+
+```python
+exact_identity = identity_kind in {"repo_id", "exact_value"}
+contextual_identity = identity_kind in {
+    "name_mention",
+    "contextual_name_mention",
+}
+```
+
+其中 `contextual_identity` 最多给小幅加分，并结合查询长度、上下文和语义分数判断。
+
+建议补充以下回归查询：
+
+```text
+轻量级 Node.js Web 应用框架
+Node.js ORM 框架
+React 状态管理库
+Python Web 框架
+Rust Web 框架
+```
+
+##### P1：中文查询在 metadata/query-intent 层基本无法被正确分词
+
+当前 Token 正则是：
+
+```python
+TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*")
+```
+
+位置：`src/xists/search/query.py:24`。
+
+纯中文内容不会进入：
+
+- keyword 提取
+- metadata term overlap
+- query specificity
+- query intent 分类
+- profile term overlap
+- 可解释的 `matched_terms`
+
+Embedding 端可能支持中文，因此纯语义召回还能工作，但 metadata 和解释层基本失效。真实报告中存在：
+
+```json
+{
+  "query": "自托管大语言模型应用界面",
+  "query_intent": {
+    "type": "functional",
+    "specificity": 0.0,
+    "keywords": []
+  }
+}
+```
+
+影响包括：
+
+1. 中文查询只依赖 embedding，英文查询则能获得额外 metadata 加分。
+2. 中英文检索行为不对称。
+3. `query_intent` 和 `specificity` 对中文不可信。
+4. `why` 很难解释中文查询为何匹配。
+5. 混合中文查询可能触发错误身份置顶。
+
+短期可采用轻量方案：
+
+- 保留 ASCII 技术词抽取。
+- 对 CJK 文本做字符 bigram/trigram。
+- 对 profile/schema 中的结构化字段做精确短语匹配。
+- 将中文 query intent 更多交给 query transform 或 embedding。
+- 禁止 CJK 上下文项目名直接进入 exact identity。
+- 增加中英文成对评测集。
+
+##### P1：当前真实检索质量仍不足以支撑 1.0“可靠搜索”的定位
+
+一个代表性的 2k holdout 报告结果是：
+
+```text
+recall@1:           50.0%
+recall@5:           73.3%
+serious mismatch:  50.0%
+abstain rate:       18.3%
+```
+
+较好的 2k holdout 实验大致达到：
+
+```text
+recall@1: 约 56.7%
+recall@5: 约 78.3%
+```
+
+10k 本地 dev 实验中较好的结果大致是：
+
+```text
+recall@1: 46.7%
+recall@5: 75.0%
+```
+
+存在以下不足：
+
+- 10k 报告主要是 dev 结果，缺少清晰、冻结后的 10k holdout 结论。
+- profile、multiview、query transform、rerank 实验很多，但没有明确选出正式默认配置。
+- 很多报告记录的 `xists_version` 还是 `0.6.0`，当前代码已经是 `0.8.1`。
+- 本地实验很多，但缺少一份进入版本控制的最终对比与选择结论。
+
+建议冻结一条正式基线：
+
+```text
+Corpus:
+  scale-2k
+  scale-10k
+
+Dataset:
+  dev
+  holdout
+  no-result
+  Chinese/English paired cases
+
+Configuration:
+  profile prompt version
+  embedding model
+  query transform
+  candidate count
+  reranker
+  threshold
+  confidence calibration
+```
+
+只保留当前正式 baseline、一个 challenger、独立 holdout 和分类误差分析。
+
+#### 四、性能和规模方面的不足
+
+##### P1/P2：单查询搜索路径仍使用逐项 Python cosine
+
+相关代码：
+
+- `src/xists/search/query.py:785`
+- `src/xists/search/query.py:825`
+
+当前 `rank()` 每次查询都会：
+
+1. 遍历全部 index entries。
+2. 将每个 base64 vector 重新解码。
+3. 使用 Python 循环计算 cosine。
+4. 对每个 entry 重新提取和扩展 metadata token。
+
+项目性能文档记录：
+
+```text
+10k index load：约 1.57 秒
+10k rank()：约 1.56 秒
+CLI 搜索：约 3.1 秒 + embedding endpoint 延迟
+```
+
+而 `rank_many()` 的 NumPy 矩阵路径约为 `0.86 秒`。真正面向用户的单查询路径反而比批量评测路径慢。
+
+建议增加已准备的内存索引：
+
+```python
+class PreparedIndex:
+    document: dict[str, Any]
+    entries: list[IndexEntry]
+    matrix: np.ndarray
+    normalized_matrix: np.ndarray
+    metadata_tokens: list[frozenset[str]]
+```
+
+加载时一次性完成 vector 解码、matrix 构造、归一化、metadata token 预计算和 identity variants 预计算。查询时直接执行矩阵乘法。
+
+##### P1/P2：JSON index 在 multiview 实验下已经非常大
+
+当前本地数据规模约为：
+
+```text
+整个项目目录：6.8 GB
+data/：5.5 GB
+```
+
+最大的部分文件：
+
+```text
+1.3 GB  multiview partial index
+986 MB  10k multiview index
+575 MB  10k v3 index
+573 MB  10k v2 index
+336 MB  10k compact multiview index
+230 MB  基础 10k index
+```
+
+JSON + base64 在 multiview 下会带来：
+
+- 较高启动解析时间
+- 较大内存峰值
+- 重复 vector 解码
+- checkpoint 写入代价高
+- GB 级临时文件
+
+短期可以将格式拆分为：
+
+```text
+index.json   # metadata / schema / repo ids
+vectors.npy  # contiguous float32 matrix
+```
+
+也可考虑 `.npz`、memory-mapped NumPy、SQLite metadata + binary vector blob 或 shard 化索引。
+
+##### P2：Index checkpoint 会周期性重写整个索引
+
+相关代码：
+
+- `src/xists/cli.py:721`
+- `src/xists/cli.py:873`
+- `src/xists/cli.py:909`
+
+当前每 16 个 batch 重写一次完整 partial index。在数百 MB 到 GB 级索引下会产生很高的重复 I/O。
+
+建议改为：
+
+- 向量分片
+- append-only JSONL/vector binary
+- SQLite transaction
+- 每批独立临时文件，最后合并
+- metadata manifest + `.npy` memmap
+
+#### 五、数据和仓库治理问题
+
+##### P1：当前工作区存在 15 个未跟踪实验文件
+
+包括 multiview partial index、profile failure report、repair/retry report、baseline report、canonical query 和多种 diagnostic 文件。
+
+`.gitignore` 尚未覆盖：
+
+```text
+*.partial.json
+*-baseline.json
+*-diagnostic.json
+*-failures.json
+*-retry.json
+*-canonical-queries.json
+*-metadata-current.json
+```
+
+建议使用更明确的生成物目录：
+
+```text
+data/generated/
+data/experiments/
+data/checkpoints/
+```
+
+整体忽略目录，只将需要版本控制的 manifest/eval case 放入白名单目录。
+
+##### P1：本地 `.env` 权限为 `644`
+
+检查结果：
+
+```text
+.env                         644
+.claude/worktrees/.env       644
+```
+
+如果其中存在 GitHub、LLM 或 embedding token，同一机器上的其他用户可能读取。建议：
+
+```bash
+chmod 600 .env
+chmod 600 .claude/worktrees/.env
+```
+
+程序初始化 `.env` 时也可以主动设置 `0600`。
+
+##### P2：根目录存在过期 demo records/index
+
+本地 `demo-records.json` 和 `demo-index.json` 不是当前 schema：
+
+- 200 条 records 都是 schema v1。
+- 当前期望 schema v2。
+- index version 为 1，当前期望为 3。
+- embedding input version 为 2，当前期望为 3。
+- 200 个向量都被判定为 stale。
+
+README 已说明当前没有 current-schema demo asset，因此不属于发布内容错误，但根目录保留旧文件容易误导开发者。
+
+建议：
+
+- 删除或归档本地旧 demo 文件。
+- 或重命名为 `legacy-demo-*`。
+- 文档示例尽量使用 `examples/ci-smoke/` 中已经验证的当前 fixture。
+- 新 demo asset 必须通过 `records validate` 和 `index verify`。
+
+#### 六、文档和项目管理问题
+
+##### P2：ROADMAP 状态明显过期
+
+当前版本已经是 `0.8.1`，但 `ROADMAP.md:47` 仍写着：
+
+```text
+当前版本为 0.4.0
+```
+
+`v0.7.0` 和 `v0.8.0` 在总览中也仍未标记完成，和实际 tag、API、CLI、打包及 MCP 功能不一致。
+
+建议在 ROADMAP 顶部增加实时状态表：
+
+```text
+Current release: 0.8.1
+Completed: 0.2–0.8
+Next milestone: 1.0 readiness
+Open gates:
+- retrieval quality
+- 10k holdout evidence
+- performance decision
+- stable API/JSON policy
+```
+
+##### P2：README 仍用 v0.2.0 描述当前排序行为
+
+README 和 usage 文档仍使用 `v0.2.0 keeps ranking simple...` 描述当前搜索，但现在已经存在 semantic、metadata、rerank、query transform、confidence calibration、RRF fusion 和 MCP。
+
+建议按当前策略名称描述行为，不再用历史版本号描述当前默认逻辑。历史行为放入 release notes。
+
+##### P2：缺少“当前正式实验结论”
+
+本地存在大量实验结果，但缺少一份能够直接回答以下问题的文档：
+
+- 当前推荐 embedding 是什么？
+- 当前推荐 profile 版本是什么？
+- 是否推荐 multiview？
+- 是否推荐 query transform？
+- 是否推荐 reranker？
+- 默认阈值为什么是这个值？
+- 当前 2k/10k holdout 指标是多少？
+- 已知最主要的失败类型是什么？
+
+建议增加：
+
+```text
+docs/current-retrieval-baseline.md
+```
+
+#### 七、代码可维护性问题
+
+##### P2：`cli.py` 过大，职责过多
+
+当前：
+
+```text
+src/xists/cli.py：2660 行
+tests/test_cli.py：3158 行
+```
+
+`cli.py` 同时包含环境加载、workspace、ingest orchestration、checkpoint、profile refresh、index build、search formatting、doctor、records/index 工具、eval 和 parser construction。`build_parser()` 单个函数约 309 行。
+
+建议拆分：
+
+```text
+src/xists/commands/
+  init.py
+  doctor.py
+  ingest.py
+  profile.py
+  index.py
+  search.py
+  eval.py
+  records.py
+  parser.py
+```
+
+##### P2：部分核心函数仍然过大
+
+例如：
+
+```text
+evaluate_dataset           307 行
+records_validation_report  125 行
+rank_many                  109 行
+build_record                87 行
+```
+
+建议将 `evaluate_dataset()` 拆成：
+
+```text
+run_queries()
+classify_results()
+calculate_metrics()
+build_report()
+```
+
+##### P2：“稳定 Python API”仍大量暴露 `dict[str, Any]`
+
+`xists.api.search()` 的输入输出和 index 都是 `dict[str, Any]`，会造成 IDE 无法补全、字段错误只能运行时发现、JSON schema 变更难检测，以及 MCP/CLI/API 输出一致性依赖人工维护。
+
+建议至少增加：
+
+- `TypedDict`
+- dataclass/domain models
+- JSON schema fixture
+- 输出 contract tests
+
+##### P2：Search 没有直接验证 `index_version`
+
+`ensure_index_matches_model()` 当前检查 embedding model、embedding input version 和 record schema version，但没有检查 `index_version`。
+
+建议搜索入口同时检查：
+
+- `index_version` 是否等于 `INDEX_VERSION`。
+- `vectors` 是否为 list。
+- `record_count` 是否与实际 vector count 一致。
+- dimension 是否为正整数。
+- repo_id 是否为空。
+- 是否存在重复 repo/view 标识。
+
+#### 八、测试与 CI
+
+##### 做得好的地方
+
+测试覆盖面比较广：
+
+- CLI：105 个测试
+- Search：55 个测试
+- GitHub ingest：32 个测试
+- LLM profile：16 个测试
+- MCP：8 个测试
+- Workspace：10 个测试
+- 另有 packaging、eval、rerank、query transform 等测试
+
+本次执行结果：
+
+```text
+307 passed in 5.15s
+```
+
+##### 仍有不足
+
+CI 当前只有 Python 3.11/3.12、pytest、smoke test 和 package build/install，缺少：
+
+- lint
+- import/order 检查
+- type checking
+- coverage threshold
+- dependency audit
+- Python 3.13/3.14 CI
+
+建议优先顺序：
+
+1. `ruff check`
+2. `pytest --cov`，先记录覆盖率
+3. `mypy` 或 `pyright`，先覆盖 `api.py` 和核心数据模型
+4. Python 3.13 CI
+5. 定期 `pip-audit`
+6. 补充 CJK/identity 回归测试
+
+#### 九、建议整改顺序
+
+##### 第一阶段：修复正确性问题
+
+1. 修复 `contextual_name_mention` 被当成 exact identity 的问题。
+2. 增加混合中文查询回归测试。
+3. 改善中文 query intent/keyword 处理。
+4. 搜索入口增加 `index_version` 校验。
+5. 冻结一套 2k dev/holdout 基线，确认修复没有引发总体回归。
+
+##### 第二阶段：收口实验与仓库资产
+
+1. 增加 `docs/current-retrieval-baseline.md`。
+2. 明确当前正式 profile、embedding、reranker 和 threshold。
+3. 补完整 10k holdout 评测。
+4. 将生成文件移动到 ignored artifact 目录。
+5. 清理 15 个 untracked 文件和过期 demo。
+6. 将 `.env` 权限改为 `600`。
+
+##### 第三阶段：优化性能
+
+1. 引入 `PreparedIndex`。
+2. 统一 `rank()` 和 `rank_many()` 的 NumPy 打分路径。
+3. 缓存 metadata token 和 identity variants。
+4. 将向量从 JSON 拆为二进制矩阵。
+5. 将 index checkpoint 改为分片或 append-only。
+
+##### 第四阶段：为 1.0 做维护性收口
+
+1. 拆分 `cli.py`。
+2. 拆分 `evaluate_dataset()`。
+3. 给 API 和输出增加 TypedDict/schema。
+4. 更新 ROADMAP 当前状态。
+5. 更新 README 中的旧版本描述。
+6. 加入 lint、coverage 和 Python 3.13 CI。
+
+#### 十、最终评价
+
+项目目前最大的优势是：
+
+- 功能链路完整。
+- CLI/API/MCP 都已经可用。
+- 测试数量和质量较好。
+- 离线 smoke fixture 完整。
+- 打包发布流程可靠。
+- Schema/index 版本意识较强。
+- 对失败恢复、断点续跑和错误提示投入充分。
+
+最大的不足是：
+
+1. 身份匹配规则存在明确误排序。
+2. 中文查询只有 embedding 层相对可靠，规则和解释层较弱。
+3. 真实 holdout 检索质量还不够稳定。
+4. 10k/multiview 下 JSON 索引性能和体积已经接近架构边界。
+5. 实验很多，但正式基线与结论尚未收口。
+6. ROADMAP、demo 资产和当前版本状态不同步。
+
+下一步不宜继续横向增加功能，建议集中完成：
+
+> **搜索正确性修复 → 冻结正式评测基线 → 10k holdout 验证 → 索引内存化/矩阵化 → 文档与资产收口。**
+
+完成这些后，项目才比较适合进入 `1.0.0` 稳定发布阶段。

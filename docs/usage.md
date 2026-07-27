@@ -487,7 +487,7 @@ xists search "frontend UI library"
 xists search "frontend UI library" --format json
 ```
 
-Returns ranked results with confidence tiers. Text is the default output for terminal review; `--format json` is intended for scripts and agent integrations. In v0.2.0 search is deliberately simple and explainable: exact repository/name/alias matches are pinned first, then remaining results are ranked by cosine similarity plus a small metadata adjustment from language, topics/profile overlap, repository state, and popularity.
+Returns ranked results with confidence tiers. Text is the default output for terminal review; `--format json` is intended for scripts and agent integrations. Search combines embedding similarity with bounded, explainable metadata signals. Exact `owner/repo` and exact name/alias lookups are pinned first; names mentioned inside a broader natural-language request remain contextual evidence and do not receive exact-identity pinning. Other results use cosine similarity plus lightweight language, topic/profile overlap, repository-state, and popularity adjustments.
 
 Default text output keeps the fields people usually inspect first:
 
@@ -534,7 +534,7 @@ JSON output exposes the same ranking data for automation:
 }
 ```
 
-`score` is the final ranking score. `semantic_score` is the embedding cosine similarity, and `metadata_score` is a lightweight, bounded adjustment. Exact repository/name/alias queries are pinned to the top so entity lookup works even when the embedding score is not the highest.
+`score` is the final ranking score. `semantic_score` is the embedding cosine similarity, and `metadata_score` is a lightweight, bounded adjustment. Exact `owner/repo` and exact name/alias queries are pinned to the top so entity lookup works even when the embedding score is not the highest. A name only mentioned as part of a broader request is not an exact identity match.
 
 `query_intent` describes the detected query shape. Each result includes:
 

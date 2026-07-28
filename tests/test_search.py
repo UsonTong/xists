@@ -366,6 +366,36 @@ def test_explicit_chinese_project_lookup_is_treated_as_exact_identity():
     assert result["results"][0]["diagnostics"]["identity_evidence"]["kind"] == "exact_value"
 
 
+def test_ambiguous_exact_values_do_not_claim_high_confidence():
+    index = make_index(
+        [
+            {"repo_id": "current/vue", "vector": [1.0, 0.0], "metadata": {"aliases": ["vue"]}},
+            {"repo_id": "legacy/vue", "vector": vector_for_cosine(0.9), "metadata": {"name": "vue"}},
+        ]
+    )
+
+    result = rank("查找 Vue 开源项目", index, CONFIG, top_k=2, embed=lambda *_: [1.0, 0.0])
+
+    assert [item["confidence"] for item in result["results"]] == ["exploratory", "exploratory"]
+    assert all(item["diagnostics"]["identity_ambiguity_count"] == 2 for item in result["results"])
+    assert all("ambiguous exact identity" in item["why"] for item in result["results"])
+
+
+def test_repo_id_identity_remains_high_confidence_when_aliases_collide():
+    index = make_index(
+        [
+            {"repo_id": "current/vue", "vector": [0.0, 1.0], "metadata": {"aliases": ["vue"]}},
+            {"repo_id": "legacy/vue", "vector": [1.0, 0.0], "metadata": {"name": "vue"}},
+        ]
+    )
+
+    result = rank("current/vue", index, CONFIG, top_k=2, embed=lambda *_: [1.0, 0.0])
+
+    assert result["results"][0]["repo_id"] == "current/vue"
+    assert result["results"][0]["confidence"] == "high_confidence"
+    assert result["results"][0]["diagnostics"]["identity_evidence"]["kind"] == "repo_id"
+
+
 def test_repo_id_identity_is_pinned_inside_natural_language_query():
     index = make_index(
         [

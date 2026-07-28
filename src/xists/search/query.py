@@ -536,6 +536,7 @@ def _rank_scored_entries(
         _result_from_score(query, entry, score, exploratory_threshold=exploratory_threshold)
         for entry, score in scored_entries
     ]
+    _downgrade_ambiguous_exact_values(results)
     results.sort(
         key=lambda item: (
             1 if item.get("_identity_pin") else 0,
@@ -590,6 +591,20 @@ def _present_ranked_results(results: list[dict[str, Any]], top_k: int) -> list[d
         if item.get("url") is None:
             item.pop("url", None)
     return presented
+
+
+def _downgrade_ambiguous_exact_values(results: list[dict[str, Any]]) -> None:
+    exact_values = [
+        item
+        for item in results
+        if item.get("diagnostics", {}).get("identity_evidence", {}).get("kind") == "exact_value"
+    ]
+    if len(exact_values) <= 1:
+        return
+    for item in exact_values:
+        item["confidence"] = "exploratory"
+        item["diagnostics"]["identity_ambiguity_count"] = len(exact_values)
+        item["why"].append("ambiguous exact identity")
 
 
 def _rank_semantic_entries(
@@ -656,6 +671,7 @@ def _rank_reranked_entries(
         }
         result["why"] = ["ranked by fused embedding recall and cross-encoder relevance"]
         results.append(result)
+    _downgrade_ambiguous_exact_values(results)
     results.sort(
         key=lambda item: (
             1 if item.get("_identity_pin") else 0,

@@ -22,6 +22,13 @@ EXPLORATORY_THRESHOLD = 0.35
 RANKING_STRATEGIES = ("metadata", "semantic", "rerank")
 RERANK_FUSION_RANK_CONSTANT = 60
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*")
+CJK_RUN_RE = re.compile(r"[\u3400-\u9fff]+")
+CJK_TERM_LENGTHS = (3, 2)
+CJK_TERM_LIMIT = 32
+EXPLICIT_LOOKUP_PATTERNS = (
+    re.compile(r"^\s*(?:查找|搜索|寻找)\s+(.+?)\s+(?:开源)?项目\s*$", re.IGNORECASE),
+    re.compile(r"^\s*(?:find|search for|look up)\s+(.+?)\s+(?:open[ -]source\s+)?project\s*$", re.IGNORECASE),
+)
 
 GENERIC_TERMS = {
     "a",
@@ -87,12 +94,6 @@ LANGUAGE_TERMS = {
     for alias in aliases
     for token in TOKEN_RE.findall(alias)
 }
-CONTEXTUAL_ECOSYSTEM_TERMS = {
-    "node",
-    "nodejs",
-    "react",
-    "reactjs",
-}
 LANGUAGE_PREFIXES = sorted(
     {
         tuple(TOKEN_RE.findall(alias))
@@ -138,7 +139,21 @@ def confidence_bucket(score: float, *, exploratory_threshold: float = EXPLORATOR
 
 @lru_cache(maxsize=65536)
 def _tokenize(text: str) -> tuple[str, ...]:
-    return tuple(TOKEN_RE.findall(text.lower()))
+    ascii_tokens = TOKEN_RE.findall(text.lower())
+    tokens = list(ascii_tokens)
+    seen = set(tokens)
+    for run in CJK_RUN_RE.findall(text):
+        for width in CJK_TERM_LENGTHS:
+            if len(run) < width:
+                continue
+            for start in range(len(run) - width + 1):
+                term = run[start : start + width]
+                if term not in seen:
+                    tokens.append(term)
+                    seen.add(term)
+                    if len(tokens) >= CJK_TERM_LIMIT + len(ascii_tokens):
+                        return tuple(tokens)
+    return tuple(tokens)
 
 
 @lru_cache(maxsize=65536)
@@ -224,7 +239,7 @@ def _query_intent(query: str) -> dict[str, Any]:
     raw_query = query.strip().lower()
     if not tokens:
         intent_type = "empty"
-    elif "/" in raw_query or (
+    elif _explicit_lookup_value(query) is not None or "/" in raw_query or (
         len(tokens) <= EXACT_NAME_QUERY_MAX_TOKENS
         and all(token not in GENERIC_TERMS and token not in QUERY_JOINERS for token in tokens)
     ):
@@ -263,6 +278,15 @@ def _query_variants(query: str) -> set[str]:
     return {variant for variant in variants if variant}
 
 
+def _explicit_lookup_value(query: str) -> str | None:
+    for pattern in EXPLICIT_LOOKUP_PATTERNS:
+        match = pattern.fullmatch(query)
+        if match:
+            value = match.group(1).strip().lower()
+            return value or None
+    return None
+
+
 def _identity_values(entry: dict[str, Any]) -> list[str]:
     metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
     repo_id = str(entry.get("repo_id") or "")
@@ -288,17 +312,19 @@ def _identity_match_kind(query: str, entry: dict[str, Any]) -> str:
         return "repo_id"
     if raw_query in {value.strip().lower() for value in _identity_values(entry)}:
         return "exact_value"
+    explicit_value = _explicit_lookup_value(query)
+    if explicit_value and explicit_value in {value.strip().lower() for value in _identity_values(entry)}:
+        return "exact_value"
     # A project name embedded in a natural-language request is contextual
-    # evidence, never an exact lookup.  In particular, ecosystem names such as
-    # Node.js and React must not identify their own repositories.
+    # evidence, never an exact lookup. Ecosystem names such as Node.js and
+    # React may be reported as context but must never pin their repositories.
     for value in _identity_values(entry):
         normalized = value.strip().lower()
         value_tokens = _tokenize(normalized)
-        identity_terms = _expanded_token_set(set(value_tokens))
         if (
             len(normalized) >= 3
             and normalized in raw_query
-            and not (identity_terms & (LANGUAGE_TERMS | CONTEXTUAL_ECOSYSTEM_TERMS))
+            and not (set(value_tokens) & LANGUAGE_TERMS)
         ):
             return "contextual_name_mention"
     return "none"
@@ -532,9 +558,12 @@ def _semantic_result(
     semantic_score: float,
     *,
     exploratory_threshold: float,
+    query: str | None = None,
 ) -> dict[str, Any]:
     metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
     confidence = confidence_bucket(semantic_score, exploratory_threshold=exploratory_threshold)
+    identity_kind = _identity_match_kind(query, entry) if query is not None else "none"
+    identity_match = "contextual" if identity_kind == "contextual_name_mention" else None
     return {
         "repo_id": entry.get("repo_id"),
         "url": metadata.get("url"),
@@ -548,7 +577,7 @@ def _semantic_result(
             final_score=semantic_score,
         ),
         "matched_terms": [],
-        "diagnostics": {"identity_match": None, "identity_evidence": {"kind": "none"}},
+        "diagnostics": {"identity_match": identity_match, "identity_evidence": {"kind": identity_kind}},
         "why": ["ranked by semantic similarity"],
         "_identity_pin": False,
     }
@@ -610,7 +639,9 @@ def _rank_reranked_entries(
             1.0 / (RERANK_FUSION_RANK_CONSTANT + semantic_rank)
             + 1.0 / (RERANK_FUSION_RANK_CONSTANT + rerank_rank)
         )
-        result = _semantic_result(entry, semantic_score, exploratory_threshold=exploratory_threshold)
+        result = _semantic_result(
+            entry, semantic_score, exploratory_threshold=exploratory_threshold, query=query
+        )
         result["score"] = fusion_score
         result["rerank_score"] = float(rerank_score)
         result["score_breakdown"] = _score_breakdown(
@@ -685,12 +716,24 @@ def ensure_index_matches_model(index: dict[str, Any], config: EmbeddingConfig) -
             "Index vectors must be a list. Rebuild the index with xists index build."
         )
     record_count = index.get("record_count")
-    if isinstance(record_count, bool) or not isinstance(record_count, int) or record_count != len(vectors):
+    if isinstance(record_count, bool) or not isinstance(record_count, int) or record_count < 0:
         raise IndexMismatchError(
-            "Index record_count does not match vectors. Rebuild the index with xists index build."
+            "Index record_count must be a non-negative integer. Rebuild the index with xists index build."
+        )
+    vector_count = index.get("vector_count")
+    if vector_count is not None and (
+        isinstance(vector_count, bool) or not isinstance(vector_count, int) or vector_count != len(vectors)
+    ):
+        raise IndexMismatchError(
+            "Index vector_count does not match vectors. Rebuild the index with xists index build."
         )
     dimension = index.get("dimension")
     if dimension is None and not vectors:
+        if record_count != 0:
+            raise IndexMismatchError(
+                "Index record_count does not match repositories represented by vectors. "
+                "Rebuild the index with xists index build."
+            )
         return
     if isinstance(dimension, bool) or not isinstance(dimension, int) or dimension <= 0:
         raise IndexMismatchError(
@@ -711,6 +754,11 @@ def ensure_index_matches_model(index: dict[str, Any], config: EmbeddingConfig) -
                 f"Index contains invalid vectors that do not match its dimension {dimension}. "
                 "Rebuild the index with xists index build."
             )
+    if record_count != len(vectors):
+        raise IndexMismatchError(
+            "Index record_count does not match vectors. "
+            "Rebuild the index with xists index build."
+        )
 
 
 def _normalized_matrix(vectors: list[Any]) -> np.ndarray:

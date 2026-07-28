@@ -345,6 +345,27 @@ def test_exact_identity_is_pinned_even_when_embedding_is_weaker():
     assert "matched exact repository identity" in result["results"][0]["why"]
 
 
+def test_explicit_chinese_project_lookup_is_treated_as_exact_identity():
+    index = make_index(
+        [
+            {"repo_id": "vuejs/core", "vector": [0.0, 1.0], "metadata": {"name": "vue"}},
+            {"repo_id": "semantic/winner", "vector": [1.0, 0.0], "metadata": {"name": "winner"}},
+        ]
+    )
+
+    result = rank(
+        "查找 Vue 开源项目",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda _config, _query: [1.0, 0.0],
+    )
+
+    assert result["results"][0]["repo_id"] == "vuejs/core"
+    assert result["query_intent"]["type"] == "exact_name"
+    assert result["results"][0]["diagnostics"]["identity_evidence"]["kind"] == "exact_value"
+
+
 def test_repo_id_identity_is_pinned_inside_natural_language_query():
     index = make_index(
         [
@@ -440,8 +461,8 @@ def test_cjk_ecosystem_mention_cannot_overturn_a_clear_semantic_winner():
 
     assert result["results"][0]["repo_id"] == "expressjs/express"
     node = next(item for item in result["results"] if item["repo_id"] == "nodejs/node")
-    assert node["diagnostics"]["identity_evidence"]["kind"] == "none"
-    assert node["diagnostics"]["identity_match"] is None
+    assert node["diagnostics"]["identity_evidence"]["kind"] == "contextual_name_mention"
+    assert node["diagnostics"]["identity_match"] == "contextual"
 
 
 def test_cjk_context_does_not_pin_a_repo_owner_fragment():
@@ -629,7 +650,7 @@ def test_evidence_calibration_downgrades_high_confidence_without_reranker_eviden
     assert result["confidence_evidence"]["downgrade_reasons"] == ["reranker_evidence_unavailable"]
 
 
-def test_evidence_calibration_does_not_treat_an_ecosystem_term_as_identity():
+def test_evidence_calibration_keeps_contextual_identity_weak_in_rerank_results():
     index = make_index(
         [
             {"repo_id": "nodejs/node", "vector": [1.0, 0.0], "metadata": {"name": "node"}},
@@ -651,8 +672,8 @@ def test_evidence_calibration_does_not_treat_an_ecosystem_term_as_identity():
         item["repo_id"] for item in baseline["results"]
     ]
     node = next(item for item in calibrated["results"] if item["repo_id"] == "nodejs/node")
-    assert node["diagnostics"]["identity_evidence"]["kind"] == "none"
-    assert node["confidence_evidence"]["identity_evidence"] == "none"
+    assert node["diagnostics"]["identity_evidence"]["kind"] == "contextual_name_mention"
+    assert node["confidence_evidence"]["identity_evidence"] == "contextual_name_mention"
 
 
 def test_evidence_calibration_preserves_direct_repository_identity():
@@ -1002,6 +1023,14 @@ def test_rank_rejects_record_count_not_matching_vectors():
         rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
 
 
+def test_rank_rejects_declared_vector_count_not_matching_vectors():
+    index = make_index([{"repo_id": "react/react", "vector": [1.0, 0.0], "metadata": {}}])
+    index["vector_count"] = 2
+
+    with pytest.raises(IndexMismatchError, match=r"vector_count.*vectors.*Rebuild"):
+        rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+
 @pytest.mark.parametrize("dimension", [0, -1, 2.5, True])
 def test_rank_rejects_invalid_index_dimension(dimension):
     index = make_index([])
@@ -1052,3 +1081,53 @@ def test_query_intent_keeps_basic_labels():
     assert _query_intent("open source firebase alternative")["type"] == "alternative"
     assert _query_intent("python web framework")["primary_language"] == "python"
     assert _query_intent("")["type"] == "empty"
+
+
+def test_query_intent_extracts_bounded_cjk_terms_without_losing_technical_identifiers():
+    intent = _query_intent("自托管大语言模型应用界面，Node.js C++ C# .NET")
+
+    cjk_terms = [term for term in intent["keywords"] if any("\u3400" <= char <= "\u9fff" for char in term)]
+    assert intent["type"] == "functional"
+    assert intent["specificity"] > 0
+    assert cjk_terms
+    assert all(2 <= len(term) <= 3 for term in cjk_terms)
+    assert len(cjk_terms) <= 32
+    assert {"node.js", "c++", "c#", "net"}.issubset(intent["keywords"])
+
+
+def test_query_intent_deduplicates_cjk_terms_across_whitespace_and_punctuation():
+    intent = _query_intent("  自托管，自托管   大语言模型！！  ")
+
+    assert len(intent["keywords"]) == len(set(intent["keywords"]))
+    assert "自托管" in intent["keywords"]
+    assert all(len(term) > 1 for term in intent["keywords"])
+
+
+def test_cjk_terms_participate_in_metadata_overlap_and_explanations():
+    index = make_index(
+        [
+            {
+                "repo_id": "chat/ui",
+                "vector": vector_for_cosine(0.90),
+                "metadata": {
+                    "name": "chat-ui",
+                    "search_text": "自托管大语言模型应用界面",
+                    "capabilities": ["大语言模型应用界面"],
+                },
+            },
+            {"repo_id": "generic/result", "vector": vector_for_cosine(0.91), "metadata": {}},
+        ]
+    )
+
+    result = rank(
+        "自托管大语言模型应用界面",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda _config, _query: [1.0, 0.0],
+    )
+
+    top = result["results"][0]
+    assert top["repo_id"] == "chat/ui"
+    assert top["matched_terms"]
+    assert any("matched metadata terms" in reason for reason in top["why"])

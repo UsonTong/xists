@@ -541,6 +541,12 @@ JSON output exposes the same ranking data for automation:
 - `score_breakdown`: rounded semantic, metadata, and final scores for easier debugging
 - `matched_terms`: non-generic query terms found in the candidate metadata/profile
 - `diagnostics`: compact structured evidence used by CLI/eval reports
+
+Chinese and mixed-language queries retain ASCII technical identifiers and add
+a bounded, deduplicated set of CJK bigrams/trigrams. These terms participate in
+query specificity, metadata overlap, matched terms, and explanations. They are
+not a heavyweight word segmenter and do not change the text sent to the
+embedding endpoint.
 - `why`: short human-readable reasons from identity/language/topic/profile/state signals
 
 #### Confidence tiers

@@ -237,6 +237,12 @@ JSON 输出保留相同的排序证据，适合机器读取：
 
 `score` 是最终排序分数，越高代表匹配越强。其他程序或 agent 需要结构化 payload 时使用 `--format json`。
 
+中文和中英混合请求是一等查询输入。xists 会保留 `Node.js`、`C++`、
+`C#`、`.NET`、`owner/repo` 等 ASCII 技术标识，并提取数量有界的 CJK
+二元/三元片段，用于 query intent、metadata overlap 与解释输出。参见
+[当前检索基线](docs/current-retrieval-baseline.md)，也可以运行
+`python scripts/run_retrieval_regression.py` 验证已提交的离线契约 fixture。
+
 ---
 
 ## 可选评测

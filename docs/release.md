@@ -26,6 +26,7 @@ git status --short
 python -m pip install -e ".[dev]"
 python -m pytest tests/ -q
 python scripts/smoke_check.py
+python scripts/run_retrieval_regression.py
 ```
 
 `git status --short` must show no staged secrets or generated data. Confirm the

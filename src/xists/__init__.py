@@ -1,3 +1,3 @@
 """xists: find what already exists before building from scratch."""
 
-__version__ = "0.8.2"
+__version__ = "0.9.0"

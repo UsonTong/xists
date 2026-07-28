@@ -32,6 +32,9 @@ jobs:
       - name: Run demo smoke checks
         run: python scripts/smoke_check.py
 
+      - name: Run public retrieval regression
+        run: python scripts/run_retrieval_regression.py
+
   package:
     name: build and install wheel
     runs-on: ubuntu-latest

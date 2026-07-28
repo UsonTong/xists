@@ -3,6 +3,8 @@
 records.json
 report.json
 index.json
+!examples/retrieval-regression/records.json
+!examples/retrieval-regression/index.json
 
 __pycache__/
 *.py[cod]
@@ -34,3 +36,5 @@ data/scale-*-canonical-queries.json
 data/scale-*-metadata-current.json
 data/scale-*-repair-report*.json
 data/scale-*-failure-diagnostics.json
+data/scale-cross-domain-*-report.json
+data/scale-*-retry*.json

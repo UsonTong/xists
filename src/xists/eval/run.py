@@ -311,6 +311,20 @@ def evaluate_dataset(
     summary = build_summary(summary_seed)
 
     finished_at = datetime.now(timezone.utc)
+    retrieval_configuration = {
+        "embedding_model": index.get("embedding_model"),
+        "embedding_input_version": index.get("embedding_input_version"),
+        "record_schema_version": index.get("record_schema_version"),
+        "index_version": index.get("index_version"),
+        "index_dimension": index.get("dimension"),
+        "ranking_strategy": ranking_strategy,
+        "rerank_candidate_limit": rerank_candidate_limit if ranking_strategy == "rerank" else None,
+        "exploratory_threshold": exploratory_threshold,
+        "rerank_abstain_threshold": rerank_abstain_threshold if ranking_strategy == "rerank" else None,
+        "confidence_calibration": confidence_calibration,
+        "query_transform_mode": query_transform_mode,
+        "query_transform_model": query_transform_model,
+    }
     return {
         "started_at": started_at.isoformat(),
         "finished_at": finished_at.isoformat(),
@@ -328,6 +342,7 @@ def evaluate_dataset(
         "confidence_calibration": confidence_calibration,
         "query_transform_mode": query_transform_mode,
         "query_transform_model": query_transform_model,
+        "retrieval_configuration": retrieval_configuration,
         "case_count": case_count,
         "metrics": metrics,
         "confidence": {

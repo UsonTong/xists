@@ -201,6 +201,21 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
 
     report = evaluate_dataset(cases_file, index_file, CONFIG, embed_many=fake_rank_many)
 
+    assert report["xists_version"] == __import__("xists").__version__
+    assert report["retrieval_configuration"] == {
+        "embedding_model": "bge-m3",
+        "embedding_input_version": None,
+        "record_schema_version": None,
+        "index_version": None,
+        "index_dimension": 2,
+        "ranking_strategy": "metadata",
+        "rerank_candidate_limit": None,
+        "exploratory_threshold": 0.35,
+        "rerank_abstain_threshold": None,
+        "confidence_calibration": "off",
+        "query_transform_mode": "off",
+        "query_transform_model": None,
+    }
     assert report["case_count"] == 3
     assert report["metrics"] == {
         "exact_hit_at_1": 0.333333,

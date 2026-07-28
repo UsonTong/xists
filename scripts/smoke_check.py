@@ -59,6 +59,11 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
 
     datasets = [_check_dataset(ROOT / path, repo_ids) for path in args.cases]
     index_vector_count = len(index.get("vectors") or [])
+    index_version_ok = index.get("index_version") == 3
+    index_record_count_ok = index.get("record_count") == len(records)
+    index_vector_count_ok = (
+        index.get("vector_count", index_vector_count) == index_vector_count
+    )
     checks = [
         {"name": "repos", "ok": len(repo_ids) > 0, "count": len(repo_ids), "path": _relative(repos_path)},
         {
@@ -69,7 +74,8 @@ def run_smoke(args: argparse.Namespace) -> dict[str, Any]:
         },
         {
             "name": "index",
-            "ok": index_vector_count == index.get("record_count") and index_vector_count > 0,
+            "ok": index_version_ok and index_record_count_ok and index_vector_count_ok and index_vector_count > 0,
+            "index_version": index.get("index_version"),
             "record_count": index.get("record_count"),
             "vector_count": index_vector_count,
             "path": _relative(index_path),

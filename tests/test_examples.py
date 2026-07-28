@@ -73,3 +73,16 @@ def test_committed_ci_smoke_fixture_passes_no_network_check():
 
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout)["ok"] is True
+
+
+def test_public_retrieval_fixture_is_checked_by_its_offline_runner():
+    completed = subprocess.run(
+        [sys.executable, "scripts/run_retrieval_regression.py"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["passed"] is True

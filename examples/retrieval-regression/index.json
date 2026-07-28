@@ -1,0 +1,17 @@
+{
+  "index_version": 3,
+  "record_schema_version": 2,
+  "embedding_model": "fixture/regression-4d",
+  "embedding_base_url": "https://example.invalid/v1",
+  "embedding_input_version": 3,
+  "dimension": 4,
+  "built_at": "2026-07-26T00:00:00+00:00",
+  "record_count": 4,
+  "skipped": [],
+  "vectors": [
+    {"repo_id": "acme/firebase-alt", "embedding_input_fingerprint": "fixture-firebase-alt", "metadata": {"name": "firebase-alt", "aliases": ["firebase-alt"], "description": "An open-source backend platform and Firebase alternative.", "topics": ["firebase", "backend"], "language": "TypeScript", "search_text": "open source firebase alternative backend platform"}, "vector": [1.0, 0.0, 0.0, 0.0]},
+    {"repo_id": "acme/express-lite", "embedding_input_fingerprint": "fixture-express-lite", "metadata": {"name": "express-lite", "aliases": ["express-lite"], "description": "A lightweight Node.js web application framework.", "topics": ["nodejs", "web", "framework"], "language": "JavaScript", "search_text": "lightweight node.js web application framework"}, "vector": [0.0, 1.0, 0.0, 0.0]},
+    {"repo_id": "acme/kube", "embedding_input_fingerprint": "fixture-kube", "metadata": {"name": "kube", "aliases": ["kubernetes"], "description": "A cloud-native container orchestration platform.", "topics": ["kubernetes", "containers"], "language": "Go", "search_text": "kubernetes cloud native container orchestration platform"}, "vector": [0.0, 0.0, 1.0, 0.0]},
+    {"repo_id": "acme/chat-ui", "embedding_input_fingerprint": "fixture-chat-ui", "metadata": {"name": "chat-ui", "aliases": ["chat-ui"], "description": "A self-hosted large-language-model application interface.", "topics": ["llm", "chat", "self-hosted"], "language": "TypeScript", "search_text": "self hosted large language model application interface 自托管大语言模型应用界面"}, "vector": [0.0, 0.0, 0.0, 1.0]}
+  ]
+}

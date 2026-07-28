@@ -45,3 +45,6 @@ def test_sdist_build_whitelist_excludes_local_and_private_artifacts():
     assert ".claude" not in build["only-include"]
     assert "src/xists" in build["only-include"]
     assert "LICENSE" in build["only-include"]
+    assert "examples" in build["only-include"]
+    assert (ROOT / "examples" / "retrieval-regression" / "records.json").is_file()
+    assert (ROOT / "examples" / "retrieval-regression" / "index.json").is_file()

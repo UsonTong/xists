@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "dataset_name": "xists-public-retrieval-regression-v1",
+  "families": {},
+  "cases": [
+    {"id": "exact", "query": "express-lite", "expected_repo_id": "acme/express-lite", "tags": ["exact"]},
+    {"id": "functional", "query": "open source firebase alternative", "expected_repo_id": "acme/firebase-alt", "tags": ["functional"]},
+    {"id": "ecosystem", "query": "Node.js web framework", "expected_repo_id": "acme/express-lite", "tags": ["ecosystem"]},
+    {"id": "ambiguous", "query": "self hosted developer backend platform", "expected_repo_id": "acme/firebase-alt", "tags": ["ambiguous"]},
+    {"id": "chinese", "query": "自托管大语言模型应用界面", "expected_repo_id": "acme/chat-ui", "tags": ["chinese", "functional"]},
+    {"id": "no-result", "query": "quantum chemistry notebook for protein folding games", "expected_repo_id": "xists/no-such-result", "tags": ["no-result"], "notes": "The fixture runner asserts abstention for this deliberately unmatched query."}
+  ]
+}

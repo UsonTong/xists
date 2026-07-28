@@ -1,0 +1,34 @@
+[
+  {
+    "schema_version": 2,
+    "repo_id": "acme/firebase-alt",
+    "name": "firebase-alt",
+    "url": "https://example.invalid/acme/firebase-alt",
+    "github": {"description": "An open-source backend platform and Firebase alternative.", "topics": ["firebase", "backend"], "language": "TypeScript"},
+    "llm_profile": {"summary": "An open-source Firebase alternative for application backends.", "aliases": ["firebase-alt"], "project_type": "platform", "ecosystem": ["typescript", "backend"], "search_text": "open source firebase alternative backend platform", "confidence": "high", "abstained": false}
+  },
+  {
+    "schema_version": 2,
+    "repo_id": "acme/express-lite",
+    "name": "express-lite",
+    "url": "https://example.invalid/acme/express-lite",
+    "github": {"description": "A lightweight Node.js web application framework.", "topics": ["nodejs", "web", "framework"], "language": "JavaScript"},
+    "llm_profile": {"summary": "A lightweight Node.js web framework.", "aliases": ["express-lite"], "project_type": "framework", "ecosystem": ["javascript", "web"], "search_text": "lightweight node.js web application framework", "confidence": "high", "abstained": false}
+  },
+  {
+    "schema_version": 2,
+    "repo_id": "acme/kube",
+    "name": "kube",
+    "url": "https://example.invalid/acme/kube",
+    "github": {"description": "A cloud-native container orchestration platform.", "topics": ["kubernetes", "containers"], "language": "Go"},
+    "llm_profile": {"summary": "A Kubernetes-style cloud-native orchestration platform.", "aliases": ["kubernetes"], "project_type": "platform", "ecosystem": ["go", "cloud-native"], "search_text": "kubernetes cloud native container orchestration platform", "confidence": "high", "abstained": false}
+  },
+  {
+    "schema_version": 2,
+    "repo_id": "acme/chat-ui",
+    "name": "chat-ui",
+    "url": "https://example.invalid/acme/chat-ui",
+    "github": {"description": "A self-hosted large-language-model application interface.", "topics": ["llm", "chat", "self-hosted"], "language": "TypeScript"},
+    "llm_profile": {"summary": "A self-hosted user interface for large-language-model applications.", "aliases": ["chat-ui"], "project_type": "app", "ecosystem": ["typescript", "llm"], "search_text": "self hosted large language model application interface 自托管大语言模型应用界面", "confidence": "high", "abstained": false}
+  }
+]

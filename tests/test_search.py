@@ -345,6 +345,27 @@ def test_exact_identity_is_pinned_even_when_embedding_is_weaker():
     assert "matched exact repository identity" in result["results"][0]["why"]
 
 
+def test_explicit_chinese_project_lookup_without_spaces_is_treated_as_exact_identity():
+    index = make_index(
+        [
+            {"repo_id": "vuejs/core", "vector": [0.0, 1.0], "metadata": {"name": "vue"}},
+            {"repo_id": "semantic/winner", "vector": [1.0, 0.0], "metadata": {"name": "winner"}},
+        ]
+    )
+
+    result = rank(
+        "查找Vue开源项目",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda _config, _query: [1.0, 0.0],
+    )
+
+    assert result["results"][0]["repo_id"] == "vuejs/core"
+    assert result["query_intent"]["type"] == "exact_name"
+    assert result["results"][0]["diagnostics"]["identity_evidence"]["kind"] == "exact_value"
+
+
 def test_explicit_chinese_project_lookup_is_treated_as_exact_identity():
     index = make_index(
         [

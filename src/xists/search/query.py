@@ -26,7 +26,7 @@ CJK_RUN_RE = re.compile(r"[\u3400-\u9fff]+")
 CJK_TERM_LENGTHS = (3, 2)
 CJK_TERM_LIMIT = 32
 EXPLICIT_LOOKUP_PATTERNS = (
-    re.compile(r"^\s*(?:查找|搜索|寻找)\s+(.+?)\s+(?:开源)?项目\s*$", re.IGNORECASE),
+    re.compile(r"^\s*(?:查找|搜索|寻找)\s*(.+?)\s*(?:开源)?项目\s*$", re.IGNORECASE),
     re.compile(r"^\s*(?:find|search for|look up)\s+(.+?)\s+(?:open[ -]source\s+)?project\s*$", re.IGNORECASE),
 )
 

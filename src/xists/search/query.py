@@ -25,6 +25,7 @@ TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*")
 CJK_RUN_RE = re.compile(r"[\u3400-\u9fff]+")
 CJK_TERM_LENGTHS = (3, 2)
 CJK_TERM_LIMIT = 32
+TERMINAL_LOOKUP_PUNCTUATION = ".?!\u3002\uff01\uff1f"
 EXPLICIT_LOOKUP_PATTERNS = (
     re.compile(r"^\s*(?:查找|搜索|寻找)\s*(.+?)\s*(?:开源)?项目\s*$", re.IGNORECASE),
     re.compile(r"^\s*(?:find|search for|look up)\s+(.+?)\s+(?:open[ -]source\s+)?project\s*$", re.IGNORECASE),
@@ -279,8 +280,9 @@ def _query_variants(query: str) -> set[str]:
 
 
 def _explicit_lookup_value(query: str) -> str | None:
+    normalized_query = query.strip().rstrip(TERMINAL_LOOKUP_PUNCTUATION).strip()
     for pattern in EXPLICIT_LOOKUP_PATTERNS:
-        match = pattern.fullmatch(query)
+        match = pattern.fullmatch(normalized_query)
         if match:
             value = match.group(1).strip().lower()
             return value or None

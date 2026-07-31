@@ -26,6 +26,7 @@ CJK_RUN_RE = re.compile(r"[\u3400-\u9fff]+")
 CJK_TERM_LENGTHS = (3, 2)
 CJK_TERM_LIMIT = 32
 TERMINAL_LOOKUP_PUNCTUATION = ".?!\u3002\uff01\uff1f"
+LEADING_LOOKUP_PUNCTUATION = ":\uff1a"
 EXPLICIT_LOOKUP_PATTERNS = (
     re.compile(r"^\s*(?:查找|搜索|寻找)\s*(.+?)\s*(?:开源)?项目\s*$", re.IGNORECASE),
     re.compile(r"^\s*(?:find|search for|look up)\s+(.+?)\s+(?:open[ -]source\s+)?project\s*$", re.IGNORECASE),
@@ -284,7 +285,7 @@ def _explicit_lookup_value(query: str) -> str | None:
     for pattern in EXPLICIT_LOOKUP_PATTERNS:
         match = pattern.fullmatch(normalized_query)
         if match:
-            value = match.group(1).strip().lower()
+            value = match.group(1).lstrip(LEADING_LOOKUP_PUNCTUATION).strip().lower()
             return value or None
     return None
 

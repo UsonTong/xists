@@ -382,6 +382,22 @@ def test_explicit_chinese_project_lookup_ignores_terminal_punctuation(query):
     assert result["results"][0]["diagnostics"]["identity_evidence"]["kind"] == "exact_value"
 
 
+@pytest.mark.parametrize("query", ["搜索：Vue 项目", "查找:Vue开源项目", "寻找： Vue 项目"])
+def test_explicit_chinese_project_lookup_ignores_leading_colons(query):
+    index = make_index(
+        [
+            {"repo_id": "vuejs/core", "vector": [0.0, 1.0], "metadata": {"name": "vue"}},
+            {"repo_id": "semantic/winner", "vector": [1.0, 0.0], "metadata": {"name": "winner"}},
+        ]
+    )
+
+    result = rank(query, index, CONFIG, top_k=2, embed=lambda _config, _query: [1.0, 0.0])
+
+    assert result["results"][0]["repo_id"] == "vuejs/core"
+    assert result["query_intent"]["type"] == "exact_name"
+    assert result["results"][0]["diagnostics"]["identity_evidence"]["kind"] == "exact_value"
+
+
 def test_explicit_chinese_project_lookup_is_treated_as_exact_identity():
     index = make_index(
         [

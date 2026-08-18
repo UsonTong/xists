@@ -11,6 +11,4 @@ python scripts/run_retrieval_regression.py
 ```
 
 It covers exact identity, functional intent, ecosystem intent, an ambiguous
-query, a Chinese query, and a deliberate no-result query. The full 2k/10k
-internal corpus remains a separate scale-validation artifact and is documented
-in `docs/current-retrieval-baseline.md`.
+query, a Chinese query, and a deliberate no-result query.

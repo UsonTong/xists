@@ -267,9 +267,7 @@ The JSON output keeps the same ranking evidence in a machine-readable shape:
 Chinese and mixed-language requests are first-class query inputs. xists keeps
 ASCII technical identifiers such as `Node.js`, `C++`, `C#`, `.NET`, and
 `owner/repo`, while extracting a bounded set of CJK bigrams/trigrams for query
-intent, metadata overlap, and explanations. See the
-[current retrieval baseline](docs/current-retrieval-baseline.md) and run the
-committed offline contract fixture with
+intent, metadata overlap, and explanations. Run the committed offline contract fixture with
 `python scripts/run_retrieval_regression.py`.
 
 ---

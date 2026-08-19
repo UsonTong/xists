@@ -14,8 +14,10 @@ queries the repository is a poor fit for.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -23,6 +25,7 @@ from typing import Any
 
 USER_AGENT = "xists-embedding"
 EMBEDDING_INPUT_VERSION = 3
+RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
 
 class EmbeddingError(RuntimeError):
@@ -39,6 +42,16 @@ class EmbeddingConfig:
     base_url: str
     model: str
     input_type_field: str | None = None
+    api_keys: tuple[str, ...] = ()
+
+    def with_api_key(self, api_key: str) -> EmbeddingConfig:
+        return EmbeddingConfig(
+            api_key=api_key,
+            base_url=self.base_url,
+            model=self.model,
+            input_type_field=self.input_type_field,
+            api_keys=self.api_keys,
+        )
 
     @property
     def embeddings_url(self) -> str:
@@ -59,10 +72,35 @@ def embedding_config_from_env() -> EmbeddingConfig:
     can fail fast with a clear message.
     """
 
-    api_key = os.environ.get("EMBEDDING_API_KEY")
+    api_key_env = os.environ.get("EMBEDDING_API_KEY")
+    api_keys_env = os.environ.get("EMBEDDING_API_KEYS")
+    keys_file_env = os.environ.get("EMBEDDING_KEYS_FILE")
     base_url = os.environ.get("EMBEDDING_BASE_URL")
     model = os.environ.get("EMBEDDING_MODEL")
     input_type_field = os.environ.get("EMBEDDING_INPUT_TYPE_FIELD") or None
+
+    api_keys: list[str] = []
+    if keys_file_env and os.path.isfile(keys_file_env):
+        try:
+            with open(keys_file_env, "r", encoding="utf-8") as f:
+                for line in f:
+                    k = line.strip()
+                    if k and not k.startswith("#") and k not in api_keys:
+                        api_keys.append(k)
+        except OSError:
+            pass
+    if api_keys_env:
+        for k in api_keys_env.split(","):
+            k_clean = k.strip()
+            if k_clean and k_clean not in api_keys:
+                api_keys.append(k_clean)
+    if api_key_env:
+        for k in api_key_env.split(","):
+            k_clean = k.strip()
+            if k_clean and k_clean not in api_keys:
+                api_keys.append(k_clean)
+
+    api_key = api_keys[0] if api_keys else (api_key_env or "")
 
     missing = [
         name
@@ -85,6 +123,7 @@ def embedding_config_from_env() -> EmbeddingConfig:
         base_url=base_url,
         model=model,
         input_type_field=input_type_field,
+        api_keys=tuple(api_keys),
     )
 
 
@@ -106,7 +145,7 @@ def embedding_text_from_record(record: dict[str, Any]) -> str:
     if isinstance(search_text, str) and search_text.strip():
         content.append(search_text.strip())
     if github.get("description"):
-        content.append(str(github["description"]))
+        content.append(str(github["description"])[:2000].strip())
     topics = github.get("topics") or []
     if topics:
         content.append(", ".join(str(t) for t in topics))
@@ -172,8 +211,22 @@ def _parse_tei_response(data: Any, count: int) -> list[list[float]] | None:
 
 def _request_json(url: str, body: bytes, headers: dict[str, str], timeout: int) -> Any:
     request = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+    last_error: Exception | None = None
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            if error.code not in RETRYABLE_HTTP_STATUSES or attempt == 4:
+                raise
+            time.sleep(min(8.0, 0.5 * (2**attempt)))
+        except (urllib.error.URLError, TimeoutError, http.client.IncompleteRead, Exception) as error:
+            last_error = error
+            if attempt == 4:
+                raise
+            time.sleep(min(8.0, 0.5 * (2**attempt)))
+    if last_error:
+        raise last_error
 
 
 def _embedding_request_attempts(
@@ -202,7 +255,7 @@ def _call_embeddings_with_details(
     config: EmbeddingConfig,
     inputs: list[str],
     *,
-    timeout: int = 60,
+    timeout: int = 30,
     input_type: str | None = None,
 ) -> tuple[list[list[float]], dict[str, Any]]:
     if not inputs:
@@ -273,7 +326,7 @@ def call_embeddings(
     config: EmbeddingConfig,
     inputs: list[str],
     *,
-    timeout: int = 60,
+    timeout: int = 30,
     input_type: str | None = None,
 ) -> list[list[float]]:
     """Call an OpenAI-compatible embeddings endpoint, return vectors in order.

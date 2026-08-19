@@ -782,7 +782,7 @@ def index_build(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    batch_size = 64
+    batch_size = getattr(args, "batch_size", 64) or 64
 
     checkpoint_path = _index_checkpoint_path(args.output)
     if args.resume and not checkpoint_path.exists():
@@ -871,43 +871,160 @@ def index_build(args: argparse.Namespace) -> int:
 
     new_count = 0
     checkpoint_every_batches = 16
-    for batch_number, start in enumerate(range(0, len(embeddable), batch_size), start=1):
-        batch = embeddable[start : start + batch_size]
-        try:
-            results = call_embeddings(config, [item["text"] for item in batch], input_type="passage")
-        except EmbeddingError as error:
-            write_partial_checkpoint()
-            _print_embedding_error(error, command="index build")
-            return 1
-        if len(results) != len(batch):
-            write_partial_checkpoint()
-            print(
-                f"Embedding count mismatch: sent {len(batch)}, received {len(results)}",
-                file=sys.stderr,
+    concurrency = getattr(args, "concurrency", 1) or 1
+    keys_pool = config.api_keys if config.api_keys else ((config.api_key,) if config.api_key else ())
+
+    batches = [
+        embeddable[start : start + batch_size]
+        for start in range(0, len(embeddable), batch_size)
+    ]
+    total_batches = len(batches)
+
+    if concurrency > 1 and total_batches > 1:
+        def process_batch(idx: int, batch: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]], list[list[float]]]:
+            key = keys_pool[idx % len(keys_pool)] if keys_pool else ""
+            worker_cfg = config.with_api_key(key) if key else config
+            res = call_embeddings(worker_cfg, [item["text"] for item in batch], input_type="passage")
+            return idx, batch, res
+
+        batch_results: dict[int, list[dict[str, Any]]] = {}
+        batches_done = 0
+        error_occurred: Exception | None = None
+
+        with ThreadPoolExecutor(max_workers=min(concurrency, total_batches)) as executor:
+            future_to_idx = {
+                executor.submit(process_batch, idx, batch): idx
+                for idx, batch in enumerate(batches)
+            }
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                try:
+                    b_idx, batch, results = future.result()
+                except EmbeddingError as error:
+                    error_occurred = error
+                    break
+                except Exception as error:
+                    error_occurred = error
+                    break
+
+                if len(results) != len(batch):
+                    error_occurred = RuntimeError(
+                        f"Embedding count mismatch: sent {len(batch)}, received {len(results)}"
+                    )
+                    break
+
+                batch_vectors = []
+                for item, vector in zip(batch, results):
+                    if dimension is None:
+                        dimension = len(vector)
+                    elif len(vector) != dimension:
+                        error_occurred = RuntimeError(
+                            f"Inconsistent embedding dimension: {len(vector)} vs {dimension}"
+                        )
+                        break
+                    batch_vectors.append(
+                        {
+                            "repo_id": item["repo_id"],
+                            "embedding_input_fingerprint": item["fingerprint"],
+                            "metadata": item["metadata"],
+                            "vector": encode_vector(vector),
+                        }
+                    )
+                if error_occurred:
+                    break
+
+                batch_results[b_idx] = batch_vectors
+                batches_done += 1
+                new_count += len(batch_vectors)
+
+                if batches_done % checkpoint_every_batches == 0 or batches_done == total_batches:
+                    current_vectors = list(vectors)
+                    for i in sorted(batch_results.keys()):
+                        current_vectors.extend(batch_results[i])
+                    _index_write_checkpoint(
+                        checkpoint_path,
+                        index_version=INDEX_VERSION,
+                        record_schema_version=RECORD_SCHEMA_VERSION,
+                        embedding_model=config.model,
+                        embedding_base_url=config.base_url,
+                        embedding_input_version=EMBEDDING_INPUT_VERSION,
+                        dimension=dimension,
+                        record_count=len(current_vectors),
+                        skipped=skipped,
+                        vectors=current_vectors,
+                    )
+                    print(
+                        f"index progress: {len(current_vectors)}/{len(embeddable) + len(vectors)} embedded",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+
+        if error_occurred:
+            current_vectors = list(vectors)
+            for i in sorted(batch_results.keys()):
+                current_vectors.extend(batch_results[i])
+            _index_write_checkpoint(
+                checkpoint_path,
+                index_version=INDEX_VERSION,
+                record_schema_version=RECORD_SCHEMA_VERSION,
+                embedding_model=config.model,
+                embedding_base_url=config.base_url,
+                embedding_input_version=EMBEDDING_INPUT_VERSION,
+                dimension=dimension,
+                record_count=len(current_vectors),
+                skipped=skipped,
+                vectors=current_vectors,
             )
+            if isinstance(error_occurred, EmbeddingError):
+                _print_embedding_error(error_occurred, command="index build")
+            else:
+                print(str(error_occurred), file=sys.stderr)
             return 1
-        for item, vector in zip(batch, results):
-            if dimension is None:
-                dimension = len(vector)
-            elif len(vector) != dimension:
+
+        for i in range(total_batches):
+            vectors.extend(batch_results[i])
+    else:
+        for batch_number, batch in enumerate(batches, start=1):
+            try:
+                results = call_embeddings(config, [item["text"] for item in batch], input_type="passage")
+            except EmbeddingError as error:
+                write_partial_checkpoint()
+                _print_embedding_error(error, command="index build")
+                return 1
+            if len(results) != len(batch):
                 write_partial_checkpoint()
                 print(
-                    f"Inconsistent embedding dimension: {len(vector)} vs {dimension}",
+                    f"Embedding count mismatch: sent {len(batch)}, received {len(results)}",
                     file=sys.stderr,
                 )
                 return 1
-            vectors.append(
-                {
-                    "repo_id": item["repo_id"],
-                    "embedding_input_fingerprint": item["fingerprint"],
-                    "metadata": item["metadata"],
-                    "vector": encode_vector(vector),
-                }
-            )
-            new_count += 1
+            for item, vector in zip(batch, results):
+                if dimension is None:
+                    dimension = len(vector)
+                elif len(vector) != dimension:
+                    write_partial_checkpoint()
+                    print(
+                        f"Inconsistent embedding dimension: {len(vector)} vs {dimension}",
+                        file=sys.stderr,
+                    )
+                    return 1
+                vectors.append(
+                    {
+                        "repo_id": item["repo_id"],
+                        "embedding_input_fingerprint": item["fingerprint"],
+                        "metadata": item["metadata"],
+                        "vector": encode_vector(vector),
+                    }
+                )
+                new_count += 1
 
-        if batch_number % checkpoint_every_batches == 0:
-            write_partial_checkpoint()
+            if batch_number % checkpoint_every_batches == 0:
+                write_partial_checkpoint()
+                print(
+                    f"index progress: {len(vectors)}/{len(embeddable) + len(vectors) - new_count} embedded",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
     _index_write_checkpoint(
         args.output,
@@ -2436,6 +2553,18 @@ def build_parser() -> argparse.ArgumentParser:
     index_build_parser.add_argument("--output", type=Path, default=workspace.index, help="Path to write the embedding index")
     index_build_parser.add_argument("--force", action="store_true", help="Ignore existing index.json and rebuild from scratch")
     index_build_parser.add_argument("--resume", action="store_true", help="Resume from an existing partial index checkpoint")
+    index_build_parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=64,
+        help="Batch size for embedding requests (default: 64)",
+    )
+    index_build_parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="Number of concurrent embedding requests (default: 1)",
+    )
     index_build_parser.add_argument(
         "--format",
         choices=("text", "json"),

@@ -305,11 +305,18 @@ def request_graphql(query: str, variables: dict[str, Any], token: str | None = N
     if errors:
         message = "; ".join(err.get("message", "GraphQL error") for err in errors)
         rate_limit = (payload.get("data") or {}).get("rateLimit") or {}
-        reset_at = rate_limit.get("resetAt")
-        try:
-            rate_limit_reset = datetime.fromisoformat(str(reset_at).replace("Z", "+00:00")).timestamp()
-        except (TypeError, ValueError):
-            rate_limit_reset = None
+        remaining = rate_limit.get("remaining")
+        is_rate_limited = (remaining == 0) or any(
+            err.get("type") == "RATE_LIMITED" or "rate limit" in str(err.get("message", "")).lower()
+            for err in errors
+        )
+        rate_limit_reset = None
+        if is_rate_limited:
+            reset_at = rate_limit.get("resetAt")
+            try:
+                rate_limit_reset = datetime.fromisoformat(str(reset_at).replace("Z", "+00:00")).timestamp()
+            except (TypeError, ValueError):
+                rate_limit_reset = None
         raise GitHubAPIError(message, rate_limit_reset=rate_limit_reset)
     return payload
 

@@ -849,6 +849,91 @@ def test_index_build_json_format_is_machine_readable(tmp_path, monkeypatch, caps
     assert payload["record_count"] == 1
 
 
+def test_index_build_concurrent_with_multi_key_pool(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    output_file = tmp_path / "index.json"
+    records = [_make_record(f"example/project-{i}") for i in range(10)]
+    records_file.write_text(json.dumps(records), encoding="utf-8")
+
+    keys_file = tmp_path / "keys.txt"
+    keys_file.write_text("key1\nkey2\n", encoding="utf-8")
+    monkeypatch.setenv("EMBEDDING_KEYS_FILE", str(keys_file))
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://test.invalid/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
+
+    seen_keys = set()
+    lock = threading.Lock()
+
+    def fake_call_embeddings(cfg, inputs, *, timeout=30, input_type=None):
+        with lock:
+            seen_keys.add(cfg.api_key)
+        return [[1.0, 0.0] for _ in inputs]
+
+    args = build_parser().parse_args(
+        [
+            "index",
+            "build",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--concurrency",
+            "2",
+            "--batch-size",
+            "2",
+            "--format",
+            "json",
+        ]
+    )
+
+    with patch("xists.cli.call_embeddings", side_effect=fake_call_embeddings):
+        assert index_build(args) == 0
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["record_count"] == 10
+    assert "key1" in seen_keys or "key2" in seen_keys
+
+    with open(output_file, "r", encoding="utf-8") as f:
+        saved_index = json.load(f)
+    assert len(saved_index["vectors"]) == 10
+    assert [v["repo_id"] for v in saved_index["vectors"]] == [f"example/project-{i}" for i in range(10)]
+
+
+def test_index_build_concurrency_error_handling(tmp_path, monkeypatch, capsys):
+    records_file = tmp_path / "records.json"
+    output_file = tmp_path / "index.json"
+    records = [_make_record(f"example/project-{i}") for i in range(4)]
+    records_file.write_text(json.dumps(records), encoding="utf-8")
+
+    monkeypatch.setenv("EMBEDDING_API_KEY", "key1")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://test.invalid/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
+
+    def fake_failing_call(cfg, inputs, *, timeout=30, input_type=None):
+        raise EmbeddingError("Simulated API failure")
+
+    args = build_parser().parse_args(
+        [
+            "index",
+            "build",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--concurrency",
+            "2",
+            "--batch-size",
+            "2",
+        ]
+    )
+
+    with patch("xists.cli.call_embeddings", side_effect=fake_failing_call):
+        assert index_build(args) == 1
+
+    captured = capsys.readouterr()
+    assert "Simulated API failure" in captured.err
+
+
 def test_ingest_defaults_to_a_human_summary(tmp_path, monkeypatch, capsys):
     repos_file = tmp_path / "repos.txt"
     output_file = tmp_path / "records.json"

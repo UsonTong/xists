@@ -1,4 +1,5 @@
 import io
+import json
 import threading
 import urllib.error
 
@@ -8,6 +9,7 @@ from xists import __version__
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.ingest.github import (
     GITHUB_API_VERSION,
+    GitHubAPIError,
     GitHubSnapshot,
     TokenPool,
     build_graphql_batch_query,
@@ -534,3 +536,38 @@ def test_fetch_snapshots_graphql_maps_multiple_repositories(monkeypatch):
 
 def test_github_token_from_file_returns_empty_for_missing_file(tmp_path):
     assert github_token_from_file(tmp_path / "missing") == []
+
+
+def test_request_graphql_extracts_rate_limit_reset(monkeypatch):
+    from xists.ingest.github import request_graphql
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self):
+            return json.dumps(
+                {
+                    "data": {
+                        "rateLimit": {
+                            "remaining": 0,
+                            "resetAt": "2026-08-16T12:00:00Z",
+                        }
+                    },
+                    "errors": [
+                        {"message": "API rate limit exceeded", "type": "RATE_LIMITED"}
+                    ],
+                }
+            ).encode("utf-8")
+
+    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=60: FakeResponse())
+
+    with pytest.raises(GitHubAPIError) as exc_info:
+        request_graphql("query", {}, token="tok")
+
+    assert exc_info.value.rate_limit_reset is not None
+    assert "rate limit" in str(exc_info.value).lower()
+

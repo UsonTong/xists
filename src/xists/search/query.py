@@ -333,6 +333,23 @@ def _identity_match_kind(query: str, entry: dict[str, Any]) -> str:
     return "none"
 
 
+def _identity_match_kind_cached(
+    raw_query: str,
+    explicit_value: str | None,
+    cache: dict[str, Any],
+) -> str:
+    if cache["repo_id_lower"] and cache["repo_id_lower"] in raw_query:
+        return "repo_id"
+    if raw_query in cache["identity_values_lower"]:
+        return "exact_value"
+    if explicit_value and explicit_value in cache["identity_values_lower"]:
+        return "exact_value"
+    for val_lower in cache["id_value_tokens"]:
+        if val_lower in raw_query:
+            return "contextual_name_mention"
+    return "none"
+
+
 def _exact_identity_match(query: str, entry: dict[str, Any]) -> bool:
     return _identity_match_kind(query, entry) in {"repo_id", "exact_value"}
 
@@ -395,6 +412,73 @@ def _repository_state_penalty(metadata: dict[str, Any]) -> tuple[float, list[str
         penalty += 0.12
         states.append("disabled")
     return penalty, states
+
+
+def _build_query_context(query: str) -> dict[str, Any]:
+    raw_query = query.strip().lower()
+    keyword_tokens = sorted(_keyword_tokens(query))
+    expanded_keyword_map = {token: _expanded_token(token) for token in keyword_tokens}
+    explicit_val = _explicit_lookup_value(query)
+    primary_lang = _query_primary_language_alias(query)
+    return {
+        "query": query,
+        "raw_query": raw_query,
+        "keyword_tokens": keyword_tokens,
+        "expanded_keyword_map": expanded_keyword_map,
+        "explicit_value": explicit_val,
+        "primary_language": primary_lang,
+    }
+
+
+def _precompute_entry_cache(entry: dict[str, Any]) -> dict[str, Any]:
+    metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+    repo_id = str(entry.get("repo_id") or "").strip()
+    repo_id_lower = repo_id.lower()
+
+    id_values = _identity_values(entry)
+    id_values_lower = {v.strip().lower() for v in id_values if v.strip()}
+
+    id_value_tokens: list[str] = []
+    for val in id_values:
+        val_lower = val.strip().lower()
+        if len(val_lower) >= 3:
+            val_tokens = _tokenize(val_lower)
+            if not (set(val_tokens) & LANGUAGE_TERMS):
+                id_value_tokens.append(val_lower)
+
+    text_tokens = _expanded_token_set(_tokenize(_metadata_text(metadata)))
+    topic_tokens = _expanded_token_set(
+        tuple(token for topic in _string_list(metadata.get("topics")) for token in _tokenize(topic))
+    )
+    profile_tokens = _expanded_token_set(
+        {
+            token
+            for key in ("use_cases", "capabilities", "search_phrases")
+            for value in _string_list(metadata.get(key))
+            for token in _tokenize(value)
+        }
+    )
+
+    language = str(metadata.get("language") or "")
+    language_alias = _metadata_language_alias(language)
+    popularity = _popularity_bonus(metadata)
+    state_penalty, repository_state = _repository_state_penalty(metadata)
+
+    return {
+        "repo_id": repo_id,
+        "repo_id_lower": repo_id_lower,
+        "identity_values_lower": id_values_lower,
+        "id_value_tokens": tuple(id_value_tokens),
+        "text_tokens": text_tokens,
+        "topic_tokens": topic_tokens,
+        "profile_tokens": profile_tokens,
+        "language": language,
+        "language_alias": language_alias,
+        "popularity_bonus": popularity,
+        "state_penalty": state_penalty,
+        "repository_state": repository_state,
+        "url": metadata.get("url"),
+    }
 
 
 def _metadata_adjustment(query: str, entry: dict[str, Any], semantic_score: float) -> dict[str, Any]:
@@ -484,6 +568,98 @@ def _metadata_adjustment(query: str, entry: dict[str, Any], semantic_score: floa
     }
 
 
+def _metadata_adjustment_cached(
+    query_ctx: dict[str, Any],
+    entry: dict[str, Any],
+    cache: dict[str, Any],
+    semantic_score: float,
+) -> dict[str, Any]:
+    keyword_tokens = query_ctx["keyword_tokens"]
+    expanded_keyword_map = query_ctx["expanded_keyword_map"]
+
+    identity_kind = _identity_match_kind_cached(
+        query_ctx["raw_query"],
+        query_ctx["explicit_value"],
+        cache,
+    )
+    exact_identity = identity_kind in {"repo_id", "exact_value"}
+    contextual_identity = identity_kind == "contextual_name_mention"
+
+    matched_terms = sorted(
+        token for token in keyword_tokens if expanded_keyword_map[token] & cache["text_tokens"]
+    )
+    topic_matches = sorted(
+        token for token in keyword_tokens if expanded_keyword_map[token] & cache["topic_tokens"]
+    )
+    profile_matches = sorted(
+        token for token in keyword_tokens if expanded_keyword_map[token] & cache["profile_tokens"]
+    )
+
+    adjustment = 0.0
+    why: list[str] = []
+    primary_language = query_ctx["primary_language"]
+    language = cache["language"]
+    language_alias = cache["language_alias"]
+    language_match: str | None = None
+    language_mismatch: str | None = None
+
+    if exact_identity:
+        adjustment += max(0.25, HIGH_CONFIDENCE_THRESHOLD + 0.05 - semantic_score)
+        why.append("matched exact repository identity")
+    elif contextual_identity:
+        adjustment += 0.015
+        why.append("mentioned project name in query context")
+    if primary_language and language_alias == primary_language:
+        adjustment += 0.03
+        language_match = language
+        why.append(f"matched language: {language}")
+    elif primary_language and language_alias and language_alias != primary_language:
+        adjustment -= 0.04
+        language_mismatch = language
+        why.append(f"language differs: {language}")
+
+    overlap_count = len(matched_terms)
+    if overlap_count:
+        adjustment += min(0.08, overlap_count * 0.02)
+        why.append("matched metadata terms: " + ", ".join(matched_terms[:5]))
+    if topic_matches:
+        adjustment += min(0.035, len(topic_matches) * 0.015)
+        why.append("matched topics: " + ", ".join(topic_matches[:5]))
+    if profile_matches:
+        adjustment += min(0.045, len(profile_matches) * 0.015)
+        why.append("matched profile terms: " + ", ".join(profile_matches[:5]))
+
+    popularity = cache["popularity_bonus"]
+    if popularity:
+        adjustment += popularity
+        why.append("popular repository")
+    state_penalty = cache["state_penalty"]
+    repository_state = cache["repository_state"]
+    if state_penalty:
+        adjustment -= state_penalty
+        why.append("repository state penalty: " + ", ".join(repository_state))
+
+    if not why:
+        why.append("ranked by semantic similarity")
+
+    return {
+        "adjustment": adjustment,
+        "exact_identity": exact_identity,
+        "matched_terms": matched_terms,
+        "diagnostics": {
+            "identity_match": "exact" if exact_identity else "contextual" if contextual_identity else None,
+            "identity_evidence": {"kind": identity_kind},
+            "language_match": language_match,
+            "language_mismatch": language_mismatch,
+            "topic_matches": topic_matches,
+            "profile_matches": profile_matches,
+            "repository_state": repository_state,
+            "popularity_bonus": round(popularity, 6) if popularity else 0.0,
+        },
+        "why": why,
+    }
+
+
 def _score_breakdown(*, semantic_score: float, metadata_score: float, final_score: float) -> dict[str, float]:
     return {
         "semantic": round(semantic_score, 6),
@@ -528,6 +704,42 @@ def _result_from_score(
     }
 
 
+def _result_from_score_cached(
+    query_ctx: dict[str, Any],
+    entry: dict[str, Any],
+    cache: dict[str, Any],
+    semantic_score: float,
+    *,
+    exploratory_threshold: float = EXPLORATORY_THRESHOLD,
+) -> dict[str, Any]:
+    adjustment = _metadata_adjustment_cached(query_ctx, entry, cache, semantic_score)
+    metadata_score = float(adjustment["adjustment"])
+    final_score = semantic_score + metadata_score
+    if adjustment["exact_identity"]:
+        confidence = "high_confidence"
+    elif semantic_score < exploratory_threshold:
+        confidence = "abstain"
+    else:
+        confidence = confidence_bucket(final_score, exploratory_threshold=exploratory_threshold)
+    return {
+        "repo_id": entry.get("repo_id"),
+        "url": cache["url"],
+        "score": final_score,
+        "semantic_score": semantic_score,
+        "metadata_score": metadata_score,
+        "confidence": confidence,
+        "score_breakdown": _score_breakdown(
+            semantic_score=semantic_score,
+            metadata_score=metadata_score,
+            final_score=final_score,
+        ),
+        "matched_terms": adjustment["matched_terms"],
+        "diagnostics": adjustment["diagnostics"],
+        "why": adjustment["why"],
+        "_identity_pin": bool(adjustment["exact_identity"]),
+    }
+
+
 def _rank_scored_entries(
     query: str,
     scored_entries: list[tuple[dict[str, Any], float]],
@@ -549,12 +761,38 @@ def _rank_scored_entries(
         ),
         reverse=True,
     )
-    presented = [item for item in results if item["confidence"] != "abstain"][: max(top_k, 0)]
-    for item in presented:
-        item.pop("_identity_pin", None)
-        if item.get("url") is None:
-            item.pop("url", None)
-    return presented
+    return _present_ranked_results(results, top_k)
+
+
+def _rank_scored_entries_prepared(
+    prepared: PreparedIndex,
+    semantic_scores: np.ndarray,
+    top_k: int,
+    *,
+    query_ctx: dict[str, Any],
+    exploratory_threshold: float = EXPLORATORY_THRESHOLD,
+) -> list[dict[str, Any]]:
+    results = [
+        _result_from_score_cached(
+            query_ctx,
+            entry,
+            cache,
+            float(semantic_scores[i]),
+            exploratory_threshold=exploratory_threshold,
+        )
+        for i, (entry, cache) in enumerate(zip(prepared.entries, prepared.metadata_caches))
+    ]
+    _downgrade_ambiguous_exact_values(results)
+    results.sort(
+        key=lambda item: (
+            1 if item.get("_identity_pin") else 0,
+            item["score"],
+            item["semantic_score"],
+            str(item.get("repo_id") or ""),
+        ),
+        reverse=True,
+    )
+    return _present_ranked_results(results, top_k)
 
 
 def _semantic_result(
@@ -571,6 +809,43 @@ def _semantic_result(
     return {
         "repo_id": entry.get("repo_id"),
         "url": metadata.get("url"),
+        "score": semantic_score,
+        "semantic_score": semantic_score,
+        "metadata_score": 0.0,
+        "confidence": confidence,
+        "score_breakdown": _score_breakdown(
+            semantic_score=semantic_score,
+            metadata_score=0.0,
+            final_score=semantic_score,
+        ),
+        "matched_terms": [],
+        "diagnostics": {"identity_match": identity_match, "identity_evidence": {"kind": identity_kind}},
+        "why": ["ranked by semantic similarity"],
+        "_identity_pin": False,
+    }
+
+
+def _semantic_result_cached(
+    entry: dict[str, Any],
+    cache: dict[str, Any],
+    semantic_score: float,
+    *,
+    exploratory_threshold: float,
+    query_ctx: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    confidence = confidence_bucket(semantic_score, exploratory_threshold=exploratory_threshold)
+    if query_ctx is not None:
+        identity_kind = _identity_match_kind_cached(
+            query_ctx["raw_query"],
+            query_ctx["explicit_value"],
+            cache,
+        )
+    else:
+        identity_kind = "none"
+    identity_match = "contextual" if identity_kind == "contextual_name_mention" else None
+    return {
+        "repo_id": entry.get("repo_id"),
+        "url": cache["url"],
         "score": semantic_score,
         "semantic_score": semantic_score,
         "metadata_score": 0.0,
@@ -619,6 +894,28 @@ def _rank_semantic_entries(
     results = [
         _semantic_result(entry, score, exploratory_threshold=exploratory_threshold)
         for entry, score in scored_entries
+    ]
+    results.sort(key=lambda item: (item["score"], str(item.get("repo_id") or "")), reverse=True)
+    return _present_ranked_results(results, top_k)
+
+
+def _rank_semantic_entries_prepared(
+    prepared: PreparedIndex,
+    semantic_scores: np.ndarray,
+    top_k: int,
+    *,
+    exploratory_threshold: float,
+    query_ctx: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    results = [
+        _semantic_result_cached(
+            entry,
+            cache,
+            float(semantic_scores[i]),
+            exploratory_threshold=exploratory_threshold,
+            query_ctx=query_ctx,
+        )
+        for i, (entry, cache) in enumerate(zip(prepared.entries, prepared.metadata_caches))
     ]
     results.sort(key=lambda item: (item["score"], str(item.get("repo_id") or "")), reverse=True)
     return _present_ranked_results(results, top_k)
@@ -695,25 +992,120 @@ def _rank_reranked_entries(
     )
 
 
-def ensure_index_matches_model(index: dict[str, Any], config: EmbeddingConfig) -> None:
+def _rank_reranked_entries_prepared(
+    query: str,
+    prepared: PreparedIndex,
+    semantic_scores: np.ndarray,
+    top_k: int,
+    *,
+    rerank: Callable[[str, list[str]], list[float]],
+    rerank_query: str,
+    candidate_limit: int,
+    exploratory_threshold: float,
+    rerank_abstain_threshold: float | None,
+    confidence_calibration: str,
+    query_ctx: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    if candidate_limit < 1:
+        raise ValueError("rerank candidate limit must be at least 1")
+    if query_ctx is None:
+        query_ctx = _build_query_context(query)
+
+    identity_indices: list[int] = []
+    for i, cache in enumerate(prepared.metadata_caches):
+        kind = _identity_match_kind_cached(
+            query_ctx["raw_query"],
+            query_ctx["explicit_value"],
+            cache,
+        )
+        if kind in {"repo_id", "exact_value"}:
+            identity_indices.append(i)
+
+    identity_ids = {prepared.repo_ids[i] for i in identity_indices if prepared.repo_ids[i]}
+    candidate_indices = [
+        i for i in range(len(prepared.entries))
+        if prepared.repo_ids[i] not in identity_ids
+    ]
+    candidate_indices.sort(key=lambda i: float(semantic_scores[i]), reverse=True)
+    candidate_indices = candidate_indices[:candidate_limit]
+
+    candidates = [prepared.entries[i] for i in candidate_indices]
+    rerank_scores = rerank(rerank_query, [rerank_text_from_entry(entry) for entry in candidates])
+    if len(rerank_scores) != len(candidates):
+        raise ValueError(f"reranker returned {len(rerank_scores)} scores for {len(candidates)} candidates")
+
+    rerank_order = sorted(range(len(candidates)), key=lambda position: (rerank_scores[position], -position), reverse=True)
+    rerank_ranks = {position: rank for rank, position in enumerate(rerank_order, start=1)}
+
+    results = [
+        _result_from_score_cached(
+            query_ctx,
+            prepared.entries[i],
+            prepared.metadata_caches[i],
+            float(semantic_scores[i]),
+            exploratory_threshold=exploratory_threshold,
+        )
+        for i in identity_indices
+    ]
+
+    for semantic_rank, (idx, rerank_score) in enumerate(zip(candidate_indices, rerank_scores), start=1):
+        entry = prepared.entries[idx]
+        cache = prepared.metadata_caches[idx]
+        semantic_score = float(semantic_scores[idx])
+        rerank_rank = rerank_ranks[semantic_rank - 1]
+        fusion_score = (
+            1.0 / (RERANK_FUSION_RANK_CONSTANT + semantic_rank)
+            + 1.0 / (RERANK_FUSION_RANK_CONSTANT + rerank_rank)
+        )
+        result = _semantic_result_cached(
+            entry,
+            cache,
+            semantic_score,
+            exploratory_threshold=exploratory_threshold,
+            query_ctx=query_ctx,
+        )
+        result["score"] = fusion_score
+        result["rerank_score"] = float(rerank_score)
+        result["score_breakdown"] = _score_breakdown(
+            semantic_score=semantic_score,
+            metadata_score=0.0,
+            final_score=fusion_score,
+        )
+        result["ranking_evidence"] = {
+            "semantic_rank": semantic_rank,
+            "rerank_rank": rerank_rank,
+            "fusion": "reciprocal_rank",
+        }
+        result["why"] = ["ranked by fused embedding recall and cross-encoder relevance"]
+        results.append(result)
+
+    _downgrade_ambiguous_exact_values(results)
+    results.sort(
+        key=lambda item: (
+            1 if item.get("_identity_pin") else 0,
+            item["score"],
+            item["semantic_score"],
+            str(item.get("repo_id") or ""),
+        ),
+        reverse=True,
+    )
+    if not identity_indices and rerank_abstain_threshold is not None and results:
+        top_rerank_score = results[0].get("rerank_score")
+        if isinstance(top_rerank_score, (int, float)) and top_rerank_score <= rerank_abstain_threshold:
+            return []
+    return calibrate_confidence(
+        _present_ranked_results(results, top_k),
+        ranking_strategy="rerank",
+        mode=confidence_calibration,
+    )
+
+
+def _validate_index_structure(index: dict[str, Any]) -> None:
     index_version = index.get("index_version")
     if index_version != INDEX_VERSION:
         raise IndexMismatchError(
             f"Index index_version is {index_version!r}, but xists expects {INDEX_VERSION}. "
             "Rebuild the index with xists index build."
-        )
-    index_model = index.get("embedding_model")
-    if not index_model:
-        raise IndexMismatchError(
-            f"Index does not record an embedding_model, but the configured "
-            f"model is '{config.model}'. Rebuild the index (xists index build) "
-            "so compatibility can be verified."
-        )
-    if index_model != config.model:
-        raise IndexMismatchError(
-            f"Index was built with embedding model '{index_model}' but the "
-            f"configured model is '{config.model}'. Rebuild the index "
-            "(xists index build) or set EMBEDDING_MODEL to match."
         )
     input_version = index.get("embedding_input_version")
     if input_version != EMBEDDING_INPUT_VERSION:
@@ -780,6 +1172,220 @@ def ensure_index_matches_model(index: dict[str, Any], config: EmbeddingConfig) -
         )
 
 
+def ensure_index_matches_model(index: dict[str, Any] | PreparedIndex, config: EmbeddingConfig) -> None:
+    if isinstance(index, PreparedIndex):
+        if index.index_version != INDEX_VERSION:
+            raise IndexMismatchError(
+                f"Index index_version is {index.index_version!r}, but xists expects {INDEX_VERSION}. "
+                "Rebuild the index with xists index build."
+            )
+        if not index.embedding_model:
+            raise IndexMismatchError(
+                f"Index does not record an embedding_model, but the configured "
+                f"model is '{config.model}'. Rebuild the index (xists index build) "
+                "so compatibility can be verified."
+            )
+        if index.embedding_model != config.model:
+            raise IndexMismatchError(
+                f"Index was built with embedding model '{index.embedding_model}' but the "
+                f"configured model is '{config.model}'. Rebuild the index "
+                "(xists index build) or set EMBEDDING_MODEL to match."
+            )
+        if index.embedding_input_version != EMBEDDING_INPUT_VERSION:
+            raise IndexMismatchError(
+                f"Index embedding_input_version is {index.embedding_input_version!r}, but xists expects "
+                f"{EMBEDDING_INPUT_VERSION}. Refresh profiles if needed, then rebuild "
+                "the index with xists index build."
+            )
+        if index.record_schema_version != RECORD_SCHEMA_VERSION:
+            raise IndexMismatchError(
+                f"Index record_schema_version is {index.record_schema_version!r}, but xists expects "
+                f"{RECORD_SCHEMA_VERSION}. Run xists profile refresh for older records, "
+                "then rebuild the index."
+            )
+        if index.record_count != len(index.entries):
+            raise IndexMismatchError(
+                "Index record_count does not match vectors. "
+                "Rebuild the index with xists index build."
+            )
+        return
+
+    index_model = index.get("embedding_model")
+    if not index_model:
+        raise IndexMismatchError(
+            f"Index does not record an embedding_model, but the configured "
+            f"model is '{config.model}'. Rebuild the index (xists index build) "
+            "so compatibility can be verified."
+        )
+    if index_model != config.model:
+        raise IndexMismatchError(
+            f"Index was built with embedding model '{index_model}' but the "
+            f"configured model is '{config.model}'. Rebuild the index "
+            "(xists index build) or set EMBEDDING_MODEL to match."
+        )
+    _validate_index_structure(index)
+
+
+class PreparedIndex:
+    """Pre-computed, memory-efficient index for accelerated vector search."""
+
+    def __init__(
+        self,
+        *,
+        raw_index: dict[str, Any],
+        matrix: np.ndarray,
+        normalized_matrix: np.ndarray,
+        entries: list[dict[str, Any]],
+        repo_ids: tuple[str, ...],
+        repo_id_to_index: dict[str, int],
+        metadata_caches: list[dict[str, Any]],
+        index_version: int,
+        record_schema_version: int,
+        embedding_model: str,
+        embedding_base_url: str | None,
+        embedding_input_version: int,
+        dimension: int | None,
+        record_count: int,
+    ) -> None:
+        self.raw_index = raw_index
+        self.matrix = matrix
+        self.normalized_matrix = normalized_matrix
+        self.entries = entries
+        self.repo_ids = repo_ids
+        self.repo_id_to_index = repo_id_to_index
+        self.metadata_caches = metadata_caches
+        self.index_version = index_version
+        self.record_schema_version = record_schema_version
+        self.embedding_model = embedding_model
+        self.embedding_base_url = embedding_base_url
+        self.embedding_input_version = embedding_input_version
+        self.dimension = dimension
+        self.record_count = record_count
+
+    @classmethod
+    def from_dict(
+        cls,
+        index: dict[str, Any],
+        config: EmbeddingConfig | None = None,
+    ) -> PreparedIndex:
+        if config is not None:
+            ensure_index_matches_model(index, config)
+        else:
+            _validate_index_structure(index)
+
+        dimension = index.get("dimension")
+        entries = [entry for entry in index.get("vectors", []) if isinstance(entry, dict)]
+
+        vectors: list[np.ndarray] = []
+        for position, entry in enumerate(entries):
+            vec = decode_vector(entry.get("vector"), dimension=dimension)
+            if vec is None:
+                raise IndexMismatchError(
+                    f"Index contains invalid vectors that do not match its dimension {dimension}. "
+                    "Rebuild the index with xists index build."
+                )
+            vectors.append(vec)
+
+        if vectors:
+            matrix = np.asarray(vectors, dtype=np.float32)
+            if matrix.ndim != 2:
+                raise IndexMismatchError("Index vectors must be a two-dimensional matrix")
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+            normalized_matrix = np.divide(matrix, norms, out=np.zeros_like(matrix), where=norms != 0)
+        else:
+            matrix = np.empty((0, dimension or 0), dtype=np.float32)
+            normalized_matrix = np.empty((0, dimension or 0), dtype=np.float32)
+
+        repo_ids = tuple(str(entry.get("repo_id") or "") for entry in entries)
+        repo_id_to_index = {repo_id: idx for idx, repo_id in enumerate(repo_ids) if repo_id}
+        metadata_caches = [_precompute_entry_cache(entry) for entry in entries]
+
+        return cls(
+            raw_index=index,
+            matrix=matrix,
+            normalized_matrix=normalized_matrix,
+            entries=entries,
+            repo_ids=repo_ids,
+            repo_id_to_index=repo_id_to_index,
+            metadata_caches=metadata_caches,
+            index_version=index.get("index_version", INDEX_VERSION),
+            record_schema_version=index.get("record_schema_version", RECORD_SCHEMA_VERSION),
+            embedding_model=index.get("embedding_model", ""),
+            embedding_base_url=index.get("embedding_base_url"),
+            embedding_input_version=index.get("embedding_input_version", EMBEDDING_INPUT_VERSION),
+            dimension=dimension,
+            record_count=index.get("record_count", len(entries)),
+        )
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "vectors":
+            return self.entries
+        if key == "dimension":
+            return self.dimension
+        if key == "record_count":
+            return self.record_count
+        if key == "index_version":
+            return self.index_version
+        if key == "record_schema_version":
+            return self.record_schema_version
+        if key == "embedding_model":
+            return self.embedding_model
+        if key == "embedding_base_url":
+            return self.embedding_base_url
+        if key == "embedding_input_version":
+            return self.embedding_input_version
+        if isinstance(self.raw_index, dict):
+            return self.raw_index[key]
+        raise KeyError(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except KeyError:
+            return default
+
+    def __contains__(self, key: str) -> bool:
+        if key in {
+            "vectors",
+            "dimension",
+            "record_count",
+            "index_version",
+            "record_schema_version",
+            "embedding_model",
+            "embedding_base_url",
+            "embedding_input_version",
+        }:
+            return True
+        if isinstance(self.raw_index, dict):
+            return key in self.raw_index
+        return False
+
+    def __len__(self) -> int:
+        return len(self.entries)
+
+    def __iter__(self):
+        if isinstance(self.raw_index, dict):
+            return iter(self.raw_index)
+        return iter(())
+
+
+def prepare_index(
+    index: dict[str, Any] | PreparedIndex,
+    config: EmbeddingConfig | None = None,
+) -> PreparedIndex:
+    """Ensure an index is in the accelerated in-memory PreparedIndex format."""
+
+    if isinstance(index, PreparedIndex):
+        if config is not None:
+            ensure_index_matches_model(index, config)
+        return index
+    if isinstance(index, dict):
+        return PreparedIndex.from_dict(index, config)
+    raise IndexMismatchError(
+        f"Index must be a dictionary or PreparedIndex, got {type(index).__name__}"
+    )
+
+
 def _normalized_matrix(vectors: list[Any]) -> np.ndarray:
     matrix = np.asarray(vectors, dtype=np.float32)
     if matrix.ndim != 2:
@@ -790,7 +1396,7 @@ def _normalized_matrix(vectors: list[Any]) -> np.ndarray:
 
 def rank_many(
     queries: list[str],
-    index: dict[str, Any],
+    index: dict[str, Any] | PreparedIndex,
     config: EmbeddingConfig,
     *,
     top_k: int = 10,
@@ -807,7 +1413,7 @@ def rank_many(
 ) -> list[dict[str, Any]]:
     """Rank multiple queries with batched embeddings and matrix similarity."""
 
-    ensure_index_matches_model(index, config)
+    prepared = prepare_index(index, config)
     if ranking_strategy not in RANKING_STRATEGIES:
         raise ValueError(f"Unknown ranking strategy: {ranking_strategy}")
     if ranking_strategy == "rerank" and rerank is None:
@@ -827,14 +1433,11 @@ def rank_many(
     if len(rerank_queries) != len(queries):
         raise ValueError("rerank queries must contain one value for every query")
 
-    entries = [entry for entry in index.get("vectors", []) if isinstance(entry, dict)]
-    dimension = index.get("dimension")
-    vectors = [decode_vector(entry.get("vector"), dimension=dimension) for entry in entries]
-    if any(vector is None for vector in vectors):
-        raise IndexMismatchError(
-            f"Index contains invalid vectors that do not match its dimension {dimension}. "
-            "Rebuild the index with xists index build."
-        )
+    if not prepared.entries:
+        return [
+            {"query": query, "query_intent": _query_intent(query), "abstained": True, "results": [], "considered": 0}
+            for query in queries
+        ]
 
     flattened_variants = [variant for variants in query_variants for variant in variants]
     query_vectors: list[list[float]] = []
@@ -846,21 +1449,17 @@ def rank_many(
             query_vectors.extend(embed_many(config, batch))
     if len(query_vectors) != len(flattened_variants):
         raise EmbeddingError(f"Embedding count mismatch: sent {len(flattened_variants)}, received {len(query_vectors)}")
+    dimension = prepared.dimension
     if dimension is not None and any(len(vector) != dimension for vector in query_vectors):
         raise IndexMismatchError(
             f"One or more query vectors do not match index dimension {dimension}. "
             "Rebuild the index or check the model."
         )
 
-    if not entries:
-        return [
-            {"query": query, "query_intent": _query_intent(query), "abstained": True, "results": [], "considered": 0}
-            for query in queries
-        ]
-
-    index_matrix = _normalized_matrix([vector for vector in vectors if vector is not None])
-    query_matrix = _normalized_matrix(query_vectors)
-    scores = query_matrix @ index_matrix.T
+    q_mat = np.asarray(query_vectors, dtype=np.float32)
+    q_norms = np.linalg.norm(q_mat, axis=1, keepdims=True)
+    q_norm = np.divide(q_mat, q_norms, out=np.zeros_like(q_mat), where=q_norms != 0)
+    scores = q_norm @ prepared.normalized_matrix.T
     ranked: list[dict[str, Any]] = []
     offset = 0
     for row, query in enumerate(queries):
@@ -868,13 +1467,22 @@ def rank_many(
         variant_count = len(query_variants[row])
         variant_scores = scores[offset : offset + variant_count]
         offset += variant_count
-        scored_entries = [(entry, float(variant_scores[:, column].max())) for column, entry in enumerate(entries)]
+        semantic_scores = variant_scores.max(axis=0)
+        query_ctx = _build_query_context(query)
+
         if ranking_strategy == "semantic":
-            results = _rank_semantic_entries(scored_entries, top_k, exploratory_threshold=exploratory_threshold)
+            results = _rank_semantic_entries_prepared(
+                prepared,
+                semantic_scores,
+                top_k,
+                exploratory_threshold=exploratory_threshold,
+                query_ctx=query_ctx,
+            )
         elif ranking_strategy == "rerank":
-            results = _rank_reranked_entries(
+            results = _rank_reranked_entries_prepared(
                 query,
-                scored_entries,
+                prepared,
+                semantic_scores,
                 top_k,
                 rerank=rerank,
                 rerank_query=rerank_queries[row],
@@ -882,16 +1490,24 @@ def rank_many(
                 exploratory_threshold=exploratory_threshold,
                 rerank_abstain_threshold=rerank_abstain_threshold,
                 confidence_calibration=confidence_calibration,
+                query_ctx=query_ctx,
             )
         else:
-            results = _rank_scored_entries(query, scored_entries, top_k, exploratory_threshold=exploratory_threshold)
+            results = _rank_scored_entries_prepared(
+                prepared,
+                semantic_scores,
+                top_k,
+                query_ctx=query_ctx,
+                exploratory_threshold=exploratory_threshold,
+            )
+
         item = {
-                "query": query,
-                "latency_ms": round((perf_counter() - started) * 1000, 3),
-                "query_intent": _query_intent(query),
-                "abstained": len(results) == 0,
-                "results": results,
-                "considered": len(entries),
+            "query": query,
+            "latency_ms": round((perf_counter() - started) * 1000, 3),
+            "query_intent": _query_intent(query),
+            "abstained": len(results) == 0,
+            "results": results,
+            "considered": len(prepared.entries),
         }
         if query_variants[row] != [query]:
             item["query_variants"] = query_variants[row]
@@ -901,7 +1517,7 @@ def rank_many(
 
 def rank(
     query: str,
-    index: dict[str, Any],
+    index: dict[str, Any] | PreparedIndex,
     config: EmbeddingConfig,
     *,
     top_k: int = 10,
@@ -918,7 +1534,7 @@ def rank(
     """Rank index entries against the query."""
 
     started = perf_counter()
-    ensure_index_matches_model(index, config)
+    prepared = prepare_index(index, config)
     if ranking_strategy not in RANKING_STRATEGIES:
         raise ValueError(f"Unknown ranking strategy: {ranking_strategy}")
     if not 0.0 <= exploratory_threshold <= 1.0:
@@ -931,34 +1547,50 @@ def rank(
         raise ValueError("query variants must contain at least one value")
     if rerank_query is None:
         rerank_query = query
+
     query_vectors = [embed(config, variant) for variant in query_variants]
-    dimension = index.get("dimension")
+    dimension = prepared.dimension
     if dimension is not None and any(len(vector) != dimension for vector in query_vectors):
         raise IndexMismatchError(
             "Query vector dimension does not match index "
             f"dimension {dimension}. Rebuild the index or check the model."
         )
 
-    entries = [entry for entry in index.get("vectors", []) if isinstance(entry, dict)]
-    vectors = [decode_vector(entry.get("vector"), dimension=dimension) for entry in entries]
-    if any(vector is None for vector in vectors):
-        raise IndexMismatchError(
-            f"Index contains invalid vectors that do not match its dimension {dimension}. "
-            "Rebuild the index with xists index build."
-        )
-    scored_entries = [
-        (entry, max(cosine_similarity(query_vector, vector) for query_vector in query_vectors))
-        for entry, vector in zip(entries, vectors)
-        if vector is not None
-    ]
+    if not prepared.entries:
+        result = {
+            "query": query,
+            "latency_ms": round((perf_counter() - started) * 1000, 3),
+            "query_intent": _query_intent(query),
+            "abstained": True,
+            "results": [],
+            "considered": 0,
+        }
+        if query_variants != [query]:
+            result["query_variants"] = query_variants
+        return result
+
+    q_mat = np.asarray(query_vectors, dtype=np.float32)
+    q_norms = np.linalg.norm(q_mat, axis=1, keepdims=True)
+    q_norm = np.divide(q_mat, q_norms, out=np.zeros_like(q_mat), where=q_norms != 0)
+    sim_matrix = q_norm @ prepared.normalized_matrix.T
+    semantic_scores = sim_matrix.max(axis=0)
+
+    query_ctx = _build_query_context(query)
     if ranking_strategy == "semantic":
-        results = _rank_semantic_entries(scored_entries, top_k, exploratory_threshold=exploratory_threshold)
+        results = _rank_semantic_entries_prepared(
+            prepared,
+            semantic_scores,
+            top_k,
+            exploratory_threshold=exploratory_threshold,
+            query_ctx=query_ctx,
+        )
     elif ranking_strategy == "rerank":
         if rerank is None:
             raise ValueError("A reranker is required when ranking_strategy is rerank")
-        results = _rank_reranked_entries(
+        results = _rank_reranked_entries_prepared(
             query,
-            scored_entries,
+            prepared,
+            semantic_scores,
             top_k,
             rerank=rerank,
             rerank_query=rerank_query,
@@ -966,16 +1598,24 @@ def rank(
             exploratory_threshold=exploratory_threshold,
             rerank_abstain_threshold=rerank_abstain_threshold,
             confidence_calibration=confidence_calibration,
+            query_ctx=query_ctx,
         )
     else:
-        results = _rank_scored_entries(query, scored_entries, top_k, exploratory_threshold=exploratory_threshold)
+        results = _rank_scored_entries_prepared(
+            prepared,
+            semantic_scores,
+            top_k,
+            query_ctx=query_ctx,
+            exploratory_threshold=exploratory_threshold,
+        )
+
     result = {
         "query": query,
         "latency_ms": round((perf_counter() - started) * 1000, 3),
         "query_intent": _query_intent(query),
         "abstained": len(results) == 0,
         "results": results,
-        "considered": len(entries),
+        "considered": len(prepared.entries),
     }
     if query_variants != [query]:
         result["query_variants"] = query_variants

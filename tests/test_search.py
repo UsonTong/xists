@@ -18,9 +18,11 @@ from xists.search.index import INDEX_VERSION, build_index, decode_vector, encode
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.query import (
     IndexMismatchError,
+    PreparedIndex,
     _query_intent,
     confidence_bucket,
     cosine_similarity,
+    prepare_index,
     rank,
     rank_many,
 )
@@ -100,6 +102,87 @@ def test_embedding_config_reads_optional_input_type_field(monkeypatch):
     config = embedding_config_from_env()
 
     assert config.input_type_field == "input_type"
+
+
+def test_embedding_config_reads_multiple_keys_and_file(monkeypatch, tmp_path):
+    keys_file = tmp_path / "keys.txt"
+    keys_file.write_text("# comment\nkey-file-1\nkey-file-2\n\nkey-file-1\n", encoding="utf-8")
+    monkeypatch.setenv("EMBEDDING_KEYS_FILE", str(keys_file))
+    monkeypatch.setenv("EMBEDDING_API_KEYS", "key-env-1, key-env-2")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "key-single, key-file-2")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embeddings.example/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture-model")
+
+    config = embedding_config_from_env()
+    assert config.api_key == "key-file-1"
+    assert config.api_keys == ("key-file-1", "key-file-2", "key-env-1", "key-env-2", "key-single")
+
+    cloned = config.with_api_key("custom-key")
+    assert cloned.api_key == "custom-key"
+    assert cloned.base_url == config.base_url
+    assert cloned.model == config.model
+    assert cloned.api_keys == config.api_keys
+
+
+def test_request_json_retries_transient_http_errors(monkeypatch):
+    from urllib.error import HTTPError
+    from xists.search import embed as embed_module
+
+    attempts = 0
+
+    def fake_urlopen(request, timeout=30):
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise HTTPError(request.full_url, 429, "Too Many Requests", hdrs=None, fp=None)
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def read(self):
+                return b'{"data": [{"index": 0, "embedding": [1.0, 0.0]}]}'
+
+        return FakeResponse()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    res = embed_module._request_json("http://localhost/v1", b"{}", {}, timeout=5)
+    assert attempts == 3
+    assert res == {"data": [{"index": 0, "embedding": [1.0, 0.0]}]}
+
+
+def test_request_json_fails_immediately_on_non_retryable_error(monkeypatch):
+    from urllib.error import HTTPError
+    from xists.search import embed as embed_module
+
+    attempts = 0
+
+    def fake_urlopen(request, timeout=30):
+        nonlocal attempts
+        attempts += 1
+        raise HTTPError(request.full_url, 401, "Unauthorized", hdrs=None, fp=None)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("time.sleep", lambda s: None)
+
+    with pytest.raises(HTTPError) as exc_info:
+        embed_module._request_json("http://localhost/v1", b"{}", {}, timeout=5)
+    assert attempts == 1
+    assert exc_info.value.code == 401
+
+
+def test_embedding_text_truncates_long_description():
+    record = make_record()
+    record["llm_profile"] = None
+    record["github"]["description"] = "A" * 3000
+
+    text = embedding_text_from_record(record)
+    assert len(text) <= 2050
+    assert "A" * 2000 in text
+    assert "A" * 2001 not in text
 
 
 def test_embedding_text_excludes_not_for():
@@ -1214,3 +1297,186 @@ def test_cjk_terms_participate_in_metadata_overlap_and_explanations():
     assert top["repo_id"] == "chat/ui"
     assert top["matched_terms"]
     assert any("matched metadata terms" in reason for reason in top["why"])
+
+
+def test_prepared_index_creation_and_dict_protocol():
+    raw_index = make_index(
+        [
+            {"repo_id": "fastapi/fastapi", "vector": [1.0, 0.0], "metadata": {"name": "fastapi", "language": "Python"}},
+            {"repo_id": "expressjs/express", "vector": [0.0, 1.0], "metadata": {"name": "express", "language": "JavaScript"}},
+        ]
+    )
+
+    prepared = prepare_index(raw_index, CONFIG)
+    assert isinstance(prepared, PreparedIndex)
+    assert len(prepared) == 2
+    assert prepared.dimension == 2
+    assert prepared.record_count == 2
+    assert prepared.embedding_model == "bge-m3"
+    assert prepared.repo_ids == ("fastapi/fastapi", "expressjs/express")
+    assert prepared.repo_id_to_index == {"fastapi/fastapi": 0, "expressjs/express": 1}
+    assert prepared.normalized_matrix.shape == (2, 2)
+
+    # Dict compatibility
+    assert prepared["vectors"] == raw_index["vectors"]
+    assert prepared["dimension"] == 2
+    assert prepared["record_count"] == 2
+    assert prepared.get("dimension") == 2
+    assert prepared.get("nonexistent", "fallback") == "fallback"
+    assert "vectors" in prepared
+    assert "dimension" in prepared
+    assert len(list(iter(prepared))) > 0
+
+
+def test_prepare_index_idempotent():
+    raw_index = make_index([{"repo_id": "a/b", "vector": [1.0, 0.0], "metadata": {}}])
+    prep1 = prepare_index(raw_index, CONFIG)
+    prep2 = prepare_index(prep1, CONFIG)
+    assert prep1 is prep2
+
+
+def test_prepare_index_type_error():
+    with pytest.raises(IndexMismatchError, match="must be a dictionary or PreparedIndex"):
+        prepare_index("not-an-index")
+
+
+def test_ranking_parity_single_and_batch_all_strategies():
+    index = make_index(
+        [
+            {
+                "repo_id": "fastapi/fastapi",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "fastapi",
+                    "description": "FastAPI framework for Python.",
+                    "language": "Python",
+                    "topics": ["python", "api"],
+                    "search_phrases": ["python api framework"],
+                },
+            },
+            {
+                "repo_id": "flask/flask",
+                "vector": vector_for_cosine(0.85),
+                "metadata": {
+                    "name": "flask",
+                    "description": "The Python micro framework.",
+                    "language": "Python",
+                    "topics": ["python", "web"],
+                },
+            },
+            {
+                "repo_id": "expressjs/express",
+                "vector": [0.0, 1.0],
+                "metadata": {
+                    "name": "express",
+                    "description": "Fast web framework for Node.js.",
+                    "language": "JavaScript",
+                },
+            },
+        ]
+    )
+
+    query = "python api framework"
+    query_vector = [1.0, 0.0]
+
+    # Strategy 1: metadata
+    single_meta = rank(query, index, CONFIG, top_k=3, embed=lambda c, q: query_vector)
+    many_meta = rank_many([query], index, CONFIG, top_k=3, embed_many=lambda c, qs: [query_vector])[0]
+    assert [r["repo_id"] for r in single_meta["results"]] == [r["repo_id"] for r in many_meta["results"]]
+    for r1, r2 in zip(single_meta["results"], many_meta["results"]):
+        assert r1["score"] == pytest.approx(r2["score"], abs=1e-5)
+        assert r1["semantic_score"] == pytest.approx(r2["semantic_score"], abs=1e-5)
+        assert r1["metadata_score"] == pytest.approx(r2["metadata_score"], abs=1e-5)
+        assert r1["confidence"] == r2["confidence"]
+
+    # Strategy 2: semantic
+    single_sem = rank(query, index, CONFIG, top_k=3, embed=lambda c, q: query_vector, ranking_strategy="semantic")
+    many_sem = rank_many([query], index, CONFIG, top_k=3, embed_many=lambda c, qs: [query_vector], ranking_strategy="semantic")[0]
+    assert [r["repo_id"] for r in single_sem["results"]] == [r["repo_id"] for r in many_sem["results"]]
+    for r1, r2 in zip(single_sem["results"], many_sem["results"]):
+        assert r1["score"] == pytest.approx(r2["score"], abs=1e-5)
+
+    # Strategy 3: rerank
+    def mock_rerank(q, docs):
+        return [0.95, 0.50, 0.10][: len(docs)]
+
+    single_rerank = rank(
+        query,
+        index,
+        CONFIG,
+        top_k=3,
+        embed=lambda c, q: query_vector,
+        ranking_strategy="rerank",
+        rerank=mock_rerank,
+        rerank_candidate_limit=3,
+    )
+    many_rerank = rank_many(
+        [query],
+        index,
+        CONFIG,
+        top_k=3,
+        embed_many=lambda c, qs: [query_vector],
+        ranking_strategy="rerank",
+        rerank=mock_rerank,
+        rerank_candidate_limit=3,
+    )[0]
+    assert [r["repo_id"] for r in single_rerank["results"]] == [r["repo_id"] for r in many_rerank["results"]]
+    for r1, r2 in zip(single_rerank["results"], many_rerank["results"]):
+        assert r1["score"] == pytest.approx(r2["score"], abs=1e-5)
+
+
+def test_ranking_parity_prepared_vs_raw_dict():
+    raw_index = make_index(
+        [
+            {"repo_id": "repo/a", "vector": [1.0, 0.0], "metadata": {"name": "repo-a"}},
+            {"repo_id": "repo/b", "vector": [0.0, 1.0], "metadata": {"name": "repo-b"}},
+        ]
+    )
+    prepared = prepare_index(raw_index, CONFIG)
+
+    res_raw = rank("repo-a", raw_index, CONFIG, embed=lambda c, q: [1.0, 0.0])
+    res_prep = rank("repo-a", prepared, CONFIG, embed=lambda c, q: [1.0, 0.0])
+
+    assert [r["repo_id"] for r in res_raw["results"]] == [r["repo_id"] for r in res_prep["results"]]
+    assert res_raw["results"][0]["score"] == pytest.approx(res_prep["results"][0]["score"], abs=1e-5)
+
+
+def test_zero_vector_similarity_handling():
+    index = make_index(
+        [
+            {"repo_id": "nonzero/repo", "vector": [1.0, 0.0], "metadata": {}},
+            {"repo_id": "zero/repo", "vector": [0.0, 0.0], "metadata": {}},
+        ]
+    )
+    prepared = prepare_index(index, CONFIG)
+    assert not math.isnan(prepared.normalized_matrix[1, 0])
+    assert not math.isnan(prepared.normalized_matrix[1, 1])
+
+    result = rank("test", prepared, CONFIG, embed=lambda c, q: [0.0, 0.0])
+    assert result["abstained"] is True
+
+    result_nonzero = rank("test", prepared, CONFIG, embed=lambda c, q: [1.0, 0.0])
+    assert result_nonzero["results"][0]["repo_id"] == "nonzero/repo"
+
+
+def test_ranking_tie_breaking_by_repo_id():
+    index = make_index(
+        [
+            {"repo_id": "beta/repo", "vector": [1.0, 0.0], "metadata": {}},
+            {"repo_id": "alpha/repo", "vector": [1.0, 0.0], "metadata": {}},
+        ]
+    )
+    single = rank("test", index, CONFIG, top_k=2, embed=lambda c, q: [1.0, 0.0])
+    many = rank_many(["test"], index, CONFIG, top_k=2, embed_many=lambda c, qs: [[1.0, 0.0]])[0]
+
+    assert [r["repo_id"] for r in single["results"]] == ["beta/repo", "alpha/repo"]
+    assert [r["repo_id"] for r in many["results"]] == ["beta/repo", "alpha/repo"]
+
+
+def test_prepared_index_matches_model_validation():
+    raw_index = make_index([{"repo_id": "a/b", "vector": [1.0, 0.0], "metadata": {}}])
+    prepared = prepare_index(raw_index, CONFIG)
+
+    diff_config = EmbeddingConfig(api_key="k", base_url="http://localhost/v1", model="different-model")
+    with pytest.raises(IndexMismatchError, match=r"different-model"):
+        prepare_index(prepared, diff_config)

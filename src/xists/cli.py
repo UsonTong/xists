@@ -6,16 +6,20 @@ import argparse
 import inspect
 import json
 import os
+import re
 import shutil
 import sys
 import time
 import textwrap
+import zlib
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from math import ceil
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from xists import __version__
 from xists.api import load_index, search as public_search
@@ -57,7 +61,15 @@ from xists.search.embed import (
     embedding_text_from_record,
     probe_embedding_endpoint,
 )
-from xists.search.index import INDEX_VERSION, decode_vector, encode_vector, entry_metadata
+from xists.search.index import (
+    INDEX_VERSION,
+    LEGACY_INDEX_VERSION,
+    SUPPORTED_INDEX_VERSIONS,
+    decode_vector,
+    encode_vector,
+    entry_metadata,
+    save_index,
+)
 from xists.search.confidence import CONFIDENCE_CALIBRATION_MODES
 from xists.search.query import RANKING_STRATEGIES, IndexMismatchError, _query_intent
 from xists.search.rerank import (
@@ -718,6 +730,17 @@ def ingest_github(args: argparse.Namespace) -> int:
     return 1 if failed and generated == 0 and total_to_process > 0 else 0
 
 
+def _compute_checkpoint_checksum(vectors: list[dict[str, Any]]) -> str:
+    """Compute lightweight CRC32 checksum for vector entries in checkpoint."""
+    signatures = [
+        f"{entry.get('repo_id')}:{entry.get('embedding_input_fingerprint')}:{len(str(entry.get('vector', '')))}"
+        for entry in vectors
+        if isinstance(entry, dict)
+    ]
+    data = "\n".join(signatures).encode("utf-8")
+    return f"{zlib.crc32(data) & 0xFFFFFFFF:08x}"
+
+
 def _index_write_checkpoint(
     output: Path,
     *,
@@ -734,6 +757,7 @@ def _index_write_checkpoint(
     # Index files can be large enough that a reader may otherwise observe a
     # partially truncated JSON document while a checkpoint is being rewritten.
     # Replacing a completed sibling file keeps every visible checkpoint valid.
+    checksum = _compute_checkpoint_checksum(vectors)
     write_json_atomic(
         output,
         {
@@ -746,9 +770,115 @@ def _index_write_checkpoint(
             "built_at": datetime.now(timezone.utc).isoformat(),
             "record_count": record_count,
             "skipped": skipped,
+            "checkpoint_checksum": checksum,
             "vectors": vectors,
         },
     )
+
+
+def _load_checkpoint_resilient(path: Path, dimension: int | None = None) -> dict[str, Any]:
+    """Load a checkpoint with self-healing recovery for truncated or corrupted files."""
+    raw_text = path.read_text(encoding="utf-8")
+    try:
+        data = json.loads(raw_text)
+        if isinstance(data, dict):
+            expected_checksum = data.get("checkpoint_checksum")
+            vectors = [e for e in data.get("vectors", []) if isinstance(e, dict)]
+            if expected_checksum:
+                actual_checksum = _compute_checkpoint_checksum(vectors)
+                if actual_checksum != expected_checksum:
+                    valid_vectors = [
+                        e for e in vectors
+                        if e.get("repo_id") and decode_vector(e.get("vector"), dimension=dimension) is not None
+                    ]
+                    print(
+                        f"Warning: Checkpoint checksum mismatch at {path}. Auto-healed: retained {len(valid_vectors)}/{len(vectors)} valid vectors.",
+                        file=sys.stderr,
+                    )
+                    data["vectors"] = valid_vectors
+                    data["record_count"] = len(valid_vectors)
+                    data["checkpoint_checksum"] = _compute_checkpoint_checksum(valid_vectors)
+                    write_json_atomic(path, data)
+            return data
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+        print(f"Warning: Checkpoint at {path} is truncated/corrupted ({error}). Attempting self-healing recovery...", file=sys.stderr)
+
+    repaired_vectors: list[dict[str, Any]] = []
+    # Resilient balanced-brace scanner for vector entries in JSON array
+    start_pos = 0
+    vectors_pos = raw_text.find('"vectors"')
+    if vectors_pos != -1:
+        bracket_pos = raw_text.find("[", vectors_pos)
+        if bracket_pos != -1:
+            start_pos = bracket_pos
+
+    in_string = False
+    escape = False
+    depth = 0
+    obj_start = -1
+
+    for i in range(start_pos, len(raw_text)):
+        char = raw_text[i]
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+
+        if char == "{":
+            if depth == 0:
+                obj_start = i
+            depth += 1
+        elif char == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and obj_start != -1:
+                    chunk = raw_text[obj_start : i + 1]
+                    try:
+                        entry = json.loads(chunk)
+                        if isinstance(entry, dict) and entry.get("repo_id"):
+                            repaired_vectors.append(entry)
+                    except Exception:
+                        pass
+                    obj_start = -1
+
+    def _extract_field(field_name: str, default: Any, is_int: bool = False) -> Any:
+        pattern = rf'"{field_name}"\s*:\s*(\d+)' if is_int else rf'"{field_name}"\s*:\s*"([^"]*)"'
+        found = re.search(pattern, raw_text)
+        if found:
+            return int(found.group(1)) if is_int else found.group(1)
+        return default
+
+    model = _extract_field("embedding_model", "")
+    dim = _extract_field("dimension", dimension, is_int=True)
+    base_url = _extract_field("embedding_base_url", "")
+    input_ver = _extract_field("embedding_input_version", EMBEDDING_INPUT_VERSION, is_int=True)
+    schema_ver = _extract_field("record_schema_version", RECORD_SCHEMA_VERSION, is_int=True)
+
+    repaired_doc = {
+        "index_version": INDEX_VERSION,
+        "record_schema_version": schema_ver,
+        "embedding_model": model,
+        "embedding_base_url": base_url,
+        "embedding_input_version": input_ver,
+        "dimension": dim,
+        "built_at": datetime.now(timezone.utc).isoformat(),
+        "record_count": len(repaired_vectors),
+        "skipped": [],
+        "checkpoint_checksum": _compute_checkpoint_checksum(repaired_vectors),
+        "vectors": repaired_vectors,
+    }
+
+    write_json_atomic(path, repaired_doc)
+    print(f"Self-healing complete: Recovered {len(repaired_vectors)} vectors from {path}.", file=sys.stderr)
+    return repaired_doc
 
 
 def _index_checkpoint_path(output: Path) -> Path:
@@ -810,7 +940,13 @@ def index_build(args: argparse.Namespace) -> int:
     elif not args.force and args.output.exists():
         source_index_path = args.output
     if source_index_path is not None:
-        existing_index = json.loads(source_index_path.read_text(encoding="utf-8"))
+        if args.resume:
+            existing_index = _load_checkpoint_resilient(source_index_path, dimension=dimension)
+        else:
+            try:
+                existing_index = _read_index_file(source_index_path)
+            except ValueError:
+                existing_index = {}
         if existing_index.get("embedding_model") and existing_index["embedding_model"] != config.model:
             print(
                 f"Index was built with model '{existing_index['embedding_model']}' "
@@ -825,11 +961,16 @@ def index_build(args: argparse.Namespace) -> int:
         )
         if reusable:
             dimension = existing_index.get("dimension")
-            reusable_vectors = {
-                entry.get("repo_id"): entry
-                for entry in existing_index.get("vectors", [])
-                if entry.get("repo_id")
-            }
+            raw_matrix = existing_index.get("_matrix")
+            reusable_vectors = {}
+            for i, entry in enumerate(existing_index.get("vectors", [])):
+                repo_id = entry.get("repo_id")
+                if not repo_id:
+                    continue
+                if raw_matrix is not None and i < len(raw_matrix):
+                    reusable_vectors[repo_id] = {**entry, "vector": raw_matrix[i]}
+                else:
+                    reusable_vectors[repo_id] = entry
 
     # Prepare embeddable records and reuse unchanged vectors.
     embeddable: list[dict[str, Any]] = []
@@ -1026,20 +1167,27 @@ def index_build(args: argparse.Namespace) -> int:
                     flush=True,
                 )
 
-    _index_write_checkpoint(
+    save_index(
         args.output,
-        index_version=INDEX_VERSION,
-        record_schema_version=RECORD_SCHEMA_VERSION,
-        embedding_model=config.model,
-        embedding_base_url=config.base_url,
-        embedding_input_version=EMBEDDING_INPUT_VERSION,
-        dimension=dimension,
-        record_count=len(vectors),
-        skipped=skipped,
-        vectors=vectors,
+        {
+            "index_version": INDEX_VERSION,
+            "record_schema_version": RECORD_SCHEMA_VERSION,
+            "embedding_model": config.model,
+            "embedding_base_url": config.base_url,
+            "embedding_input_version": EMBEDDING_INPUT_VERSION,
+            "dimension": dimension,
+            "built_at": datetime.now(timezone.utc).isoformat(),
+            "record_count": len(vectors),
+            "skipped": skipped,
+            "vectors": vectors,
+        },
+        version=INDEX_VERSION,
     )
     if checkpoint_path.exists():
         checkpoint_path.unlink()
+    checkpoint_npy = checkpoint_path.with_name(f"{checkpoint_path.stem}.vectors.npy")
+    if checkpoint_npy.exists():
+        checkpoint_npy.unlink()
 
     payload = {
         "index": str(args.output),
@@ -2132,7 +2280,7 @@ def _index_verify_report(records: list[dict[str, Any]], index: dict[str, Any]) -
     warnings: Counter[str] = Counter()
     if not record_validation["ok"]:
         errors["records_validation_failed"] = sum(record_validation["errors"].values())
-    if index.get("index_version") != INDEX_VERSION:
+    if index.get("index_version") not in SUPPORTED_INDEX_VERSIONS:
         errors["index_version_mismatch"] += 1
     if index.get("record_schema_version") != RECORD_SCHEMA_VERSION:
         errors["record_schema_version_mismatch"] += 1
@@ -2147,14 +2295,27 @@ def _index_verify_report(records: list[dict[str, Any]], index: dict[str, Any]) -
     missing_fingerprints = [entry.get("repo_id") for entry in vectors if not entry.get("embedding_input_fingerprint")]
     if missing_fingerprints:
         errors["missing_fingerprints"] = len(missing_fingerprints)
-    dimension_mismatches = [
-        entry.get("repo_id")
-        for entry in vectors
-        if isinstance(dimension, int)
-        and (decoded := decode_vector(entry.get("vector"))) is not None
-        and decoded.size != dimension
-    ]
-    invalid_vectors = [entry.get("repo_id") for entry in vectors if decode_vector(entry.get("vector")) is None]
+
+    dimension_mismatches: list[str] = []
+    invalid_vectors: list[str] = []
+    if index.get("index_version") == 4 and index.get("_matrix") is not None:
+        mat = index["_matrix"]
+        if not isinstance(mat, np.ndarray) or mat.ndim != 2:
+            invalid_vectors = [entry.get("repo_id") for entry in vectors if entry.get("repo_id")]
+        elif isinstance(dimension, int) and mat.shape[1] != dimension:
+            dimension_mismatches = [entry.get("repo_id") for entry in vectors if entry.get("repo_id")]
+        elif mat.shape[0] != len(vectors):
+            invalid_vectors = [f"matrix_rows_{mat.shape[0]}_vs_vectors_{len(vectors)}"]
+    else:
+        dimension_mismatches = [
+            entry.get("repo_id")
+            for entry in vectors
+            if isinstance(dimension, int)
+            and (decoded := decode_vector(entry.get("vector"))) is not None
+            and decoded.size != dimension
+        ]
+        invalid_vectors = [entry.get("repo_id") for entry in vectors if decode_vector(entry.get("vector")) is None]
+
     if dimension_mismatches:
         errors["dimension_mismatch"] = len(dimension_mismatches)
     if invalid_vectors:
@@ -2266,6 +2427,108 @@ def index_verify(args: argparse.Namespace) -> int:
     else:
         print(_format_index_verify_text(report, args.records, args.index))
     return 0 if report["ok"] else 1
+
+
+def index_migrate(args: argparse.Namespace) -> int:
+    if not args.input.exists():
+        print(f"Input index file not found: {args.input}", file=sys.stderr)
+        return 2
+
+    if not args.output and not args.output_dir:
+        print("Must specify either --output or --output-dir for migration destination.", file=sys.stderr)
+        return 2
+
+    try:
+        index = _read_index_file(args.input)
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+    source_version = index.get("index_version")
+    if source_version not in SUPPORTED_INDEX_VERSIONS:
+        print(
+            f"Unsupported index_version {source_version!r} in {args.input}. "
+            f"Expected one of {SUPPORTED_INDEX_VERSIONS}.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if args.output_dir:
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = args.output_dir / "index.json"
+    else:
+        output_path = args.output
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    dimension = index.get("dimension")
+    vectors = index.get("vectors") or []
+    if not isinstance(vectors, list):
+        print(f"Invalid index vectors in {args.input}", file=sys.stderr)
+        return 1
+
+    if index.get("_matrix") is not None:
+        matrix = np.asarray(index["_matrix"], dtype=np.float32)
+    else:
+        vectors_list: list[np.ndarray] = []
+        for entry in vectors:
+            vec = decode_vector(entry.get("vector"), dimension=dimension)
+            if vec is None:
+                print(f"Failed to decode vector for repo {entry.get('repo_id')}", file=sys.stderr)
+                return 1
+            vectors_list.append(vec)
+        matrix = np.asarray(vectors_list, dtype=np.float32) if vectors_list else np.empty((0, dimension or 0), dtype=np.float32)
+
+    save_index(output_path, index, matrix=matrix, version=4)
+
+    input_size = args.input.stat().st_size
+    output_json_size = output_path.stat().st_size
+    vectors_file = output_path.with_name(f"{output_path.stem}.vectors.npy")
+    output_npy_size = vectors_file.stat().st_size if vectors_file.exists() else 0
+    total_output_size = output_json_size + output_npy_size
+    reduction_pct = ((input_size - total_output_size) / input_size * 100) if input_size > 0 else 0.0
+
+    payload = {
+        "input": str(args.input),
+        "output": str(output_path),
+        "vectors_file": str(vectors_file),
+        "source_version": source_version,
+        "target_version": 4,
+        "record_count": len(vectors),
+        "dimension": dimension,
+        "source_size_bytes": input_size,
+        "target_size_bytes": total_output_size,
+        "target_json_bytes": output_json_size,
+        "target_vectors_bytes": output_npy_size,
+        "size_reduction_percent": round(reduction_pct, 2),
+    }
+
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        def _format_bytes(num: int) -> str:
+            for unit in ("B", "KB", "MB", "GB"):
+                if num < 1024.0:
+                    return f"{num:.1f} {unit}" if unit != "B" else f"{num} B"
+                num /= 1024.0
+            return f"{num:.1f} TB"
+
+        print(
+            _format_command_summary(
+                "Index migrated",
+                [
+                    ("Source", args.input),
+                    ("Output", output_path),
+                    ("Vectors file", vectors_file),
+                    ("Records", len(vectors)),
+                    ("Dimensions", dimension),
+                    ("Source size", _format_bytes(input_size)),
+                    ("Target size", f"{_format_bytes(total_output_size)} ({reduction_pct:.1f}% reduction)"),
+                    ("Format", "INDEX_VERSION 4 (dual-file binary)"),
+                ],
+                stream=sys.stdout,
+            )
+        )
+    return 0
 
 
 def eval_run(args: argparse.Namespace) -> int:
@@ -2592,6 +2855,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format: text (default) or json for scripts and agents",
     )
     index_verify_parser.set_defaults(func=index_verify)
+    index_migrate_parser = index_subparsers.add_parser(
+        "migrate", help="Migrate an index from v3 Base64 to v4 dual-file binary format"
+    )
+    index_migrate_parser.add_argument(
+        "--input", type=Path, required=True, help="Path to the input index file (e.g. index-v3.json)"
+    )
+    index_migrate_parser.add_argument(
+        "--output", type=Path, default=None, help="Path to the output index file (e.g. index.json)"
+    )
+    index_migrate_parser.add_argument(
+        "--output-dir", type=Path, default=None, help="Directory to save the migrated index"
+    )
+    index_migrate_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
+    index_migrate_parser.set_defaults(func=index_migrate)
 
     records = subparsers.add_parser("records", help="Inspect generated repository records")
     records_subparsers = records.add_subparsers(dest="records_command", required=True)

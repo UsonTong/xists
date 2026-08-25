@@ -3,6 +3,7 @@ import threading
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
 import pytest
 
 from xists import __version__
@@ -16,6 +17,7 @@ from xists.cli import (
     eval_inspect,
     eval_run,
     index_build,
+    index_migrate,
     index_stats,
     index_verify,
     ingest_github,
@@ -38,7 +40,7 @@ from xists.search.embed import (
     EmbeddingError,
     embedding_input_fingerprint,
 )
-from xists.search.index import INDEX_VERSION, decode_vector
+from xists.search.index import INDEX_VERSION, decode_vector, encode_vector, load_index, save_index
 from xists.workspace import resolve_workspace
 
 
@@ -2749,11 +2751,11 @@ def test_index_build_rebuilds_legacy_vectors_without_fingerprints(tmp_path, monk
         code = index_build(args)
 
     assert code == 0
-    index = json.loads(output_file.read_text())
+    index = load_index(output_file)
     assert index["record_count"] == 2
     assert len(index["vectors"]) == 2
     assert index["vectors"][0]["repo_id"] == "a/b"
-    assert decode_vector(index["vectors"][0]["vector"]).tolist() == [0.0, 1.0, 0.0, 0.0]
+    assert index["_matrix"][0].tolist() == [0.0, 1.0, 0.0, 0.0]
     assert index["vectors"][1]["repo_id"] == "c/d"
     assert index["vectors"][1]["embedding_input_fingerprint"]
 
@@ -2823,9 +2825,9 @@ def test_index_build_refreshes_metadata_when_reusing_vector(tmp_path, monkeypatc
         code = index_build(args)
 
     assert code == 0
-    index = json.loads(output_file.read_text())
+    index = load_index(output_file)
     assert index["record_count"] == 1
-    assert index["vectors"][0]["vector"] == [1.0, 0.0]
+    assert index["_matrix"][0].tolist() == [1.0, 0.0]
     assert index["vectors"][0]["metadata"]["language"] == "JavaScript"
     assert index["vectors"][0]["metadata"]["topics"] == ["frontend", "vue"]
     assert index["vectors"][0]["metadata"]["search_phrases"] == [
@@ -3110,9 +3112,9 @@ def test_index_build_force_rebuilds_from_scratch(tmp_path, monkeypatch):
         code = index_build(args)
 
     assert code == 0
-    index = json.loads(output_file.read_text())
+    index = load_index(output_file)
     assert index["record_count"] == 1
-    assert decode_vector(index["vectors"][0]["vector"]).tolist() == [0.0, 0.0, 1.0, 0.0]
+    assert index["_matrix"][0].tolist() == [0.0, 0.0, 1.0, 0.0]
 
 
 def test_index_build_checkpoint_writes_after_each_batch(tmp_path, monkeypatch):
@@ -3207,7 +3209,8 @@ def test_index_build_checkpoints_large_builds_in_bounded_intervals(tmp_path, mon
     ):
         assert index_build(args) == 0
 
-    assert writes == [Path(f"{output_file}.partial.json"), output_file]
+    assert writes == [Path(f"{output_file}.partial.json")]
+    assert output_file.exists()
 
 
 def test_index_build_resume_completes_partial_checkpoint(tmp_path, monkeypatch):
@@ -3242,3 +3245,220 @@ def test_index_build_resume_completes_partial_checkpoint(tmp_path, monkeypatch):
     index = json.loads(output_file.read_text())
     assert index["record_count"] == 65
     assert not Path(f"{output_file}.partial.json").exists()
+
+
+def test_index_migrate_v3_to_v4_file_output(tmp_path):
+    v3_file = tmp_path / "v3_index.json"
+    doc = {
+        "index_version": 3,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "BAAI/bge-m3",
+        "embedding_base_url": "http://localhost:6597/v1",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "dimension": 2,
+        "built_at": "2026-01-01T00:00:00+00:00",
+        "record_count": 2,
+        "skipped": [],
+        "vectors": [
+            {
+                "repo_id": "fastapi/fastapi",
+                "embedding_input_fingerprint": "fp1",
+                "metadata": {"name": "fastapi"},
+                "vector": encode_vector([1.0, 0.0]),
+            },
+            {
+                "repo_id": "expressjs/express",
+                "embedding_input_fingerprint": "fp2",
+                "metadata": {"name": "express"},
+                "vector": encode_vector([0.0, 1.0]),
+            },
+        ],
+    }
+    v3_file.write_text(json.dumps(doc), encoding="utf-8")
+
+    out_file = tmp_path / "migrated" / "index.json"
+    args = build_parser().parse_args(
+        ["index", "migrate", "--input", str(v3_file), "--output", str(out_file)]
+    )
+    assert index_migrate(args) == 0
+
+    assert out_file.exists()
+    vectors_file = out_file.with_name("index.vectors.npy")
+    assert vectors_file.exists()
+
+    loaded = load_index(out_file)
+    assert loaded["index_version"] == 4
+    assert "_matrix" in loaded
+    assert loaded["_matrix"].shape == (2, 2)
+    assert loaded["_matrix"][0].tolist() == [1.0, 0.0]
+    assert loaded["_matrix"][1].tolist() == [0.0, 1.0]
+
+
+def test_index_migrate_v3_to_v4_output_dir_json(tmp_path, capsys):
+    v3_file = tmp_path / "v3_index.json"
+    doc = {
+        "index_version": 3,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "BAAI/bge-m3",
+        "embedding_base_url": "http://localhost:6597/v1",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "dimension": 2,
+        "built_at": "2026-01-01T00:00:00+00:00",
+        "record_count": 1,
+        "skipped": [],
+        "vectors": [
+            {
+                "repo_id": "fastapi/fastapi",
+                "embedding_input_fingerprint": "fp1",
+                "metadata": {"name": "fastapi"},
+                "vector": encode_vector([1.0, 0.0]),
+            },
+        ],
+    }
+    v3_file.write_text(json.dumps(doc), encoding="utf-8")
+
+    out_dir = tmp_path / "migrated_dir"
+    args = build_parser().parse_args(
+        ["index", "migrate", "--input", str(v3_file), "--output-dir", str(out_dir), "--format", "json"]
+    )
+    assert index_migrate(args) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["target_version"] == 4
+    assert output["record_count"] == 1
+    assert Path(output["output"]).exists()
+    assert Path(output["vectors_file"]).exists()
+
+
+def test_index_migrate_errors_and_unsupported_version(tmp_path):
+    missing_file = tmp_path / "missing.json"
+    args = build_parser().parse_args(
+        ["index", "migrate", "--input", str(missing_file), "--output", str(tmp_path / "out.json")]
+    )
+    assert index_migrate(args) == 2
+
+    # Unsupported version
+    unsupported_file = tmp_path / "v1_index.json"
+    unsupported_file.write_text(json.dumps({"index_version": 1, "vectors": []}), encoding="utf-8")
+    args_unsupported = build_parser().parse_args(
+        ["index", "migrate", "--input", str(unsupported_file), "--output", str(tmp_path / "out.json")]
+    )
+    assert index_migrate(args_unsupported) == 1
+
+
+def test_index_build_resilient_checkpoint_recovery_on_truncated_json(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "local")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost:6597/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
+
+    records = [_make_record(f"r{i}/repo") for i in range(10)]
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps(records), encoding="utf-8")
+
+    output_file = tmp_path / "index.json"
+    checkpoint_file = Path(f"{output_file}.partial.json")
+
+    # Create a corrupted/truncated partial JSON file simulating sudden crash mid-write
+    truncated_json = (
+        '{\n'
+        '  "index_version": 4,\n'
+        '  "record_schema_version": ' + str(RECORD_SCHEMA_VERSION) + ',\n'
+        '  "embedding_model": "BAAI/bge-m3",\n'
+        '  "embedding_base_url": "http://localhost:6597/v1",\n'
+        '  "embedding_input_version": ' + str(EMBEDDING_INPUT_VERSION) + ',\n'
+        '  "dimension": 1,\n'
+        '  "record_count": 5,\n'
+        '  "skipped": [],\n'
+        '  "vectors": [\n'
+        '    {"repo_id": "r0/repo", "embedding_input_fingerprint": "' + embedding_input_fingerprint(records[0]) + '", "metadata": {}, "vector": "' + encode_vector([1.0]) + '"},\n'
+        '    {"repo_id": "r1/repo", "embedding_input_fingerprint": "' + embedding_input_fingerprint(records[1]) + '", "metadata": {}, "vector": "' + encode_vector([1.0]) + '"},\n'
+        '    {"repo_id": "r2/repo", "embedding_input_fingerprint": "' + embedding_input_fingerprint(records[2]) + '", "metadata": {}, "vector": "' + encode_vector([1.0]) + '"}\n'
+        '    {"repo_id": "r3/repo", "embedding_input_fingerprint": "' + embedding_input_fingerprint(records[3]) + '", "m'
+        # Intentionally truncated here!
+    )
+    checkpoint_file.write_text(truncated_json, encoding="utf-8")
+
+    called_inputs = []
+
+    def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
+        called_inputs.extend(inputs)
+        return [[1.0] for _ in inputs]
+
+    resumed_args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file), "--resume"]
+    )
+    with patch("xists.cli.call_embeddings", side_effect=fake_call_embeddings):
+        assert index_build(resumed_args) == 0
+
+    # The 3 rescued records (r0, r1, r2) should have been reused; only r3..r9 embedded
+    assert len(called_inputs) == 7
+    index = load_index(output_file)
+    assert index["record_count"] == 10
+    assert index["_matrix"].shape == (10, 1)
+    assert not checkpoint_file.exists()
+
+
+def test_index_verify_dual_file_and_legacy(tmp_path):
+    record = _make_record("a/b")
+    records_file = tmp_path / "records.json"
+    records_file.write_text(json.dumps([record]), encoding="utf-8")
+
+    # 1. Verify v4 dual file
+    v4_file = tmp_path / "index_v4.json"
+    save_index(
+        v4_file,
+        {
+            "index_version": 4,
+            "record_schema_version": RECORD_SCHEMA_VERSION,
+            "embedding_model": "BAAI/bge-m3",
+            "embedding_base_url": "http://localhost:6597/v1",
+            "embedding_input_version": EMBEDDING_INPUT_VERSION,
+            "dimension": 1,
+            "built_at": "2026-01-01T00:00:00+00:00",
+            "record_count": 1,
+            "skipped": [],
+            "vectors": [
+                {
+                    "repo_id": "a/b",
+                    "embedding_input_fingerprint": embedding_input_fingerprint(record),
+                    "metadata": {},
+                }
+            ],
+        },
+        matrix=np.array([[1.0]], dtype=np.float32),
+        version=4,
+    )
+    args_v4 = build_parser().parse_args(
+        ["index", "verify", "--records", str(records_file), "--index", str(v4_file)]
+    )
+    assert index_verify(args_v4) == 0
+
+    # 2. Verify v3 legacy file
+    v3_file = tmp_path / "index_v3.json"
+    save_index(
+        v3_file,
+        {
+            "index_version": 3,
+            "record_schema_version": RECORD_SCHEMA_VERSION,
+            "embedding_model": "BAAI/bge-m3",
+            "embedding_base_url": "http://localhost:6597/v1",
+            "embedding_input_version": EMBEDDING_INPUT_VERSION,
+            "dimension": 1,
+            "built_at": "2026-01-01T00:00:00+00:00",
+            "record_count": 1,
+            "skipped": [],
+            "vectors": [
+                {
+                    "repo_id": "a/b",
+                    "embedding_input_fingerprint": embedding_input_fingerprint(record),
+                    "metadata": {},
+                    "vector": encode_vector([1.0]),
+                }
+            ],
+        },
+        version=3,
+    )
+    args_v3 = build_parser().parse_args(
+        ["index", "verify", "--records", str(records_file), "--index", str(v3_file)]
+    )
+    assert index_verify(args_v3) == 0

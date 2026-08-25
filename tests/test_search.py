@@ -1,7 +1,9 @@
 import math
 import json
+from pathlib import Path
 from urllib.error import URLError
 
+import numpy as np
 import pytest
 
 from xists.search.embed import (
@@ -14,7 +16,16 @@ from xists.search.embed import (
     embedding_input_fingerprint,
     embedding_text_from_record,
 )
-from xists.search.index import INDEX_VERSION, build_index, decode_vector, encode_vector
+from xists.search.index import (
+    INDEX_VERSION,
+    LEGACY_INDEX_VERSION,
+    SUPPORTED_INDEX_VERSIONS,
+    build_index,
+    decode_vector,
+    encode_vector,
+    load_index,
+    save_index,
+)
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.query import (
     IndexMismatchError,
@@ -1164,13 +1175,22 @@ def test_rank_rejects_record_schema_version_mismatch():
         rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
 
 
-@pytest.mark.parametrize("version", [None, INDEX_VERSION - 1, INDEX_VERSION + 1])
+@pytest.mark.parametrize("version", [None, 1, 2, 5])
 def test_rank_rejects_missing_or_incompatible_index_version(version):
     index = make_index([])
     index["index_version"] = version
 
     with pytest.raises(IndexMismatchError, match=r"index_version.*Rebuild"):
         rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+
+
+@pytest.mark.parametrize("version", [3, 4])
+def test_rank_accepts_supported_index_versions(version):
+    index = make_index([{"repo_id": "a/b", "vector": [1.0, 0.0], "metadata": {}}])
+    index["index_version"] = version
+    res = rank("frontend ui", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+    assert not res["abstained"]
+    assert res["results"][0]["repo_id"] == "a/b"
 
 
 def test_rank_rejects_non_list_vectors():
@@ -1480,3 +1500,64 @@ def test_prepared_index_matches_model_validation():
     diff_config = EmbeddingConfig(api_key="k", base_url="http://localhost/v1", model="different-model")
     with pytest.raises(IndexMismatchError, match=r"different-model"):
         prepare_index(prepared, diff_config)
+
+
+def test_save_and_load_index_v4_dual_file(tmp_path):
+    index_file = tmp_path / "index.json"
+    doc = make_index(
+        [
+            {"repo_id": "fastapi/fastapi", "vector": [1.0, 0.0], "metadata": {"name": "fastapi"}},
+            {"repo_id": "expressjs/express", "vector": [0.0, 1.0], "metadata": {"name": "express"}},
+        ]
+    )
+
+    save_index(index_file, doc, version=4)
+
+    assert index_file.exists()
+    vectors_file = tmp_path / "index.vectors.npy"
+    assert vectors_file.exists()
+
+    raw_json = json.loads(index_file.read_text(encoding="utf-8"))
+    assert raw_json["index_version"] == 4
+    assert raw_json["vectors_file"] == "index.vectors.npy"
+    assert "vector" not in raw_json["vectors"][0]
+
+    loaded = load_index(index_file, mmap=True)
+    assert "_matrix" in loaded
+    assert loaded["_matrix"].shape == (2, 2)
+    assert np.allclose(loaded["_matrix"], [[1.0, 0.0], [0.0, 1.0]])
+
+    prepared = prepare_index(loaded, CONFIG)
+    assert isinstance(prepared, PreparedIndex)
+    assert prepared.record_count == 2
+
+    res = rank("fastapi", prepared, CONFIG, embed=lambda c, q: [1.0, 0.0])
+    assert res["results"][0]["repo_id"] == "fastapi/fastapi"
+
+
+def test_save_and_load_index_v3_legacy_file(tmp_path):
+    index_file = tmp_path / "legacy_index.json"
+    doc = make_index(
+        [
+            {"repo_id": "fastapi/fastapi", "vector": [1.0, 0.0], "metadata": {"name": "fastapi"}},
+            {"repo_id": "expressjs/express", "vector": [0.0, 1.0], "metadata": {"name": "express"}},
+        ]
+    )
+
+    save_index(index_file, doc, version=3)
+
+    assert index_file.exists()
+    assert not (tmp_path / "legacy_index.vectors.npy").exists()
+
+    raw_json = json.loads(index_file.read_text(encoding="utf-8"))
+    assert raw_json["index_version"] == 3
+    assert "vectors_file" not in raw_json
+    assert "vector" in raw_json["vectors"][0]
+
+    loaded = load_index(index_file)
+    prepared = prepare_index(loaded, CONFIG)
+    assert isinstance(prepared, PreparedIndex)
+    assert prepared.record_count == 2
+
+    res = rank("fastapi", prepared, CONFIG, embed=lambda c, q: [1.0, 0.0])
+    assert res["results"][0]["repo_id"] == "fastapi/fastapi"

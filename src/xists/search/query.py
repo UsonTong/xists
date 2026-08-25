@@ -14,7 +14,7 @@ import numpy as np
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.confidence import CONFIDENCE_CALIBRATION_MODES, calibrate_confidence
 from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingConfig, EmbeddingError, call_embeddings, embed_query
-from xists.search.index import INDEX_VERSION, decode_vector
+from xists.search.index import INDEX_VERSION, SUPPORTED_INDEX_VERSIONS, decode_vector
 from xists.search.rerank import rerank_text_from_entry
 
 HIGH_CONFIDENCE_THRESHOLD = 0.60
@@ -1102,7 +1102,7 @@ def _rank_reranked_entries_prepared(
 
 def _validate_index_structure(index: dict[str, Any]) -> None:
     index_version = index.get("index_version")
-    if index_version != INDEX_VERSION:
+    if index_version not in SUPPORTED_INDEX_VERSIONS:
         raise IndexMismatchError(
             f"Index index_version is {index_version!r}, but xists expects {INDEX_VERSION}. "
             "Rebuild the index with xists index build."
@@ -1160,21 +1160,39 @@ def _validate_index_structure(index: dict[str, Any]) -> None:
             raise IndexMismatchError(
                 f"Index vector entry {position} has an invalid repo_id. Rebuild the index with xists index build."
             )
-        if decode_vector(entry.get("vector"), dimension=dimension) is None:
-            raise IndexMismatchError(
-                f"Index contains invalid vectors that do not match its dimension {dimension}. "
-                "Rebuild the index with xists index build."
-            )
     if record_count != len(vectors):
         raise IndexMismatchError(
             "Index record_count does not match vectors. "
             "Rebuild the index with xists index build."
         )
 
+    if index_version == 4:
+        matrix = index.get("_matrix")
+        if matrix is not None:
+            if not isinstance(matrix, np.ndarray) or matrix.ndim != 2 or matrix.shape != (len(vectors), dimension):
+                raise IndexMismatchError(
+                    f"Index binary vector matrix has invalid shape {getattr(matrix, 'shape', None)}, expected ({len(vectors)}, {dimension}). "
+                    "Rebuild the index with xists index build."
+                )
+        elif not index.get("vectors_file"):
+            for position, entry in enumerate(vectors):
+                if decode_vector(entry.get("vector"), dimension=dimension) is None:
+                    raise IndexMismatchError(
+                        f"Index contains invalid vectors that do not match its dimension {dimension}. "
+                        "Rebuild the index with xists index build."
+                    )
+    else:
+        for position, entry in enumerate(vectors):
+            if decode_vector(entry.get("vector"), dimension=dimension) is None:
+                raise IndexMismatchError(
+                    f"Index contains invalid vectors that do not match its dimension {dimension}. "
+                    "Rebuild the index with xists index build."
+                )
+
 
 def ensure_index_matches_model(index: dict[str, Any] | PreparedIndex, config: EmbeddingConfig) -> None:
     if isinstance(index, PreparedIndex):
-        if index.index_version != INDEX_VERSION:
+        if index.index_version not in SUPPORTED_INDEX_VERSIONS:
             raise IndexMismatchError(
                 f"Index index_version is {index.index_version!r}, but xists expects {INDEX_VERSION}. "
                 "Rebuild the index with xists index build."
@@ -1217,6 +1235,13 @@ def ensure_index_matches_model(index: dict[str, Any] | PreparedIndex, config: Em
             f"model is '{config.model}'. Rebuild the index (xists index build) "
             "so compatibility can be verified."
         )
+    if index_model != config.model:
+        raise IndexMismatchError(
+            f"Index was built with embedding model '{index_model}' but the "
+            f"configured model is '{config.model}'. Rebuild the index "
+            "(xists index build) or set EMBEDDING_MODEL to match."
+        )
+    _validate_index_structure(index)
     if index_model != config.model:
         raise IndexMismatchError(
             f"Index was built with embedding model '{index_model}' but the "
@@ -1276,24 +1301,40 @@ class PreparedIndex:
         dimension = index.get("dimension")
         entries = [entry for entry in index.get("vectors", []) if isinstance(entry, dict)]
 
-        vectors: list[np.ndarray] = []
-        for position, entry in enumerate(entries):
-            vec = decode_vector(entry.get("vector"), dimension=dimension)
-            if vec is None:
+        if index.get("_matrix") is not None:
+            matrix = np.asarray(index["_matrix"], dtype=np.float32)
+            if matrix.shape != (len(entries), dimension or 0):
                 raise IndexMismatchError(
-                    f"Index contains invalid vectors that do not match its dimension {dimension}. "
-                    "Rebuild the index with xists index build."
+                    f"Index vector matrix shape {matrix.shape} does not match entries count {len(entries)} and dimension {dimension}"
                 )
-            vectors.append(vec)
+        elif index.get("index_version") == 4 and index.get("_vectors_path"):
+            matrix = np.load(index["_vectors_path"], mmap_mode="r")
+            if matrix.shape != (len(entries), dimension or 0):
+                raise IndexMismatchError(
+                    f"Index vector matrix shape {matrix.shape} does not match entries count {len(entries)} and dimension {dimension}"
+                )
+        else:
+            vectors: list[np.ndarray] = []
+            for position, entry in enumerate(entries):
+                vec = decode_vector(entry.get("vector"), dimension=dimension)
+                if vec is None:
+                    raise IndexMismatchError(
+                        f"Index contains invalid vectors that do not match its dimension {dimension}. "
+                        "Rebuild the index with xists index build."
+                    )
+                vectors.append(vec)
 
-        if vectors:
-            matrix = np.asarray(vectors, dtype=np.float32)
+            if vectors:
+                matrix = np.asarray(vectors, dtype=np.float32)
+            else:
+                matrix = np.empty((0, dimension or 0), dtype=np.float32)
+
+        if len(matrix) > 0:
             if matrix.ndim != 2:
                 raise IndexMismatchError("Index vectors must be a two-dimensional matrix")
             norms = np.linalg.norm(matrix, axis=1, keepdims=True)
             normalized_matrix = np.divide(matrix, norms, out=np.zeros_like(matrix), where=norms != 0)
         else:
-            matrix = np.empty((0, dimension or 0), dtype=np.float32)
             normalized_matrix = np.empty((0, dimension or 0), dtype=np.float32)
 
         repo_ids = tuple(str(entry.get("repo_id") or "") for entry in entries)

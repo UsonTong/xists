@@ -442,15 +442,35 @@ Loading a v4 index uses `numpy.load(..., mmap_mode='r')` for zero-copy memory ma
 
 For backward compatibility, xists seamlessly reads `INDEX_VERSION = 3` legacy single-file indexes without requiring immediate rebuilds.
 
-#### Offline format migration
+#### Public index distribution & pull
 
-Use `xists index migrate` to convert existing v3 Base64 indexes to v4 dual-file binary format offline without calling embedding APIs:
+Use `xists index pull` to quickly download or install pre-built indexes and datasets without needing API keys or running manual builds:
 
 ```bash
-xists index migrate --input legacy-index.json --output index.json
-# or specify an output directory
-xists index migrate --input legacy-index.json --output-dir ~/.xists/
+# Pull bundled zero-config starter dataset into current workspace
+xists index pull demo
+
+# Pull curated community index
+xists index pull curated-1k
+
+# Pull from custom URL with SHA-256 integrity verification
+xists index pull https://example.com/custom-index.tar.gz --sha256 <expected_hash> --output-dir ./data --force
 ```
+
+Available presets include `demo` (20 top open-source repositories with pre-built binary vectors) and `curated-1k`.
+
+#### Offline & zero-config search mode
+
+You can immediately test search without any embedding API credentials or external network access using the `--demo` or `--offline` flags:
+
+```bash
+# Search bundled starter demo dataset (fallback to offline metadata ranking if no API key is set)
+xists search --demo "python web framework"
+
+# Force offline lexical/metadata search across records
+xists search --offline "vector database"
+```
+
 
 #### Resilient atomic checkpoints & self-healing
 

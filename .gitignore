@@ -3,6 +3,8 @@
 records.json
 report.json
 index.json
+!src/xists/starter/records.json
+!src/xists/starter/index.json
 !examples/retrieval-regression/records.json
 !examples/retrieval-regression/index.json
 

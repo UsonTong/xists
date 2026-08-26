@@ -86,8 +86,20 @@ from xists.search.transform import (
     query_variants,
     transform_queries,
 )
+from xists.search.pull import INDEX_PRESETS, pull_index
+from xists.starter import (
+    get_starter_index_path,
+    get_starter_records_path,
+    load_starter_records,
+    starter_metadata_search,
+)
 from xists.terminal import style
-from xists.workspace import initialize_workspace, resolve_workspace, workspace_root
+from xists.workspace import (
+    initialize_workspace,
+    populate_demo_workspace,
+    resolve_workspace,
+    workspace_root,
+)
 
 
 def load_env_file(
@@ -1219,18 +1231,45 @@ def index_build(args: argparse.Namespace) -> int:
 
 
 def search(args: argparse.Namespace) -> int:
+    demo_mode = getattr(args, "demo", False)
+    offline_mode = getattr(args, "offline", False)
+
+    if offline_mode:
+        records = None
+        records_arg = getattr(args, "records", None)
+        if not demo_mode and records_arg and Path(records_arg).is_file():
+            try:
+                records = json.loads(Path(records_arg).read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        result = starter_metadata_search(args.query, records=records, top_k=args.top_k)
+        if getattr(args, "format", "json") == "text":
+            print(_format_search_text(result, {}, stream=sys.stdout))
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
     try:
         config = embedding_config_from_env()
     except EmbeddingNotConfiguredError as error:
+        if demo_mode:
+            result = starter_metadata_search(args.query, top_k=args.top_k)
+            if getattr(args, "format", "json") == "text":
+                print(_format_search_text(result, {}, stream=sys.stdout))
+            else:
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 0
         print(str(error), file=sys.stderr)
         return 2
 
-    if not args.index.exists():
-        print(f"Index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
+    target_index = get_starter_index_path() if demo_mode else args.index
+
+    if not target_index.exists():
+        print(f"Index file not found: {target_index}. Run 'xists index build' first.", file=sys.stderr)
         return 2
 
     try:
-        index = _read_index_file(args.index)
+        index = _read_index_file(target_index)
     except ValueError as error:
         print(str(error), file=sys.stderr)
         return 1
@@ -1395,7 +1434,7 @@ def _format_search_text(result: dict[str, Any], index: dict[str, Any], *, stream
             style(line, "title", stream=stream)
             for line in _wrap_terminal_text(f"{position}. {repo_id}", width=width)
         )
-        summary = summaries.get(repo_id) or metadata.get("description") or "No project summary is available."
+        summary = item.get("summary") or summaries.get(repo_id) or metadata.get("description") or "No project summary is available."
         _append_search_detail(lines, "About", str(summary), width=width, stream=stream)
         _append_search_detail(lines, "Link", str(url), width=width, stream=stream, role="link")
         confidence = _search_confidence_text(item.get("confidence"))
@@ -1508,16 +1547,34 @@ def mcp(args: argparse.Namespace) -> int:
 
 def workspace_init(args: argparse.Namespace) -> int:
     root = workspace_root()
+    demo_mode = getattr(args, "demo", False)
     created_root, created_env_file = initialize_workspace(root)
-    status = "initialized" if created_root or created_env_file else "already exists"
+    demo_info = None
+    if demo_mode:
+        try:
+            demo_info = populate_demo_workspace(root, force=getattr(args, "force", False))
+        except FileExistsError as error:
+            print(f"Note: {error}", file=sys.stderr)
+
+    status = "initialized" if created_root or created_env_file or demo_info else "already exists"
+    if demo_mode:
+        status += " (demo mode)"
     print("Workspace")
     print(f"  Location  {root}")
     print(f"  Status    {status}")
     if created_env_file:
         print(f"  Config    {root / '.env'}")
+    if demo_info:
+        print(f"  Records   {demo_info.get('records_path')} (20 starter repos)")
+        print(f"  Index     {demo_info.get('index_path')} (v4 dual-file binary)")
     print("\nNext steps")
-    print(f"  1. Edit {root / '.env'}")
-    print("  2. Run xists doctor")
+    if demo_mode:
+        print('  1. Try search: xists search "fast web framework"')
+        print('  2. Try offline demo: xists search --demo "vector database"')
+        print(f"  3. Configure API keys in {root / '.env'} when ready to index your own repos")
+    else:
+        print(f"  1. Edit {root / '.env'}")
+        print("  2. Run xists doctor")
     return 0
 
 
@@ -2531,6 +2588,52 @@ def index_migrate(args: argparse.Namespace) -> int:
     return 0
 
 
+def index_pull(args: argparse.Namespace) -> int:
+    try:
+        result = pull_index(
+            args.source,
+            args.output_dir,
+            sha256=args.sha256,
+            force=args.force,
+        )
+    except FileExistsError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    except (ValueError, FileNotFoundError) as error:
+        print(f"Failed to pull index: {error}", file=sys.stderr)
+        return 1
+    except Exception as error:
+        print(f"Failed to pull index: {error}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    rows = [
+        ("Source", result.get("source")),
+        ("Output directory", result.get("output_dir")),
+        ("Records", result.get("records_path")),
+        ("Index", result.get("index_path")),
+        ("Vectors", result.get("vectors_path") or "n/a"),
+        ("Records count", result.get("records_count")),
+        (
+            "Index version",
+            f"v{result.get('index_version')} (binary mmap)"
+            if result.get("index_version") == 4
+            else result.get("index_version"),
+        ),
+        ("Dimension", result.get("dimension") or "n/a"),
+        ("SHA-256", result.get("sha256")),
+    ]
+    print(_format_command_summary("Index pulled successfully", rows, stream=sys.stdout))
+    print("\nNext steps")
+    print('  1. Try search: xists search "fast web framework"')
+    print("  2. Inspect index: xists index stats")
+    return 0
+
+
+
 def eval_run(args: argparse.Namespace) -> int:
     try:
         config = embedding_config_from_env()
@@ -2745,6 +2848,8 @@ def build_parser() -> argparse.ArgumentParser:
     mcp_parser.set_defaults(func=mcp)
 
     init_parser = subparsers.add_parser("init", help="Create the default local workspace")
+    init_parser.add_argument("--demo", action="store_true", help="Populate workspace with bundled starter demo records and index")
+    init_parser.add_argument("--force", action="store_true", help="Overwrite existing files in workspace")
     init_parser.set_defaults(func=workspace_init)
 
     doctor_parser = subparsers.add_parser("doctor", help="Check local configuration and expected data files")
@@ -2874,6 +2979,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format: text (default) or json for scripts and agents",
     )
     index_migrate_parser.set_defaults(func=index_migrate)
+    index_pull_parser = index_subparsers.add_parser(
+        "pull", help="Pull a pre-built index and records from preset, URL, or bundled demo"
+    )
+    index_pull_parser.add_argument(
+        "source",
+        nargs="?",
+        default="demo",
+        help="Preset name (demo, starter, curated-1k) or URL to index (default: demo)",
+    )
+    index_pull_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=workspace.root,
+        help="Directory to save downloaded index and records (default: workspace root)",
+    )
+    index_pull_parser.add_argument(
+        "--sha256",
+        default=None,
+        help="Expected SHA-256 hex checksum to verify download integrity",
+    )
+    index_pull_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing index and records files in target directory",
+    )
+    index_pull_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
+    index_pull_parser.set_defaults(func=index_pull)
 
     records = subparsers.add_parser("records", help="Inspect generated repository records")
     records_subparsers = records.add_subparsers(dest="records_command", required=True)
@@ -2929,6 +3066,13 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser = subparsers.add_parser("search", help="Search the embedding index")
     search_parser.add_argument("query", help="Natural-language query")
     search_parser.add_argument("--index", type=Path, default=workspace.index, help="Embedding index to search")
+    search_parser.add_argument("--records", type=Path, default=workspace.records, help="Records JSON for offline metadata search")
+    search_parser.add_argument("--demo", action="store_true", help="Search the bundled starter demo dataset")
+    search_parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Perform offline lexical/metadata search without embedding APIs",
+    )
     search_parser.add_argument("--top-k", type=int, default=10, help="Maximum number of results to return")
     search_parser.add_argument(
         "--ranking-strategy",

@@ -63,22 +63,36 @@ with test dependencies:
 python -m pip install -e ".[dev]"
 ```
 
-Then initialize the default local workspace, add repositories you control to
-`~/.xists/repos.txt`, and configure its `.env` file:
+### Quickstart (Zero-Config Demo)
+
+Get started instantly without API keys or token configuration:
 
 ```bash
-xists init
-# Edit ~/.xists/.env and add owner/repo lines to ~/.xists/repos.txt.
+# 1. Initialize workspace with bundled starter demo repositories and binary index
+xists init --demo
 
+# 2. Try instant semantic/offline search
+xists search "open source firebase alternative"
+xists search --demo "fast python linter"
+
+# 3. Pull or update curated indexes anytime
+xists index pull demo
+```
+
+### Index Your Own Repositories
+
+```bash
+# 1. Initialize workspace
+xists init
+
+# 2. Configure ~/.xists/.env and add owner/repo lines to ~/.xists/repos.txt
+xists doctor
+
+# 3. Ingest, build index, and search
 xists ingest github
 xists index build
 xists search "open source firebase alternative"
 ```
-
-See [the demo walkthrough](docs/demo.md) for endpoint checks, concurrency,
-evaluation, and troubleshooting. No current-schema demo records/index download
-is published yet; the first Release asset will be created only after it passes
-`records validate` and `index verify`.
 
 ---
 

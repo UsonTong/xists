@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 
 LEGACY_FILENAMES = (
@@ -109,3 +109,12 @@ def initialize_workspace(root: Path) -> tuple[bool, bool]:
             env_file.chmod(0o600)
 
     return created_root, created_env_file
+
+
+def populate_demo_workspace(root: Path, *, force: bool = False) -> dict[str, Any]:
+    """Populate workspace with bundled starter demo index and records."""
+    from xists.search.pull import pull_index
+
+    root = root.expanduser().resolve()
+    return pull_index("demo", root, force=force)
+

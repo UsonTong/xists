@@ -62,18 +62,36 @@ python -m pip install xists
 python -m pip install -e ".[dev]"
 ```
 
-然后初始化默认本地工作目录，在 `~/.xists/repos.txt` 中填写你有权处理的仓库清单，并配置其中的 `.env`：
+### 零配置快速体验 (Zero-Config Demo)
+
+无需配置任何 API Key 或 GitHub Token，即可立刻体验：
 
 ```bash
-xists init
-# 编辑 ~/.xists/.env，并在 ~/.xists/repos.txt 中加入 owner/repo 条目。
+# 1. 初始化工作区并载入内置 Starter 演示数据集与二进制索引
+xists init --demo
 
+# 2. 体验即时语义/离线搜索
+xists search "open source firebase alternative"
+xists search --demo "fast python linter"
+
+# 3. 随时拉取或更新精选索引
+xists index pull demo
+```
+
+### 索引自己的仓库列表
+
+```bash
+# 1. 初始化工作区
+xists init
+
+# 2. 编辑 ~/.xists/.env 并添加仓库列表至 ~/.xists/repos.txt
+xists doctor
+
+# 3. 抓取、建库并搜索
 xists ingest github
 xists index build
 xists search "open source firebase alternative"
 ```
-
-完整的接口预检、并发、评测和排错说明请看[演示流程](docs/demo.md)。目前尚未发布符合当前 schema 的 demo records/index 下载包；首个 Release asset 必须先通过 `records validate` 与 `index verify` 才会提供。
 
 ---
 

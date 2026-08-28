@@ -1,4 +1,4 @@
-"""Build bundled starter demo dataset for xists v0.12.0."""
+"""Build bundled starter demo dataset (200 top repos) for xists."""
 
 from __future__ import annotations
 
@@ -8,616 +8,135 @@ from pathlib import Path
 import numpy as np
 
 from xists.records import RECORD_SCHEMA_VERSION, records_validation_report
-from xists.search.embed import EMBEDDING_INPUT_VERSION, embedding_input_fingerprint, embedding_text_from_record
-from xists.search.index import INDEX_VERSION, entry_metadata, save_index
-
-STARTER_REPOS = [
-    {
-        "repo_id": "fastapi/fastapi",
-        "name": "fastapi",
-        "url": "https://github.com/fastapi/fastapi",
-        "github": {
-            "description": "FastAPI framework, high performance, easy to learn, fast to code, ready for production",
-            "language": "Python",
-            "topics": ["fastapi", "python", "api", "rest", "asyncio", "web-framework", "pydantic"],
-            "stars": 80000,
-            "forks": 6500,
-        },
-        "llm_profile": {
-            "summary": "FastAPI is a modern, high-performance web framework for building APIs with Python based on standard Python type hints.",
-            "use_cases": ["building REST APIs", "machine learning model serving API", "microservices backend"],
-            "capabilities": ["automatic OpenAPI docs", "type validation with Pydantic", "asyncio concurrency", "dependency injection"],
-            "aliases": ["fastapi", "fast api"],
-            "project_type": "framework",
-            "ecosystem": ["python", "web", "api"],
-            "replaces": ["flask", "tornado"],
-            "related_projects": ["flask/flask", "django/django", "pydantic/pydantic"],
-            "search_text": "fastapi high performance python web framework for building REST APIs with pydantic and async support",
-            "search_phrases": ["python web framework", "python rest api framework", "fast api framework"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "flask/flask",
-        "name": "flask",
-        "url": "https://github.com/flask/flask",
-        "github": {
-            "description": "The Python micro framework for building web applications.",
-            "language": "Python",
-            "topics": ["flask", "python", "web-framework", "wsgi", "microframework"],
-            "stars": 67000,
-            "forks": 16000,
-        },
-        "llm_profile": {
-            "summary": "Flask is a lightweight WSGI web application framework in Python designed to make getting started quick and easy.",
-            "use_cases": ["lightweight web applications", "prototyping APIs", "server-rendered web pages with Jinja2"],
-            "capabilities": ["minimalist core", "extensible with extensions", "WSGI compliant", "Jinja2 templating"],
-            "aliases": ["flask"],
-            "project_type": "framework",
-            "ecosystem": ["python", "web"],
-            "replaces": [],
-            "related_projects": ["fastapi/fastapi", "django/django"],
-            "search_text": "flask python micro web framework for building simple web apps and APIs",
-            "search_phrases": ["python microframework", "python web framework", "flask api"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "django/django",
-        "name": "django",
-        "url": "https://github.com/django/django",
-        "github": {
-            "description": "The Web framework for perfectionists with deadlines.",
-            "language": "Python",
-            "topics": ["django", "python", "web-framework", "orm", "fullstack", "admin"],
-            "stars": 81000,
-            "forks": 32000,
-        },
-        "llm_profile": {
-            "summary": "Django is a high-level Python web framework that encourages rapid development and clean, pragmatic design with batteries included.",
-            "use_cases": ["full-stack web applications", "database-driven websites", "content management systems", "enterprise backends"],
-            "capabilities": ["built-in ORM", "automatic admin interface", "user authentication", "form handling", "security features"],
-            "aliases": ["django"],
-            "project_type": "framework",
-            "ecosystem": ["python", "web", "fullstack"],
-            "replaces": [],
-            "related_projects": ["flask/flask", "fastapi/fastapi"],
-            "search_text": "django python full stack web framework with ORM and built-in admin interface",
-            "search_phrases": ["python full stack framework", "python web framework with orm", "django admin"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "expressjs/express",
-        "name": "express",
-        "url": "https://github.com/expressjs/express",
-        "github": {
-            "description": "Fast, unopinionated, minimalist web framework for Node.js.",
-            "language": "JavaScript",
-            "topics": ["express", "nodejs", "javascript", "web-framework", "rest", "api"],
-            "stars": 65000,
-            "forks": 15000,
-        },
-        "llm_profile": {
-            "summary": "Express is a minimal and flexible Node.js web application framework that provides a robust set of features for web and mobile applications.",
-            "use_cases": ["Node.js REST APIs", "microservice backends", "web server routing"],
-            "capabilities": ["middleware pipeline", "HTTP utility methods", "robust routing", "lightweight footprint"],
-            "aliases": ["express", "express.js", "expressjs"],
-            "project_type": "framework",
-            "ecosystem": ["javascript", "nodejs", "web"],
-            "replaces": [],
-            "related_projects": ["honojs/hono", "nestjs/nest", "koajs/koa"],
-            "search_text": "express.js minimal and fast nodejs web framework for building APIs and backend services",
-            "search_phrases": ["node.js web framework", "express js api framework", "javascript backend framework"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "honojs/hono",
-        "name": "hono",
-        "url": "https://github.com/honojs/hono",
-        "github": {
-            "description": "Ultrafast web framework for the Edges and any JavaScript runtime.",
-            "language": "TypeScript",
-            "topics": ["hono", "typescript", "edge-computing", "cloudflare-workers", "deno", "bun", "fast"],
-            "stars": 22000,
-            "forks": 1000,
-        },
-        "llm_profile": {
-            "summary": "Hono is a small, ultrafast web framework built on Web Standards that runs on Cloudflare Workers, Deno, Bun, and Node.js.",
-            "use_cases": ["edge computing APIs", "Cloudflare Workers serverless backend", "ultrafast TypeScript web APIs"],
-            "capabilities": ["multi-runtime support", "zero dependencies", "type-safe routing", "extremely fast trie router"],
-            "aliases": ["hono", "hono.js"],
-            "project_type": "framework",
-            "ecosystem": ["typescript", "edge", "web"],
-            "replaces": ["expressjs/express"],
-            "related_projects": ["expressjs/express", "elysiajs/elysia"],
-            "search_text": "hono ultrafast typescript web framework for cloudflare workers deno bun and nodejs",
-            "search_phrases": ["edge web framework", "cloudflare workers framework", "fast typescript web framework"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "facebook/react",
-        "name": "react",
-        "url": "https://github.com/facebook/react",
-        "github": {
-            "description": "The library for web and native user interfaces.",
-            "language": "JavaScript",
-            "topics": ["react", "javascript", "ui", "frontend", "declarative", "components", "jsx"],
-            "stars": 230000,
-            "forks": 47000,
-        },
-        "llm_profile": {
-            "summary": "React is a JavaScript library for building user interfaces using a declarative, component-based architecture.",
-            "use_cases": ["single page applications (SPA)", "interactive web UIs", "mobile apps with React Native"],
-            "capabilities": ["virtual DOM", "declarative components", "hooks for state management", "server components"],
-            "aliases": ["react", "react.js", "reactjs"],
-            "project_type": "library",
-            "ecosystem": ["javascript", "frontend", "ui"],
-            "replaces": [],
-            "related_projects": ["vuejs/core", "sveltejs/svelte", "vercel/next.js"],
-            "search_text": "react declarative component based javascript frontend UI library for web applications",
-            "search_phrases": ["frontend ui library", "javascript ui framework", "component based web ui"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "vuejs/core",
-        "name": "vue",
-        "url": "https://github.com/vuejs/core",
-        "github": {
-            "description": "Vue.js is a progressive, incrementally-adoptable JavaScript framework for building UI on the web.",
-            "language": "TypeScript",
-            "topics": ["vue", "javascript", "typescript", "frontend", "ui", "reactive", "sfc"],
-            "stars": 46000,
-            "forks": 8000,
-        },
-        "llm_profile": {
-            "summary": "Vue is a progressive JavaScript framework for building user interfaces with reactive data binding and single-file components.",
-            "use_cases": ["interactive web interfaces", "single page applications", "gradually enhanced static pages"],
-            "capabilities": ["composition API", "reactivity system", "single-file components (SFC)", "template syntax"],
-            "aliases": ["vue", "vue.js", "vuejs", "vue3"],
-            "project_type": "framework",
-            "ecosystem": ["javascript", "typescript", "frontend"],
-            "replaces": [],
-            "related_projects": ["facebook/react", "sveltejs/svelte"],
-            "search_text": "vue.js progressive reactive frontend javascript framework with single file components",
-            "search_phrases": ["progressive frontend framework", "reactive web ui framework", "vue js ui"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "sveltejs/svelte",
-        "name": "svelte",
-        "url": "https://github.com/sveltejs/svelte",
-        "github": {
-            "description": "Cybernetically enhanced web apps with compile-time reactivity.",
-            "language": "JavaScript",
-            "topics": ["svelte", "compiler", "reactive", "ui", "frontend", "performance"],
-            "stars": 80000,
-            "forks": 4200,
-        },
-        "llm_profile": {
-            "summary": "Svelte is a radical new approach to building user interfaces by shifting the work into a compile step rather than using a virtual DOM.",
-            "use_cases": ["high performance web UIs", "lightweight web applications", "embedded web widgets"],
-            "capabilities": ["compile-time reactivity", "no virtual DOM", "truly reactive runes", "minimal boilerplate"],
-            "aliases": ["svelte", "sveltejs", "svelte 5"],
-            "project_type": "framework",
-            "ecosystem": ["javascript", "frontend", "ui"],
-            "replaces": [],
-            "related_projects": ["facebook/react", "vuejs/core"],
-            "search_text": "svelte compile time reactive frontend framework without virtual DOM for fast web apps",
-            "search_phrases": ["compiler based frontend", "reactive web framework without virtual dom", "svelte ui"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "vllm-project/vllm",
-        "name": "vllm",
-        "url": "https://github.com/vllm-project/vllm",
-        "github": {
-            "description": "A high-throughput and memory-efficient LLM inference and serving engine",
-            "language": "Python",
-            "topics": ["vllm", "llm", "inference", "serving", "pagedattention", "cuda", "gpu", "ai"],
-            "stars": 35000,
-            "forks": 5200,
-        },
-        "llm_profile": {
-            "summary": "vLLM is a high-throughput, low-latency LLM serving engine featuring PagedAttention for efficient memory management.",
-            "use_cases": ["production LLM serving", "high concurrency model inference", "OpenAI-compatible LLM endpoint hosting"],
-            "capabilities": ["PagedAttention", "continuous batching", "tensor parallelism", "OpenAI API compatibility", "speculative decoding"],
-            "aliases": ["vllm", "v-llm"],
-            "project_type": "engine",
-            "ecosystem": ["python", "ai", "llm", "inference"],
-            "replaces": ["tgi", "triton"],
-            "related_projects": ["ollama/ollama", "ggerganov/llama.cpp", "huggingface/tgi"],
-            "search_text": "vllm high throughput LLM inference and serving engine with PagedAttention and OpenAI API compatible server",
-            "search_phrases": ["llm inference engine", "local llm serving", "high throughput llm server", "pagedattention serving"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "ollama/ollama",
-        "name": "ollama",
-        "url": "https://github.com/ollama/ollama",
-        "github": {
-            "description": "Get up and running with Llama 3, Mistral, Gemma, and other large language models locally.",
-            "language": "Go",
-            "topics": ["ollama", "llm", "local-ai", "llama", "mac", "linux", "windows", "cli"],
-            "stars": 115000,
-            "forks": 9800,
-        },
-        "llm_profile": {
-            "summary": "Ollama is a user-friendly tool to run open-source large language models locally on macOS, Linux, and Windows with a simple CLI and REST API.",
-            "use_cases": ["local LLM execution", "offline AI coding assistants", "desktop AI model management"],
-            "capabilities": ["one-command model downloads", "OpenAI-compatible REST API", "GPU acceleration", "Modelfile customization"],
-            "aliases": ["ollama"],
-            "project_type": "app",
-            "ecosystem": ["go", "ai", "llm", "desktop"],
-            "replaces": [],
-            "related_projects": ["vllm-project/vllm", "ggerganov/llama.cpp"],
-            "search_text": "ollama run large language models locally on mac linux and windows with CLI and REST API",
-            "search_phrases": ["run local llm", "local ai model server", "desktop llama runner", "offline llm"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "ggerganov/llama.cpp",
-        "name": "llama.cpp",
-        "url": "https://github.com/ggerganov/llama.cpp",
-        "github": {
-            "description": "LLM inference in C/C++ with minimal dependencies and cross-platform quantization.",
-            "language": "C++",
-            "topics": ["llama-cpp", "llm", "cpp", "inference", "quantization", "gguf", "cpu-inference"],
-            "stars": 74000,
-            "forks": 11000,
-        },
-        "llm_profile": {
-            "summary": "llama.cpp is a pure C/C++ inference engine for LLMs optimized for Apple Silicon, x86 CPU, and CUDA with GGUF quantization.",
-            "use_cases": ["CPU-only LLM inference", "edge device AI execution", "embedded language model runtime"],
-            "capabilities": ["GGUF format support", "2-bit to 8-bit quantization", "Apple Metal & CUDA acceleration", "zero heavy dependencies"],
-            "aliases": ["llama.cpp", "llamacpp", "llama cpp"],
-            "project_type": "engine",
-            "ecosystem": ["c++", "ai", "llm", "gguf"],
-            "replaces": [],
-            "related_projects": ["ollama/ollama", "vllm-project/vllm"],
-            "search_text": "llama.cpp pure C++ LLM inference engine with GGUF quantization for CPU and GPU",
-            "search_phrases": ["c++ llm inference", "cpu llm runtime", "gguf quantization runner"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "supabase/supabase",
-        "name": "supabase",
-        "url": "https://github.com/supabase/supabase",
-        "github": {
-            "description": "The open source Firebase alternative. Supabase gives you a dedicated Postgres database to build your web, mobile, and AI apps.",
-            "language": "TypeScript",
-            "topics": ["supabase", "firebase-alternative", "postgres", "auth", "realtime", "storage", "backend"],
-            "stars": 76000,
-            "forks": 6500,
-        },
-        "llm_profile": {
-            "summary": "Supabase is an open source Firebase alternative that provides a Postgres database, Authentication, Realtime subscriptions, and Storage.",
-            "use_cases": ["full-stack app backend", "relational database with auth", "Firebase replacement", "realtime multiplayer state"],
-            "capabilities": ["Postgres database", "Row Level Security (RLS)", "Instant REST & GraphQL APIs", "Realtime WebSockets", "Vector search with pgvector"],
-            "aliases": ["supabase"],
-            "project_type": "platform",
-            "ecosystem": ["typescript", "postgres", "backend", "baas"],
-            "replaces": ["firebase"],
-            "related_projects": ["pocketbase/pocketbase", "appwrite/appwrite"],
-            "search_text": "supabase open source firebase alternative with postgres database authentication realtime and storage",
-            "search_phrases": ["open source firebase alternative", "postgres backend as a service", "baas with auth and realtime"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "pocketbase/pocketbase",
-        "name": "pocketbase",
-        "url": "https://github.com/pocketbase/pocketbase",
-        "github": {
-            "description": "Open Source realtime backend in 1 file (embedded SQLite + Auth + File storage).",
-            "language": "Go",
-            "topics": ["pocketbase", "sqlite", "backend", "baas", "realtime", "auth", "self-hosted", "single-binary"],
-            "stars": 44000,
-            "forks": 2200,
-        },
-        "llm_profile": {
-            "summary": "PocketBase is an open source backend consisting of embedded SQLite database with realtime subscriptions, auth, and file storage in a single binary.",
-            "use_cases": ["simple mobile and web backends", "self-hosted application backend", "embedded database server for prototypes"],
-            "capabilities": ["single executable binary", "embedded SQLite", "built-in admin dashboard", "realtime subscriptions", "OAuth2 & email auth"],
-            "aliases": ["pocketbase", "pocket base"],
-            "project_type": "platform",
-            "ecosystem": ["go", "sqlite", "backend"],
-            "replaces": ["firebase"],
-            "related_projects": ["supabase/supabase", "appwrite/appwrite"],
-            "search_text": "pocketbase single file open source realtime backend with embedded sqlite and auth",
-            "search_phrases": ["single binary backend", "sqlite firebase alternative", "self hosted realtime backend"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "withastro/astro",
-        "name": "astro",
-        "url": "https://github.com/withastro/astro",
-        "github": {
-            "description": "The web framework for content-driven websites. Fast, content-focused static site generator and SSR framework.",
-            "language": "TypeScript",
-            "topics": ["astro", "static-site-generator", "ssg", "ssr", "island-architecture", "content-collections"],
-            "stars": 48000,
-            "forks": 2500,
-        },
-        "llm_profile": {
-            "summary": "Astro is a modern web framework and static site generator designed for building fast, content-focused websites with Islands architecture.",
-            "use_cases": ["blogs and documentation sites", "marketing and landing pages", "portfolio websites", "content-driven applications"],
-            "capabilities": ["zero JS by default", "Component Islands architecture", "content collections", "bring your own UI framework (React/Vue/Svelte)"],
-            "aliases": ["astro", "astro.build"],
-            "project_type": "framework",
-            "ecosystem": ["typescript", "static-site", "frontend"],
-            "replaces": ["gatsby", "jekyll"],
-            "related_projects": ["gohugoio/hugo", "vercel/next.js", "getzola/zola"],
-            "search_text": "astro content-driven web framework and static site generator with islands architecture and zero JS default",
-            "search_phrases": ["static site generator", "content web framework", "fast ssg for blogs and docs"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "gohugoio/hugo",
-        "name": "hugo",
-        "url": "https://github.com/gohugoio/hugo",
-        "github": {
-            "description": "The world’s fastest framework for building websites. Blazing fast static site generator written in Go.",
-            "language": "Go",
-            "topics": ["hugo", "static-site-generator", "ssg", "go", "fast", "markdown", "blog"],
-            "stars": 76000,
-            "forks": 7500,
-        },
-        "llm_profile": {
-            "summary": "Hugo is an extremely fast static site generator written in Go, capable of generating thousands of pages in milliseconds.",
-            "use_cases": ["static documentation sites", "personal blogs", "company websites from markdown"],
-            "capabilities": ["sub-second build times", "built-in templates and shortcodes", "multilingual support", "zero external dependencies"],
-            "aliases": ["hugo"],
-            "project_type": "tool",
-            "ecosystem": ["go", "static-site"],
-            "replaces": ["jekyll"],
-            "related_projects": ["withastro/astro", "getzola/zola"],
-            "search_text": "hugo extremely fast static site generator written in go for building markdown websites and blogs",
-            "search_phrases": ["fastest static site generator", "go static website generator", "markdown to html blog generator"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "astral-sh/uv",
-        "name": "uv",
-        "url": "https://github.com/astral-sh/uv",
-        "github": {
-            "description": "An extremely fast Python package and project manager, written in Rust.",
-            "language": "Rust",
-            "topics": ["uv", "python", "pip", "package-manager", "rust", "fast", "venv"],
-            "stars": 45000,
-            "forks": 1400,
-        },
-        "llm_profile": {
-            "summary": "uv is an extremely fast Python package manager and resolver written in Rust, designed as a drop-in replacement for pip, virtualenv, and poetry.",
-            "use_cases": ["Python dependency installation in CI/CD", "virtual environment management", "Python project lockfile management"],
-            "capabilities": ["10-100x faster than pip", "disk space deduplication", "cross-platform lockfile", "pip-compatible CLI"],
-            "aliases": ["uv", "astral-uv"],
-            "project_type": "tool",
-            "ecosystem": ["python", "rust", "cli", "packaging"],
-            "replaces": ["pip", "pip-tools", "poetry", "virtualenv"],
-            "related_projects": ["astral-sh/ruff"],
-            "search_text": "uv extremely fast python package manager and resolver written in rust replacing pip and poetry",
-            "search_phrases": ["fast python package manager", "pip alternative in rust", "python dependency resolver"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "astral-sh/ruff",
-        "name": "ruff",
-        "url": "https://github.com/astral-sh/ruff",
-        "github": {
-            "description": "An extremely fast Python linter and code formatter, written in Rust.",
-            "language": "Rust",
-            "topics": ["ruff", "python", "linter", "formatter", "rust", "flake8", "black"],
-            "stars": 36000,
-            "forks": 1300,
-        },
-        "llm_profile": {
-            "summary": "Ruff is an extremely fast Python linter and code formatter written in Rust, replacing Flake8, Black, isort, and pydocstyle.",
-            "use_cases": ["Python code linting and formatting", "CI quality gates", "IDE auto-formatting"],
-            "capabilities": ["10-100x faster than traditional tools", "Black-compatible formatting", "autofix support", "hundreds of lint rules"],
-            "aliases": ["ruff"],
-            "project_type": "tool",
-            "ecosystem": ["python", "rust", "linter"],
-            "replaces": ["flake8", "black", "isort", "pydocstyle"],
-            "related_projects": ["astral-sh/uv"],
-            "search_text": "ruff extremely fast python linter and code formatter written in rust replacing flake8 and black",
-            "search_phrases": ["fast python linter", "python code formatter", "black alternative in rust"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "n8n-io/n8n",
-        "name": "n8n",
-        "url": "https://github.com/n8n-io/n8n",
-        "github": {
-            "description": "Fair-code workflow automation platform with native AI capabilities. Connect everything to everything.",
-            "language": "TypeScript",
-            "topics": ["n8n", "workflow-automation", "zapier-alternative", "integration", "low-code", "ai-agents"],
-            "stars": 58000,
-            "forks": 8500,
-        },
-        "llm_profile": {
-            "summary": "n8n is a self-hostable workflow automation tool that lets you connect applications, APIs, and AI agents with a visual workflow builder.",
-            "use_cases": ["workflow automation", "Zapier alternative for self-hosting", "AI agent orchestration with tools and data pipelines"],
-            "capabilities": ["visual node editor", "400+ pre-built integrations", "LangChain & AI agent nodes", "self-hosted privacy"],
-            "aliases": ["n8n"],
-            "project_type": "platform",
-            "ecosystem": ["typescript", "workflow", "automation"],
-            "replaces": ["zapier", "make"],
-            "related_projects": ["langchain-ai/langchain", "dify-ai/dify"],
-            "search_text": "n8n open source self-hosted workflow automation platform and zapier alternative with AI agent support",
-            "search_phrases": ["workflow automation tool", "self hosted zapier alternative", "ai agent workflow builder"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "qdrant/qdrant",
-        "name": "qdrant",
-        "url": "https://github.com/qdrant/qdrant",
-        "github": {
-            "description": "Qdrant - High-performance, massive-scale Vector Database and Vector Search Engine with payload filtering.",
-            "language": "Rust",
-            "topics": ["qdrant", "vector-database", "vector-search", "embeddings", "rust", "similarity-search", "ann"],
-            "stars": 22000,
-            "forks": 1500,
-        },
-        "llm_profile": {
-            "summary": "Qdrant is a vector similarity search engine and database written in Rust with extended payload filtering and fast HNSW indexing.",
-            "use_cases": ["semantic search backends", "RAG applications for LLMs", "multimodal vector retrieval"],
-            "capabilities": ["HNSW vector indexing", "rich payload filtering", "distributed clustering", "gRPC and REST API"],
-            "aliases": ["qdrant"],
-            "project_type": "database",
-            "ecosystem": ["rust", "vector-search", "ai"],
-            "replaces": [],
-            "related_projects": ["milvus-io/milvus", "chroma-core/chroma"],
-            "search_text": "qdrant high performance vector database and vector search engine written in rust for RAG and semantic search",
-            "search_phrases": ["vector database", "vector search engine", "rust vector db for embeddings"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-    {
-        "repo_id": "microsoft/vscode",
-        "name": "vscode",
-        "url": "https://github.com/microsoft/vscode",
-        "github": {
-            "description": "Visual Studio Code is a code editor redefined and optimized for building and debugging modern web and cloud applications.",
-            "language": "TypeScript",
-            "topics": ["vscode", "editor", "typescript", "electron", "developer-tools"],
-            "stars": 165000,
-            "forks": 32000,
-        },
-        "llm_profile": {
-            "summary": "Visual Studio Code is an extensible, cross-platform code editor with built-in debugging, Git control, and a rich ecosystem of extensions.",
-            "use_cases": ["general software development", "full-stack web coding", "remote container development"],
-            "capabilities": ["rich extension marketplace", "integrated terminal & debugger", "LSP language support", "Remote development via SSH"],
-            "aliases": ["vscode", "vs code", "visual studio code"],
-            "project_type": "app",
-            "ecosystem": ["typescript", "editor", "desktop"],
-            "replaces": ["atom"],
-            "related_projects": ["neovim/neovim", "zed-industries/zed"],
-            "search_text": "visual studio code extensible code editor with debugger git integration and language extensions",
-            "search_phrases": ["code editor", "visual studio code", "programming text editor"],
-            "confidence": "high",
-            "abstained": False,
-            "prompt_version": 2,
-        },
-    },
-]
+from xists.search.embed import EMBEDDING_INPUT_VERSION, embedding_input_fingerprint
+from xists.search.index import INDEX_VERSION, decode_vector, entry_metadata, save_index
 
 
-def generate_starter_assets(output_dir: Path) -> None:
+def build_starter_200(output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     records_path = output_dir / "records.json"
     index_path = output_dir / "index.json"
 
-    # Add full schema details
-    records = []
-    for r in STARTER_REPOS:
-        record = {
-            "schema_version": RECORD_SCHEMA_VERSION,
-            "repo_id": r["repo_id"],
-            "name": r["name"],
-            "url": r["url"],
-            "readme": f"# {r['name']}\n\n{r['github']['description']}\n",
-            "github": {
-                **r["github"],
-                "archived": False,
-                "disabled": False,
-                "pushed_at": "2026-08-01T00:00:00Z",
-            },
-            "llm_profile": r["llm_profile"],
-        }
-        records.append(record)
+    # Load master records and index
+    with open("records.json", encoding="utf-8") as f:
+        all_records = json.load(f)
 
-    # Validate records against schema rules
-    val = records_validation_report(records, expected_schema_version=RECORD_SCHEMA_VERSION, expected_profile_prompt_version=2)
-    assert not val["errors"], f"Starter records validation failed: {val['errors']}"
+    with open("index.json", encoding="utf-8") as f:
+        master_index = json.load(f)
 
-    records_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"Generated {len(records)} starter records -> {records_path}")
+    master_vectors_by_id = {
+        v["repo_id"].lower(): v for v in master_index.get("vectors", []) if "repo_id" in v
+    }
+    records_by_id = {r["repo_id"].lower(): r for r in all_records if "repo_id" in r}
 
-    # Generate synthetic high-quality normalized embedding vectors (dimension 1024)
-    # Seeded pseudo-embeddings derived from text hash for determinism
-    dimension = 1024
+    # Select 200 high-profile repos: Pinned Landmarks + repos.txt + top starred
+    pinned_ids = [
+        "fastapi/fastapi",
+        "flask/flask",
+        "django/django",
+        "expressjs/express",
+        "facebook/react",
+        "vuejs/vue",
+        "vuejs/core",
+        "sveltejs/svelte",
+        "vllm-project/vllm",
+        "ollama/ollama",
+        "ggerganov/llama.cpp",
+        "supabase/supabase",
+        "pocketbase/pocketbase",
+        "withastro/astro",
+        "gohugoio/hugo",
+        "astral-sh/uv",
+        "astral-sh/ruff",
+        "n8n-io/n8n",
+        "qdrant/qdrant",
+        "microsoft/vscode",
+    ]
+
+    repos_txt_lines = [
+        line.strip().lower().replace("https://github.com/", "")
+        for line in Path("repos.txt").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+
+    selected_records: list[dict] = []
+    seen_ids = set()
+
+    # 1. Pinned landmark repos
+    for pid in pinned_ids:
+        pid_low = pid.lower()
+        if pid_low in records_by_id and pid_low in master_vectors_by_id and pid_low not in seen_ids:
+            selected_records.append(records_by_id[pid_low])
+            seen_ids.add(pid_low)
+
+    # 2. From repos.txt
+    for rid in repos_txt_lines:
+        if rid in records_by_id and rid in master_vectors_by_id and rid not in seen_ids:
+            selected_records.append(records_by_id[rid])
+            seen_ids.add(rid)
+
+    # 3. Fill to 200 from highest starred
+    if len(selected_records) < 200:
+        candidates = [
+            r
+            for r in all_records
+            if r["repo_id"].lower() in master_vectors_by_id and r["repo_id"].lower() not in seen_ids
+        ]
+        candidates.sort(key=lambda r: int(r.get("github", {}).get("stars") or 0), reverse=True)
+        for c in candidates:
+            selected_records.append(c)
+            seen_ids.add(c["repo_id"].lower())
+            if len(selected_records) == 200:
+                break
+
+    # Strip large redundant readmes to keep package size under 1.5MB
+    compact_records = []
+    for r in selected_records:
+        r_copy = dict(r)
+        readme = r_copy.get("readme") or ""
+        if len(readme) > 400:
+            r_copy["readme"] = readme[:400] + "\n..."
+        compact_records.append(r_copy)
+
+    # Validate records schema
+    val = records_validation_report(
+        compact_records,
+        expected_schema_version=RECORD_SCHEMA_VERSION,
+        expected_profile_prompt_version=2,
+    )
+    assert not val["errors"], f"Validation failed: {val['errors']}"
+
+    records_path.write_text(json.dumps(compact_records, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Generated {len(compact_records)} starter records -> {records_path}")
+
+    # Build vector matrix and vectors metadata
+    dimension = master_index.get("dimension", 2048)
     raw_vectors = []
-    for i, r in enumerate(records):
-        text = embedding_text_from_record(r)
-        # Deterministic seed per repo
-        seed = abs(hash(r["repo_id"])) % (2**31 - 1)
-        rng = np.random.RandomState(seed)
-        vec = rng.standard_normal(dimension).astype(np.float32)
-        vec /= np.linalg.norm(vec)
-        raw_vectors.append(vec)
-
-    matrix = np.asarray(raw_vectors, dtype=np.float32)
-
     vectors_meta = []
-    for i, r in enumerate(records):
+
+    for r in compact_records:
+        rid = r["repo_id"].lower()
+        v_entry = master_vectors_by_id[rid]
+        vec = decode_vector(v_entry.get("vector"))
+        assert vec is not None and len(vec) == dimension, f"Invalid vector for {r['repo_id']}"
+        raw_vectors.append(vec)
         vectors_meta.append({
             "repo_id": r["repo_id"],
             "embedding_input_fingerprint": embedding_input_fingerprint(r),
             "metadata": entry_metadata(r),
         })
 
+    matrix = np.asarray(raw_vectors, dtype=np.float32)
+
     index_doc = {
         "index_version": INDEX_VERSION,
         "record_schema_version": RECORD_SCHEMA_VERSION,
-        "embedding_model": "BAAI/bge-m3",
-        "embedding_base_url": None,
+        "embedding_model": master_index.get("embedding_model", "xists-starter-v1"),
+        "embedding_base_url": master_index.get("embedding_base_url"),
         "embedding_input_version": EMBEDDING_INPUT_VERSION,
         "dimension": dimension,
         "built_at": datetime.now(timezone.utc).isoformat(),
-        "record_count": len(records),
+        "record_count": len(compact_records),
         "skipped": [],
         "vectors": vectors_meta,
     }
@@ -627,4 +146,4 @@ def generate_starter_assets(output_dir: Path) -> None:
 
 
 if __name__ == "__main__":
-    generate_starter_assets(Path("src/xists/starter"))
+    build_starter_200(Path("src/xists/starter"))

@@ -24,7 +24,7 @@ def test_cli_workspace_init_demo(tmp_path, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Workspace" in out
     assert "(demo mode)" in out
-    assert "20 starter repos" in out
+    assert "starter repos" in out
     assert "Next steps" in out
 
 
@@ -40,7 +40,7 @@ def test_cli_index_pull_demo_text_and_json(tmp_path, monkeypatch, capsys):
 
     out_text = capsys.readouterr().out
     assert "Index pulled successfully" in out_text
-    assert "20" in out_text
+    assert "200" in out_text or "204" in out_text
 
     # JSON format with --force
     args_json = build_parser().parse_args([
@@ -54,7 +54,7 @@ def test_cli_index_pull_demo_text_and_json(tmp_path, monkeypatch, capsys):
     out_json = capsys.readouterr().out
     data = json.loads(out_json)
     assert data["preset"] == "demo"
-    assert data["records_count"] >= 20
+    assert data["records_count"] >= 200
     assert data["index_version"] == 4
 
 

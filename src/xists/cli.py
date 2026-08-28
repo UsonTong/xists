@@ -1565,7 +1565,7 @@ def workspace_init(args: argparse.Namespace) -> int:
     if created_env_file:
         print(f"  Config    {root / '.env'}")
     if demo_info:
-        print(f"  Records   {demo_info.get('records_path')} (20 starter repos)")
+        print(f"  Records   {demo_info.get('records_path')} ({demo_info.get('records_count', 200)} starter repos)")
         print(f"  Index     {demo_info.get('index_path')} (v4 dual-file binary)")
     print("\nNext steps")
     if demo_mode:

@@ -24,14 +24,14 @@ from xists.starter import (
 
 INDEX_PRESETS: dict[str, dict[str, Any]] = {
     "demo": {
-        "description": "Bundled 20 top open-source repositories with pre-built binary index (zero-config)",
+        "description": "Bundled 200 top open-source repositories with pre-built binary index (zero-config)",
         "type": "bundled",
-        "records_count": 20,
+        "records_count": 200,
     },
     "starter": {
         "description": "Alias for demo starter dataset",
         "type": "bundled",
-        "records_count": 20,
+        "records_count": 200,
     },
     "curated-1k": {
         "description": "Curated 1,000 top GitHub open-source repositories with embeddings",

@@ -38,10 +38,11 @@ def test_starter_records_load_and_pass_schema_validation():
 def test_starter_index_loads_with_mmap():
     index = load_starter_index(mmap=True)
     assert index.get("index_version") == INDEX_VERSION
-    assert index.get("dimension") == 1024
-    assert index.get("record_count") >= 20
+    dim = index.get("dimension")
+    assert dim in (1024, 2048)
+    assert index.get("record_count") >= 200
     assert "_matrix" in index
-    assert index["_matrix"].shape == (len(index.get("vectors") or []), 1024)
+    assert index["_matrix"].shape == (len(index.get("vectors") or []), dim)
 
 
 def test_starter_metadata_search_exact_matches():

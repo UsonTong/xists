@@ -86,6 +86,9 @@ from xists.search.transform import (
     query_variants,
     transform_queries,
 )
+from xists.search.append import append_records_to_index, append_repo_to_index
+from xists.search.merge import merge_indices
+from xists.search.prune import prune_index
 from xists.search.pull import INDEX_PRESETS, pull_index
 from xists.starter import (
     get_starter_index_path,
@@ -2633,6 +2636,158 @@ def index_pull(args: argparse.Namespace) -> int:
     return 0
 
 
+def index_append(args: argparse.Namespace) -> int:
+    if not args.repo and not args.input:
+        print("Error: Either --repo owner/repo or --input records.json must be specified.", file=sys.stderr)
+        return 2
+
+    if not args.index.exists():
+        print(f"Target index file not found: {args.index}. Run 'xists index build' first.", file=sys.stderr)
+        return 2
+
+    try:
+        if args.repo:
+            result = append_repo_to_index(
+                args.repo,
+                index_path=args.index,
+                records_path=args.records if args.records and args.records.exists() else None,
+                force=args.force,
+            )
+        else:
+            if not args.input.is_file():
+                print(f"Input records file not found: {args.input}", file=sys.stderr)
+                return 2
+            records = json.loads(args.input.read_text(encoding="utf-8"))
+            if not isinstance(records, list):
+                print(f"Input records must be a JSON array of records: {args.input}", file=sys.stderr)
+                return 2
+            result = append_records_to_index(
+                records,
+                index_path=args.index,
+                records_path=args.records if args.records and args.records.exists() else None,
+                force=args.force,
+            )
+    except EmbeddingNotConfiguredError as error:
+        print(str(error), file=sys.stderr)
+        return 2
+    except (ValueError, FileNotFoundError, GitHubAPIError) as error:
+        print(f"Failed to append to index: {error}", file=sys.stderr)
+        return 1
+    except Exception as error:
+        print(f"Failed to append to index: {error}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    rows = [
+        ("Target index", result.get("index_path")),
+        ("Target records", result.get("records_path") or "n/a"),
+        ("Added records", result.get("added")),
+        ("Updated records", result.get("updated")),
+        ("Skipped records", result.get("skipped")),
+        ("Total vectors", result.get("total_vectors")),
+        ("Dimension", result.get("dimension")),
+        ("Elapsed time", f"{result.get('elapsed_ms')} ms"),
+    ]
+    print(_format_command_summary("Incremental append complete", rows, stream=sys.stdout))
+    return 0
+
+
+def index_merge(args: argparse.Namespace) -> int:
+    if len(args.indices) < 2:
+        print("Error: At least two index files are required to merge.", file=sys.stderr)
+        return 2
+
+    try:
+        result = merge_indices(
+            index_paths=args.indices,
+            output_index_path=args.output,
+            records_paths=args.records,
+            output_records_path=args.output_records,
+        )
+    except (ValueError, FileNotFoundError) as error:
+        print(f"Failed to merge indices: {error}", file=sys.stderr)
+        return 1
+    except Exception as error:
+        print(f"Failed to merge indices: {error}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    rows = [
+        ("Input indices count", result.get("input_indices_count")),
+        ("Merged records count", result.get("merged_records_count")),
+        ("Duplicate conflicts resolved", result.get("duplicates_resolved")),
+        ("Embedding model", result.get("embedding_model")),
+        ("Dimension", result.get("dimension")),
+        ("Output index", result.get("output_index")),
+        ("Output records", result.get("output_records") or "n/a"),
+        ("Elapsed time", f"{result.get('elapsed_ms')} ms"),
+    ]
+    print(_format_command_summary("Index merge complete", rows, stream=sys.stdout))
+    return 0
+
+
+def index_prune(args: argparse.Namespace) -> int:
+    if not args.index.exists():
+        print(f"Target index file not found: {args.index}", file=sys.stderr)
+        return 2
+
+    blocklist: list[str] = list(args.remove_repo or [])
+    if args.blocklist and args.blocklist.is_file():
+        try:
+            lines = [
+                line.strip()
+                for line in args.blocklist.read_text(encoding="utf-8").splitlines()
+                if line.strip() and not line.startswith("#")
+            ]
+            blocklist.extend(lines)
+        except Exception as error:
+            print(f"Failed to read blocklist file: {error}", file=sys.stderr)
+            return 2
+
+    try:
+        result = prune_index(
+            index_path=args.index,
+            records_path=args.records if args.records and args.records.exists() else None,
+            prune_archived=args.archived,
+            prune_disabled=args.disabled,
+            blocklist_repos=blocklist,
+            dry_run=args.dry_run,
+        )
+    except (ValueError, FileNotFoundError) as error:
+        print(f"Failed to prune index: {error}", file=sys.stderr)
+        return 1
+    except Exception as error:
+        print(f"Failed to prune index: {error}", file=sys.stderr)
+        return 1
+
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0
+
+    header = "Index health pruning (dry run)" if args.dry_run else "Index health pruning complete"
+    reasons = result.get("reasons", {})
+    rows = [
+        ("Target index", result.get("index_path")),
+        ("Target records", result.get("records_path") or "n/a"),
+        ("Total records before", result.get("total_before")),
+        ("Pruned count", result.get("pruned_count")),
+        ("Retained count", result.get("retained_count")),
+        (
+            "Prune reasons",
+            f"archived={reasons.get('archived', 0)}, disabled={reasons.get('disabled', 0)}, blocklist={reasons.get('blocklist', 0)}",
+        ),
+        ("Elapsed time", f"{result.get('elapsed_ms')} ms"),
+    ]
+    print(_format_command_summary(header, rows, stream=sys.stdout))
+    return 0
+
+
 
 def eval_run(args: argparse.Namespace) -> int:
     try:
@@ -3011,6 +3166,148 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output format: text (default) or json for scripts and agents",
     )
     index_pull_parser.set_defaults(func=index_pull)
+
+    index_append_parser = index_subparsers.add_parser(
+        "append", help="Incrementally append a repository or extra records to an index"
+    )
+    index_append_parser.add_argument(
+        "--repo",
+        type=str,
+        default=None,
+        help="GitHub repository identifier (e.g. owner/repo) to collect and append",
+    )
+    index_append_parser.add_argument(
+        "--input",
+        type=Path,
+        default=None,
+        help="Path to extra records JSON file to append",
+    )
+    index_append_parser.add_argument(
+        "--index",
+        type=Path,
+        default=workspace.index,
+        help="Target embedding index to update (default: workspace index)",
+    )
+    index_append_parser.add_argument(
+        "--records",
+        type=Path,
+        default=workspace.records,
+        help="Target records JSON file to update (default: workspace records)",
+    )
+    index_append_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force re-embedding even if fingerprint has not changed",
+    )
+    index_append_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
+    index_append_parser.set_defaults(func=index_append)
+
+    index_merge_parser = index_subparsers.add_parser(
+        "merge", help="Merge multiple embedding indexes and vector matrices into a unified index"
+    )
+    index_merge_parser.add_argument(
+        "--indices",
+        type=Path,
+        nargs="+",
+        required=True,
+        help="Input index JSON files to merge",
+    )
+    index_merge_parser.add_argument(
+        "--output",
+        type=Path,
+        default=workspace.index,
+        help="Target path for merged index JSON (default: workspace index)",
+    )
+    index_merge_parser.add_argument(
+        "--records",
+        type=Path,
+        nargs="*",
+        default=None,
+        help="Optional corresponding input records JSON files to merge",
+    )
+    index_merge_parser.add_argument(
+        "--output-records",
+        type=Path,
+        default=workspace.records,
+        help="Target path for merged records JSON (default: workspace records)",
+    )
+    index_merge_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
+    index_merge_parser.set_defaults(func=index_merge)
+
+    index_prune_parser = index_subparsers.add_parser(
+        "prune", help="Prune archived, disabled, or blacklisted repositories from index and records"
+    )
+    index_prune_parser.add_argument(
+        "--index",
+        type=Path,
+        default=workspace.index,
+        help="Embedding index to prune (default: workspace index)",
+    )
+    index_prune_parser.add_argument(
+        "--records",
+        type=Path,
+        default=workspace.records,
+        help="Records JSON to prune (default: workspace records)",
+    )
+    index_prune_parser.add_argument(
+        "--archived",
+        action="store_true",
+        default=True,
+        help="Prune repositories archived on GitHub (default: True)",
+    )
+    index_prune_parser.add_argument(
+        "--no-archived",
+        dest="archived",
+        action="store_false",
+        help="Do not prune archived repositories",
+    )
+    index_prune_parser.add_argument(
+        "--disabled",
+        action="store_true",
+        default=True,
+        help="Prune repositories disabled on GitHub (default: True)",
+    )
+    index_prune_parser.add_argument(
+        "--no-disabled",
+        dest="disabled",
+        action="store_false",
+        help="Do not prune disabled repositories",
+    )
+    index_prune_parser.add_argument(
+        "--remove-repo",
+        type=str,
+        action="append",
+        default=[],
+        help="Specific repo_id to prune (can be repeated)",
+    )
+    index_prune_parser.add_argument(
+        "--blocklist",
+        type=Path,
+        default=None,
+        help="File containing repo_ids to prune (one per line)",
+    )
+    index_prune_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Report repositories to be pruned without modifying files",
+    )
+    index_prune_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
+    index_prune_parser.set_defaults(func=index_prune)
 
     records = subparsers.add_parser("records", help="Inspect generated repository records")
     records_subparsers = records.add_subparsers(dest="records_command", required=True)

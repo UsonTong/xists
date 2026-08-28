@@ -432,6 +432,58 @@ This reads `records.json`, computes embeddings via the configured endpoint, and 
 
 By default, `xists index build` is incremental. It reuses an existing vector only when the repo id, embedding model, vector dimension, and embedding input fingerprint still match the current record. If the record content or embedding text logic changes, xists re-embeds that record automatically.
 
+#### Incremental index append (`xists index append`)
+
+When you want to add or update single repositories or a batch of newly collected records without running a full index scan or rebuild, use `xists index append`:
+
+```bash
+# Ingest, profile, and incrementally append a single repository
+xists index append --repo fastapi/fastapi
+
+# Append a batch of newly generated records into an existing index
+xists index append --input new-records.json --index index.json --records records.json
+
+# Force re-embedding even if the input fingerprint is unchanged
+xists index append --input new-records.json --force
+```
+
+- **Idempotency**: Computes `embedding_input_fingerprint` for each item. If an item already exists with an identical fingerprint, re-embedding is skipped automatically.
+- **In-Place Vector Mutation**: Modifies or appends vector rows directly to the float32 matrix (`.vectors.npy`) and atomic JSON metadata.
+
+#### Multi-index fusion (`xists index merge`)
+
+Combine multiple independently built index documents and binary vector matrices into a single unified index:
+
+```bash
+# Merge multiple team or topic indices
+xists index merge \
+  --indices frontend-index.json backend-index.json ml-index.json \
+  --output unified-index.json \
+  --records-list frontend-records.json backend-records.json ml-records.json \
+  --output-records unified-records.json
+```
+
+- **Compatibility validation**: Strictly verifies that all input indices share the same `embedding_model` and vector `dimension` before merging.
+- **Conflict resolution**: When duplicate repositories appear across input indices, `merge` compares profile completeness, LLM confidence scores, and metadata depth to retain the highest-quality entry.
+
+#### Index health pruning (`xists index prune`)
+
+Keep your search index lean and relevant by pruning archived, disabled, or deprecated repositories:
+
+```bash
+# Preview repositories that would be pruned without modifying files
+xists index prune --index index.json --records records.json --dry-run
+
+# Prune archived and disabled repositories
+xists index prune --index index.json --records records.json
+
+# Prune specific repositories using a blocklist
+xists index prune --index index.json --records records.json --blocklist deprecated/old-repo abandoned/tool
+```
+
+- **Zero-fragmentation Matrix Slicing**: Slices the underlying NumPy float32 vector matrix to eliminate pruned rows without requiring full vector recomputation.
+- **Atomic updates**: Synchronously updates both `index.json`, sidecar `.vectors.npy`, and `records.json`.
+
 #### Dual-file binary vector storage (v4)
 
 Starting in v0.11.0, `xists index build` defaults to `INDEX_VERSION = 4` dual-file binary storage:

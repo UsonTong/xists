@@ -313,6 +313,10 @@ The report groups results into pragmatic categories:
 - `xists doctor`: Check config and file status; add `--check-endpoints` or `--strict` to probe the embedding service.
 - `xists ingest github`: Fetch repo metadata and generate summaries.
 - `xists index build`: Build or incrementally update the local index.
+- `xists index append`: Incrementally append single repos or batch records directly to index and binary vectors.
+- `xists index merge`: Merge multiple index documents and binary vector matrices with automatic conflict resolution.
+- `xists index prune`: Purge archived, disabled, or blocklisted repositories and slice vector matrices.
+- `xists index pull`: Download and install pre-built indexes and datasets (e.g. `xists index pull demo`).
 - `xists search "query"`: Query the local index with readable terminal output by default; add `--format json` for scripts and agents.
 - `xists eval cases` / `xists eval run` / `xists eval inspect`: Validate the dataset and run/review ranking tests.
 - `xists records validate` / `xists records stats` / `xists records inspect`: Check record quality without printing huge payloads to your terminal.

@@ -291,6 +291,10 @@ xists eval inspect --report demo-eval-report.json --status serious_mismatch
 - `xists doctor`：检查本地配置和文件状态；加 `--check-endpoints` 或 `--strict` 可探测 embedding 服务。
 - `xists ingest github`：拉取仓库信息并生成短语摘要。
 - `xists index build`：构建或增量更新本地向量索引。
+- `xists index append`：增量将单个仓库或批量 records 追加至现有索引与二进制向量矩阵。
+- `xists index merge`：融合多个独立索引与向量矩阵，自动基于质量得分消解重复冲突。
+- `xists index prune`：健康清理已归档、已禁用或黑名单仓库，并零碎片切片向量矩阵。
+- `xists index pull`：下载并安装预构建索引与数据集（如 `xists index pull demo`）。
 - `xists search "query"`：执行搜索，默认输出适合终端阅读；加 `--format json` 可输出给脚本和 agent 使用的结构化结果。
 - `xists eval cases` / `xists eval run` / `xists eval inspect`：校验评测集并运行、检查检索评测。
 - `xists records validate` / `xists records stats` / `xists records inspect`：检查 records 质量，避免终端被长 JSON 刷屏。

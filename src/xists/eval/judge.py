@@ -5,10 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
-from xists.profile.llm import LLMConfig, LLMError, LLMResponse, call_llm, profile_input_from_record
+from xists.profile.llm import (
+    LLMConfig,
+    LLMError,
+    LLMResponse,
+    call_llm,
+    profile_input_from_record,
+)
 
 JUDGE_PROMPT_VERSION = 3
 JUDGE_CONFIDENCE_VALUES = {"high", "medium", "low"}
@@ -139,7 +145,9 @@ def parse_judge_response(content: str) -> dict[str, Any]:
         confidence = "low"
 
     reason_short = data.get("reason_short")
-    reason_short = reason_short.strip() if isinstance(reason_short, str) and reason_short.strip() else None
+    reason_short = (
+        reason_short.strip() if isinstance(reason_short, str) and reason_short.strip() else None
+    )
 
     return {
         "verdict": verdict,
@@ -177,7 +185,7 @@ def judge_top1_vs_expected(
         {
             "provider": "openai_compatible",
             "model": config.model,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "prompt_version": JUDGE_PROMPT_VERSION,
             "prompt_hash": judge_prompt_hash(),
             "duration_seconds": duration_seconds,

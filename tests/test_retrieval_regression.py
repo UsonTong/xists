@@ -5,7 +5,6 @@ from pathlib import Path
 
 from xists.eval.schema import load_dataset
 
-
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "examples" / "retrieval-regression"
 

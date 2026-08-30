@@ -68,3 +68,6 @@ def search(
         query_variants=query_variants,
         rerank_query=rerank_query,
     )
+
+
+__all__ = ["load_index", "search"]

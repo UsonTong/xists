@@ -60,8 +60,7 @@ class EmbeddingConfig:
     @property
     def tei_embed_url(self) -> str:
         base_url = self.base_url.rstrip("/")
-        if base_url.endswith("/v1"):
-            base_url = base_url[:-3]
+        base_url = base_url.removesuffix("/v1")
         return f"{base_url}/embed"
 
 
@@ -82,7 +81,7 @@ def embedding_config_from_env() -> EmbeddingConfig:
     api_keys: list[str] = []
     if keys_file_env and os.path.isfile(keys_file_env):
         try:
-            with open(keys_file_env, "r", encoding="utf-8") as f:
+            with open(keys_file_env, encoding="utf-8") as f:
                 for line in f:
                     k = line.strip()
                     if k and not k.startswith("#") and k not in api_keys:
@@ -117,6 +116,7 @@ def embedding_config_from_env() -> EmbeddingConfig:
             f"Missing environment variables: {', '.join(missing)}. "
             "Set them in your .env (see .env.example)."
         )
+    assert api_key is not None and base_url is not None and model is not None
 
     return EmbeddingConfig(
         api_key=api_key,
@@ -220,7 +220,12 @@ def _request_json(url: str, body: bytes, headers: dict[str, str], timeout: int) 
             if error.code not in RETRYABLE_HTTP_STATUSES or attempt == 4:
                 raise
             time.sleep(min(8.0, 0.5 * (2**attempt)))
-        except (urllib.error.URLError, TimeoutError, http.client.IncompleteRead, Exception) as error:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            http.client.IncompleteRead,
+            Exception,
+        ) as error:
             last_error = error
             if attempt == 4:
                 raise

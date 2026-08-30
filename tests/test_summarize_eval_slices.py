@@ -1,7 +1,6 @@
 import importlib.util
 from pathlib import Path
 
-
 MODULE_PATH = Path(__file__).resolve().parent.parent / "scripts" / "summarize_eval_slices.py"
 SPEC = importlib.util.spec_from_file_location("summarize_eval_slices", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)

@@ -23,7 +23,13 @@ def test_rerank_text_uses_only_generic_index_evidence():
         }
     )
 
-    assert text.splitlines() == ["owner/repo", "repo", "A useful project.", "tooling", "automates tasks"]
+    assert text.splitlines() == [
+        "owner/repo",
+        "repo",
+        "A useful project.",
+        "tooling",
+        "automates tasks",
+    ]
 
 
 def test_rerank_documents_restores_tei_indexes_to_input_order():
@@ -42,7 +48,12 @@ def test_rerank_documents_restores_tei_indexes_to_input_order():
 
     assert scores == [0.8, 0.2]
     assert calls[0][0] == "http://reranker/rerank"
-    assert calls[0][1] == {"query": "query", "texts": ["first", "second"], "raw_scores": True, "model": "model"}
+    assert calls[0][1] == {
+        "query": "query",
+        "texts": ["first", "second"],
+        "raw_scores": True,
+        "model": "model",
+    }
     assert calls[0][2]["Authorization"] == "Bearer key"
 
 

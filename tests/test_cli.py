@@ -25,14 +25,14 @@ from xists.cli import (
     load_repo_ids,
     mcp,
     profile_refresh,
-    search,
     records_inspect,
     records_stats,
     records_validate,
+    search,
     version,
 )
 from xists.ingest.github import GitHubAPIError
-from xists.profile.llm import LLMError, PROFILE_PROMPT_VERSION
+from xists.profile.llm import PROFILE_PROMPT_VERSION, LLMError
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.embed import (
     EMBEDDING_INPUT_VERSION,
@@ -40,7 +40,12 @@ from xists.search.embed import (
     EmbeddingError,
     embedding_input_fingerprint,
 )
-from xists.search.index import INDEX_VERSION, decode_vector, encode_vector, load_index, save_index
+from xists.search.index import (
+    INDEX_VERSION,
+    encode_vector,
+    load_index,
+    save_index,
+)
 from xists.workspace import resolve_workspace
 
 
@@ -51,7 +56,7 @@ def test_load_env_file_loads_values(tmp_path, monkeypatch):
             [
                 "# local secrets",
                 "GITHUB_TOKEN=from-file",
-                "QUOTED=\"quoted value\"",
+                'QUOTED="quoted value"',
                 "SINGLE_QUOTED='single quoted value'",
                 "INVALID_LINE",
                 "",
@@ -145,14 +150,17 @@ def test_root_help_prioritizes_search_and_command_discovery():
 
     assert "usage: xists search <QUERY> [OPTIONS]" in help_text
     assert "Start here:" in help_text
-    assert "xists search \"self-hosted photo gallery\"" in help_text
+    assert 'xists search "self-hosted photo gallery"' in help_text
     assert "Find what exists. Decide what's next." not in help_text
     assert "Commands:" in help_text
     assert help_text.index("Start here:") < help_text.index("Commands:")
     assert help_text.index("Commands:") < help_text.index("Options:")
     commands_text = help_text.split("Commands:", maxsplit=1)[1].split("Options:", maxsplit=1)[0]
-    assert commands_text.index("search") < commands_text.index("index") < commands_text.index("ingest")
+    assert (
+        commands_text.index("search") < commands_text.index("index") < commands_text.index("ingest")
+    )
     assert getattr(parser, "_color", False) is False
+
 
 def test_ingest_github_parser_uses_default_paths():
     args = build_parser().parse_args(["ingest", "github"])
@@ -166,7 +174,9 @@ def test_ingest_github_parser_uses_default_paths():
 
 
 def test_ingest_github_parser_accepts_graphql_backend():
-    args = build_parser().parse_args(["ingest", "github", "--github-api", "graphql", "--github-batch-size", "25"])
+    args = build_parser().parse_args(
+        ["ingest", "github", "--github-api", "graphql", "--github-batch-size", "25"]
+    )
 
     assert args.github_api == "graphql"
     assert args.github_batch_size == 25
@@ -295,11 +305,19 @@ def test_eval_run_parser_uses_default_paths():
 def test_load_canonical_queries_requires_an_exact_nonempty_case_map(tmp_path):
     cases = [{"id": "one"}, {"id": "two"}]
     queries_file = tmp_path / "canonical.json"
-    queries_file.write_text(json.dumps({"one": "first retrieval query", "two": "second retrieval query"}), encoding="utf-8")
+    queries_file.write_text(
+        json.dumps({"one": "first retrieval query", "two": "second retrieval query"}),
+        encoding="utf-8",
+    )
 
-    assert _load_canonical_queries(queries_file, cases) == ["first retrieval query", "second retrieval query"]
+    assert _load_canonical_queries(queries_file, cases) == [
+        "first retrieval query",
+        "second retrieval query",
+    ]
 
-    queries_file.write_text(json.dumps({"one": "first retrieval query", "extra": "other"}), encoding="utf-8")
+    queries_file.write_text(
+        json.dumps({"one": "first retrieval query", "extra": "other"}), encoding="utf-8"
+    )
     with pytest.raises(Exception, match="missing case ids: two; unexpected case ids: extra"):
         _load_canonical_queries(queries_file, cases)
 
@@ -437,7 +455,9 @@ def test_search_text_format_prints_readable_results(tmp_path, monkeypatch, capsy
     monkeypatch.setenv("EMBEDDING_BASE_URL", "http://localhost/v1")
     monkeypatch.setenv("EMBEDDING_MODEL", "bge-m3")
 
-    args = build_parser().parse_args(["search", "python api framework", "--index", str(index_file), "--format", "text"])
+    args = build_parser().parse_args(
+        ["search", "python api framework", "--index", str(index_file), "--format", "text"]
+    )
 
     with patch(
         "xists.cli.public_search",
@@ -528,7 +548,16 @@ def test_search_text_wraps_to_a_narrow_terminal(monkeypatch):
             }
         ],
     }
-    index = {"vectors": [{"repo_id": "example/long-project-name", "metadata": {"summary": "A deliberately detailed project summary for narrow terminals."}}]}
+    index = {
+        "vectors": [
+            {
+                "repo_id": "example/long-project-name",
+                "metadata": {
+                    "summary": "A deliberately detailed project summary for narrow terminals."
+                },
+            }
+        ]
+    }
 
     output = _format_search_text(result, index, stream=_InteractiveStream())
 
@@ -587,18 +616,39 @@ def test_search_cli_json_matches_public_api_core_result(tmp_path, monkeypatch, c
 @pytest.mark.parametrize(
     ("command", "handler", "expected_message"),
     [
-        (["records", "inspect", "--records", "missing.json"], records_inspect, "Records file not found"),
-        (["records", "stats", "--records", "missing.json"], records_stats, "Records file not found"),
-        (["records", "validate", "--records", "missing.json"], records_validate, "Records file not found"),
+        (
+            ["records", "inspect", "--records", "missing.json"],
+            records_inspect,
+            "Records file not found",
+        ),
+        (
+            ["records", "stats", "--records", "missing.json"],
+            records_stats,
+            "Records file not found",
+        ),
+        (
+            ["records", "validate", "--records", "missing.json"],
+            records_validate,
+            "Records file not found",
+        ),
         (["index", "stats", "--index", "missing.json"], index_stats, "Index file not found"),
         (
-            ["index", "verify", "--records", "missing-records.json", "--index", "missing-index.json"],
+            [
+                "index",
+                "verify",
+                "--records",
+                "missing-records.json",
+                "--index",
+                "missing-index.json",
+            ],
             index_verify,
             "Records file not found",
         ),
     ],
 )
-def test_core_inspection_errors_use_stderr_and_exit_two(tmp_path, monkeypatch, capsys, command, handler, expected_message):
+def test_core_inspection_errors_use_stderr_and_exit_two(
+    tmp_path, monkeypatch, capsys, command, handler, expected_message
+):
     monkeypatch.chdir(tmp_path)
 
     assert handler(build_parser().parse_args(command)) == 2
@@ -614,7 +664,9 @@ def test_search_missing_index_uses_stderr_and_exit_two(tmp_path, monkeypatch, ca
     monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
     missing_index = tmp_path / "missing-index.json"
 
-    args = build_parser().parse_args(["search", "query", "--index", str(missing_index), "--format", "json"])
+    args = build_parser().parse_args(
+        ["search", "query", "--index", str(missing_index), "--format", "json"]
+    )
 
     assert search(args) == 2
     captured = capsys.readouterr()
@@ -638,7 +690,12 @@ def test_core_commands_report_invalid_records_json_on_stderr(tmp_path, capsys, c
     index_file.write_text("{}", encoding="utf-8")
 
     args = build_parser().parse_args(
-        [*command, "--records", str(records_file), *( ["--index", str(index_file)] if handler is index_verify else [])]
+        [
+            *command,
+            "--records",
+            str(records_file),
+            *(["--index", str(index_file)] if handler is index_verify else []),
+        ]
     )
 
     assert handler(args) == 1
@@ -664,7 +721,12 @@ def test_core_commands_reject_records_that_are_not_object_lists(tmp_path, capsys
     index_file.write_text("{}", encoding="utf-8")
 
     args = build_parser().parse_args(
-        [*command, "--records", str(records_file), *( ["--index", str(index_file)] if handler is index_verify else [])]
+        [
+            *command,
+            "--records",
+            str(records_file),
+            *(["--index", str(index_file)] if handler is index_verify else []),
+        ]
     )
 
     assert handler(args) == 1
@@ -704,7 +766,12 @@ def test_index_commands_report_invalid_index_json_on_stderr(tmp_path, capsys, co
     index_file.write_text("{not json", encoding="utf-8")
 
     args = build_parser().parse_args(
-        [*command, "--index", str(index_file), *( ["--records", str(records_file)] if handler is index_verify else [])]
+        [
+            *command,
+            "--index",
+            str(index_file),
+            *(["--records", str(records_file)] if handler is index_verify else []),
+        ]
     )
 
     assert handler(args) == 1
@@ -728,7 +795,12 @@ def test_index_commands_reject_non_object_indexes(tmp_path, capsys, command, han
     index_file.write_text("[]", encoding="utf-8")
 
     args = build_parser().parse_args(
-        [*command, "--index", str(index_file), *( ["--records", str(records_file)] if handler is index_verify else [])]
+        [
+            *command,
+            "--index",
+            str(index_file),
+            *(["--records", str(records_file)] if handler is index_verify else []),
+        ]
     )
 
     assert handler(args) == 1
@@ -744,7 +816,9 @@ def test_search_reports_invalid_index_json_on_stderr(tmp_path, monkeypatch, caps
     index_file = tmp_path / "index.json"
     index_file.write_text("{not json", encoding="utf-8")
 
-    args = build_parser().parse_args(["search", "query", "--index", str(index_file), "--format", "json"])
+    args = build_parser().parse_args(
+        ["search", "query", "--index", str(index_file), "--format", "json"]
+    )
 
     assert search(args) == 1
     captured = capsys.readouterr()
@@ -759,7 +833,9 @@ def test_search_rejects_non_object_index_on_stderr(tmp_path, monkeypatch, capsys
     index_file = tmp_path / "index.json"
     index_file.write_text("[]", encoding="utf-8")
 
-    args = build_parser().parse_args(["search", "query", "--index", str(index_file), "--format", "json"])
+    args = build_parser().parse_args(
+        ["search", "query", "--index", str(index_file), "--format", "json"]
+    )
 
     assert search(args) == 1
     captured = capsys.readouterr()
@@ -798,9 +874,12 @@ def test_doctor_defaults_to_actionable_text_on_stdout(tmp_path, monkeypatch, cap
     args = build_parser().parse_args(
         [
             "doctor",
-            "--records", str(tmp_path / "missing-records.json"),
-            "--index", str(tmp_path / "missing-index.json"),
-            "--cases", str(tmp_path / "missing-cases.json"),
+            "--records",
+            str(tmp_path / "missing-records.json"),
+            "--index",
+            str(tmp_path / "missing-index.json"),
+            "--cases",
+            str(tmp_path / "missing-cases.json"),
         ]
     )
 
@@ -821,7 +900,9 @@ def test_index_build_defaults_to_a_human_summary(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
     monkeypatch.setenv("EMBEDDING_BASE_URL", "http://test.invalid/v1")
     monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
-    args = build_parser().parse_args(["index", "build", "--records", str(records_file), "--output", str(output_file)])
+    args = build_parser().parse_args(
+        ["index", "build", "--records", str(records_file), "--output", str(output_file)]
+    )
 
     with patch("xists.cli.call_embeddings", return_value=[[1.0, 0.0]]):
         assert index_build(args) == 0
@@ -840,7 +921,16 @@ def test_index_build_json_format_is_machine_readable(tmp_path, monkeypatch, caps
     monkeypatch.setenv("EMBEDDING_BASE_URL", "http://test.invalid/v1")
     monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
     args = build_parser().parse_args(
-        ["index", "build", "--records", str(records_file), "--output", str(output_file), "--format", "json"]
+        [
+            "index",
+            "build",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--format",
+            "json",
+        ]
     )
 
     with patch("xists.cli.call_embeddings", return_value=[[1.0, 0.0]]):
@@ -895,10 +985,12 @@ def test_index_build_concurrent_with_multi_key_pool(tmp_path, monkeypatch, capsy
     assert payload["record_count"] == 10
     assert "key1" in seen_keys or "key2" in seen_keys
 
-    with open(output_file, "r", encoding="utf-8") as f:
+    with open(output_file, encoding="utf-8") as f:
         saved_index = json.load(f)
     assert len(saved_index["vectors"]) == 10
-    assert [v["repo_id"] for v in saved_index["vectors"]] == [f"example/project-{i}" for i in range(10)]
+    assert [v["repo_id"] for v in saved_index["vectors"]] == [
+        f"example/project-{i}" for i in range(10)
+    ]
 
 
 def test_index_build_concurrency_error_handling(tmp_path, monkeypatch, capsys):
@@ -944,10 +1036,16 @@ def test_ingest_defaults_to_a_human_summary(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("LLM_BASE_URL", "http://test.invalid/v1")
     monkeypatch.setenv("LLM_MODEL", "fixture/llm")
     monkeypatch.setenv("GITHUB_TOKEN", "test-token")
-    args = build_parser().parse_args(["ingest", "github", "--repos", str(repos_file), "--output", str(output_file)])
+    args = build_parser().parse_args(
+        ["ingest", "github", "--repos", str(repos_file), "--output", str(output_file)]
+    )
 
-    with patch("xists.cli.collect_record", return_value=_make_record("example/project")), patch(
-        "xists.cli.generate_llm_profile", side_effect=lambda record, _config: record["llm_profile"]
+    with (
+        patch("xists.cli.collect_record", return_value=_make_record("example/project")),
+        patch(
+            "xists.cli.generate_llm_profile",
+            side_effect=lambda record, _config: record["llm_profile"],
+        ),
     ):
         assert ingest_github(args) == 0
 
@@ -965,10 +1063,20 @@ def test_profile_refresh_defaults_to_a_human_summary(tmp_path, monkeypatch, caps
     monkeypatch.setenv("LLM_BASE_URL", "http://test.invalid/v1")
     monkeypatch.setenv("LLM_MODEL", "fixture/llm")
     args = build_parser().parse_args(
-        ["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--force"]
+        [
+            "profile",
+            "refresh",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--force",
+        ]
     )
 
-    with patch("xists.cli.generate_llm_profile", side_effect=lambda record, _config: record["llm_profile"]):
+    with patch(
+        "xists.cli.generate_llm_profile", side_effect=lambda record, _config: record["llm_profile"]
+    ):
         assert profile_refresh(args) == 0
 
     output = capsys.readouterr().out
@@ -1162,7 +1270,18 @@ def test_eval_inspect_filters_by_tag_and_query_intent(tmp_path, capsys):
         ),
         encoding="utf-8",
     )
-    args = build_parser().parse_args(["eval", "inspect", "--report", str(report_file), "--tag", "api", "--query-intent", "functional"])
+    args = build_parser().parse_args(
+        [
+            "eval",
+            "inspect",
+            "--report",
+            str(report_file),
+            "--tag",
+            "api",
+            "--query-intent",
+            "functional",
+        ]
+    )
 
     code = eval_inspect(args)
 
@@ -1211,7 +1330,9 @@ def test_eval_inspect_prints_filtered_cases(tmp_path, capsys):
         ),
         encoding="utf-8",
     )
-    args = build_parser().parse_args(["eval", "inspect", "--report", str(report_file), "--status", "serious_mismatch"])
+    args = build_parser().parse_args(
+        ["eval", "inspect", "--report", str(report_file), "--status", "serious_mismatch"]
+    )
 
     code = eval_inspect(args)
 
@@ -1240,10 +1361,14 @@ def test_doctor_reports_config_and_files_without_secrets(tmp_path, monkeypatch, 
     args = build_parser().parse_args(
         [
             "doctor",
-            "--format", "json",
-            "--records", str(records_file),
-            "--index", str(index_file),
-            "--cases", str(tmp_path / "missing-eval-cases.json"),
+            "--format",
+            "json",
+            "--records",
+            str(records_file),
+            "--index",
+            str(index_file),
+            "--cases",
+            str(tmp_path / "missing-eval-cases.json"),
         ]
     )
 
@@ -1263,7 +1388,6 @@ def test_doctor_reports_config_and_files_without_secrets(tmp_path, monkeypatch, 
     assert "github-secret" not in serialized
 
 
-
 def test_doctor_reports_actionable_next_steps_for_missing_config(tmp_path, monkeypatch, capsys):
     for name in (
         "EMBEDDING_API_KEY",
@@ -1280,10 +1404,14 @@ def test_doctor_reports_actionable_next_steps_for_missing_config(tmp_path, monke
     args = build_parser().parse_args(
         [
             "doctor",
-            "--format", "json",
-            "--records", str(tmp_path / "records.json"),
-            "--index", str(tmp_path / "index.json"),
-            "--cases", str(tmp_path / "eval-cases.json"),
+            "--format",
+            "json",
+            "--records",
+            str(tmp_path / "records.json"),
+            "--index",
+            str(tmp_path / "index.json"),
+            "--cases",
+            str(tmp_path / "eval-cases.json"),
         ]
     )
 
@@ -1304,6 +1432,7 @@ def test_doctor_reports_actionable_next_steps_for_missing_config(tmp_path, monke
     assert "xists index build" in checks["index_file"]["next_steps"][0]
     assert "examples/eval-cases.json" in checks["eval_cases_file"]["next_steps"][0]
 
+
 def test_doctor_check_endpoints_reports_embedding_probe(tmp_path, monkeypatch, capsys):
     records_file = tmp_path / "records.json"
     records_file.write_text("[]", encoding="utf-8")
@@ -1323,10 +1452,14 @@ def test_doctor_check_endpoints_reports_embedding_probe(tmp_path, monkeypatch, c
         [
             "doctor",
             "--check-endpoints",
-            "--format", "json",
-            "--records", str(records_file),
-            "--index", str(index_file),
-            "--cases", str(cases_file),
+            "--format",
+            "json",
+            "--records",
+            str(records_file),
+            "--index",
+            str(index_file),
+            "--cases",
+            str(cases_file),
         ]
     )
 
@@ -1347,7 +1480,9 @@ def test_doctor_check_endpoints_reports_embedding_probe(tmp_path, monkeypatch, c
     statuses = {check["name"]: check["status"] for check in payload["checks"]}
     assert payload["ok"] is True
     assert statuses["embedding_endpoint"] == "ok"
-    endpoint_check = next(check for check in payload["checks"] if check["name"] == "embedding_endpoint")
+    endpoint_check = next(
+        check for check in payload["checks"] if check["name"] == "embedding_endpoint"
+    )
     assert endpoint_check["dimension"] == 1024
     assert endpoint_check["resolved_url"] == "http://localhost:6597/v1/embeddings"
 
@@ -1371,19 +1506,27 @@ def test_doctor_strict_fails_when_embedding_probe_fails(tmp_path, monkeypatch, c
         [
             "doctor",
             "--strict",
-            "--format", "json",
-            "--records", str(records_file),
-            "--index", str(index_file),
-            "--cases", str(cases_file),
+            "--format",
+            "json",
+            "--records",
+            str(records_file),
+            "--index",
+            str(index_file),
+            "--cases",
+            str(cases_file),
         ]
     )
 
-    with patch("xists.cli.probe_embedding_endpoint", side_effect=EmbeddingError("connection refused")):
+    with patch(
+        "xists.cli.probe_embedding_endpoint", side_effect=EmbeddingError("connection refused")
+    ):
         code = doctor(args)
 
     assert code == 1
     payload = json.loads(capsys.readouterr().out)
-    endpoint_check = next(check for check in payload["checks"] if check["name"] == "embedding_endpoint")
+    endpoint_check = next(
+        check for check in payload["checks"] if check["name"] == "embedding_endpoint"
+    )
     assert payload["ok"] is False
     assert endpoint_check["status"] == "error"
     assert endpoint_check["message"] == "connection refused"
@@ -1423,7 +1566,9 @@ def test_index_stats_prints_compact_summary(tmp_path, capsys):
         encoding="utf-8",
     )
 
-    args = build_parser().parse_args(["index", "stats", "--index", str(index_file), "--limit", "1", "--format", "json"])
+    args = build_parser().parse_args(
+        ["index", "stats", "--index", str(index_file), "--limit", "1", "--format", "json"]
+    )
 
     code = index_stats(args)
 
@@ -1457,6 +1602,8 @@ def test_index_checkpoint_replaces_an_existing_file_atomically(tmp_path):
 
     assert not output.with_name("index.json.tmp").exists()
     assert json.loads(output.read_text(encoding="utf-8"))["index_version"] == INDEX_VERSION
+
+
 def test_index_stats_text_is_readable(tmp_path, capsys):
     index_file = tmp_path / "index.json"
     index_file.write_text(
@@ -1509,7 +1656,12 @@ def test_index_stats_estimates_memory(tmp_path, capsys):
                 "record_count": 1000,
                 "skipped": [],
                 "vectors": [
-                    {"repo_id": f"a/repo-{i}", "embedding_input_fingerprint": "abc", "metadata": {}, "vector": []}
+                    {
+                        "repo_id": f"a/repo-{i}",
+                        "embedding_input_fingerprint": "abc",
+                        "metadata": {},
+                        "vector": [],
+                    }
                     for i in range(1000)
                 ],
             }
@@ -1517,7 +1669,9 @@ def test_index_stats_estimates_memory(tmp_path, capsys):
         encoding="utf-8",
     )
 
-    args = build_parser().parse_args(["index", "stats", "--index", str(index_file), "--format", "json"])
+    args = build_parser().parse_args(
+        ["index", "stats", "--index", str(index_file), "--format", "json"]
+    )
 
     code = index_stats(args)
 
@@ -1537,7 +1691,12 @@ def test_index_stats_memory_unknown_without_dimension(tmp_path, capsys):
                 "record_count": 1,
                 "skipped": [],
                 "vectors": [
-                    {"repo_id": "a/b", "embedding_input_fingerprint": "abc", "metadata": {}, "vector": [1.0, 0.0]}
+                    {
+                        "repo_id": "a/b",
+                        "embedding_input_fingerprint": "abc",
+                        "metadata": {},
+                        "vector": [1.0, 0.0],
+                    }
                 ],
             }
         ),
@@ -1553,7 +1712,9 @@ def test_index_stats_memory_unknown_without_dimension(tmp_path, capsys):
     assert "Memory" in output
     assert "unknown" in output
 
-    json_args = build_parser().parse_args(["index", "stats", "--index", str(index_file), "--format", "json"])
+    json_args = build_parser().parse_args(
+        ["index", "stats", "--index", str(index_file), "--format", "json"]
+    )
     assert index_stats(json_args) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["estimated_memory_mb"] is None
@@ -1598,14 +1759,20 @@ def test_records_validate_reports_schema_and_profile_gaps(tmp_path, capsys):
                     "name": "repo",
                     "url": "https://github.com/old/repo",
                     "github": {"description": "Old repo", "topics": []},
-                    "llm_profile": {"summary": "Old repo summary", "confidence": "low", "abstained": False},
+                    "llm_profile": {
+                        "summary": "Old repo summary",
+                        "confidence": "low",
+                        "abstained": False,
+                    },
                 }
             ]
         ),
         encoding="utf-8",
     )
 
-    args = build_parser().parse_args(["records", "validate", "--records", str(records_file), "--format", "json"])
+    args = build_parser().parse_args(
+        ["records", "validate", "--records", str(records_file), "--format", "json"]
+    )
 
     code = records_validate(args)
 
@@ -1675,7 +1842,9 @@ def test_records_validate_requires_profile_fields_without_explicit_abstention(tm
     records_file = tmp_path / "records.json"
     records_file.write_text(json.dumps([record]), encoding="utf-8")
 
-    args = build_parser().parse_args(["records", "validate", "--records", str(records_file), "--format", "json"])
+    args = build_parser().parse_args(
+        ["records", "validate", "--records", str(records_file), "--format", "json"]
+    )
 
     assert records_validate(args) == 1
     payload = json.loads(capsys.readouterr().out)
@@ -1692,7 +1861,12 @@ def test_records_validate_reports_quality_warnings_in_text(tmp_path, capsys):
                 {
                     **_make_record("weak/repo"),
                     "readme": None,
-                    "github": {"description": "Weak repo", "topics": [], "archived": True, "disabled": True},
+                    "github": {
+                        "description": "Weak repo",
+                        "topics": [],
+                        "archived": True,
+                        "disabled": True,
+                    },
                     "llm_profile": {
                         "summary": "Weak repo summary",
                         "use_cases": [],
@@ -1758,7 +1932,9 @@ def test_records_stats_json_summarizes_quality_and_metadata(tmp_path, capsys):
         encoding="utf-8",
     )
 
-    args = build_parser().parse_args(["records", "stats", "--records", str(records_file), "--format", "json"])
+    args = build_parser().parse_args(
+        ["records", "stats", "--records", str(records_file), "--format", "json"]
+    )
 
     code = records_stats(args)
 
@@ -1774,7 +1950,9 @@ def test_records_stats_json_summarizes_quality_and_metadata(tmp_path, capsys):
 
 def test_records_stats_text_is_readable(tmp_path, capsys):
     records_file = tmp_path / "records.json"
-    records_file.write_text(json.dumps([{**_make_record("fastapi/fastapi"), "readme": None}]), encoding="utf-8")
+    records_file.write_text(
+        json.dumps([{**_make_record("fastapi/fastapi"), "readme": None}]), encoding="utf-8"
+    )
 
     args = build_parser().parse_args(["records", "stats", "--records", str(records_file)])
 
@@ -1800,7 +1978,11 @@ def test_profile_refresh_writes_v2_records(tmp_path, monkeypatch, capsys):
                     "name": "repo",
                     "url": "https://github.com/old/repo",
                     "github": {"description": "Old repo", "topics": []},
-                    "llm_profile": {"summary": "Old repo summary", "confidence": "low", "abstained": False},
+                    "llm_profile": {
+                        "summary": "Old repo summary",
+                        "confidence": "low",
+                        "abstained": False,
+                    },
                 }
             ]
         ),
@@ -1828,7 +2010,16 @@ def test_profile_refresh_writes_v2_records(tmp_path, monkeypatch, capsys):
     }
 
     args = build_parser().parse_args(
-        ["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--format", "json"]
+        [
+            "profile",
+            "refresh",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--format",
+            "json",
+        ]
     )
 
     with patch("xists.cli.generate_llm_profile", return_value=refreshed_profile):
@@ -1844,7 +2035,9 @@ def test_profile_refresh_writes_v2_records(tmp_path, monkeypatch, capsys):
     assert refreshed[0]["url"] == "https://github.com/old/repo"
 
 
-def test_profile_refresh_workers_runs_profiles_concurrently_and_preserves_order(tmp_path, monkeypatch):
+def test_profile_refresh_workers_runs_profiles_concurrently_and_preserves_order(
+    tmp_path, monkeypatch
+):
     records_file = tmp_path / "records.json"
     records = [_make_record("one/repo"), _make_record("two/repo"), _make_record("three/repo")]
     records_file.write_text(json.dumps(records), encoding="utf-8")
@@ -1871,8 +2064,15 @@ def test_profile_refresh_workers_runs_profiles_concurrently_and_preserves_order(
 
     args = build_parser().parse_args(
         [
-            "profile", "refresh", "--records", str(records_file), "--output", str(output_file),
-            "--force", "--workers", "3",
+            "profile",
+            "refresh",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--force",
+            "--workers",
+            "3",
         ]
     )
     with patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
@@ -1895,7 +2095,11 @@ def test_profile_refresh_resume_reuses_partial_checkpoint(tmp_path, monkeypatch,
                     "name": "repo",
                     "url": "https://github.com/one/repo",
                     "github": {"description": "One repo", "topics": []},
-                    "llm_profile": {"summary": "One repo summary", "confidence": "low", "abstained": False},
+                    "llm_profile": {
+                        "summary": "One repo summary",
+                        "confidence": "low",
+                        "abstained": False,
+                    },
                 },
                 {
                     "schema_version": 1,
@@ -1903,7 +2107,11 @@ def test_profile_refresh_resume_reuses_partial_checkpoint(tmp_path, monkeypatch,
                     "name": "repo",
                     "url": "https://github.com/two/repo",
                     "github": {"description": "Two repo", "topics": []},
-                    "llm_profile": {"summary": "Two repo summary", "confidence": "low", "abstained": False},
+                    "llm_profile": {
+                        "summary": "Two repo summary",
+                        "confidence": "low",
+                        "abstained": False,
+                    },
                 },
                 {
                     "schema_version": 1,
@@ -1911,7 +2119,11 @@ def test_profile_refresh_resume_reuses_partial_checkpoint(tmp_path, monkeypatch,
                     "name": "repo",
                     "url": "https://github.com/three/repo",
                     "github": {"description": "Three repo", "topics": []},
-                    "llm_profile": {"summary": "Three repo summary", "confidence": "low", "abstained": False},
+                    "llm_profile": {
+                        "summary": "Three repo summary",
+                        "confidence": "low",
+                        "abstained": False,
+                    },
                 },
             ]
         ),
@@ -1970,7 +2182,17 @@ def test_profile_refresh_resume_reuses_partial_checkpoint(tmp_path, monkeypatch,
     ]
 
     args = build_parser().parse_args(
-        ["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--resume", "--format", "json"]
+        [
+            "profile",
+            "refresh",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--resume",
+            "--format",
+            "json",
+        ]
     )
 
     call_count = 0
@@ -1992,7 +2214,17 @@ def test_profile_refresh_resume_reuses_partial_checkpoint(tmp_path, monkeypatch,
     assert [json.loads(line)["repo_id"] for line in checkpoint_lines] == ["one/repo", "two/repo"]
 
     resumed_args = build_parser().parse_args(
-        ["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--resume", "--format", "json"]
+        [
+            "profile",
+            "refresh",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--resume",
+            "--format",
+            "json",
+        ]
     )
 
     resumed_call_count = 0
@@ -2016,7 +2248,9 @@ def test_profile_refresh_resume_reuses_partial_checkpoint(tmp_path, monkeypatch,
 
 def test_profile_refresh_rejects_existing_checkpoint_without_resume(tmp_path, monkeypatch, capsys):
     records_file = tmp_path / "records.json"
-    records_file.write_text(json.dumps([{**_make_record("a/b"), "schema_version": 1}]), encoding="utf-8")
+    records_file.write_text(
+        json.dumps([{**_make_record("a/b"), "schema_version": 1}]), encoding="utf-8"
+    )
     output_file = tmp_path / "records-v2.json"
     checkpoint_file = tmp_path / "records-v2.json.partial.jsonl"
     checkpoint_file.write_text(json.dumps(_make_record("a/b")) + "\n", encoding="utf-8")
@@ -2025,7 +2259,9 @@ def test_profile_refresh_rejects_existing_checkpoint_without_resume(tmp_path, mo
     monkeypatch.setenv("LLM_BASE_URL", "http://localhost/v1")
     monkeypatch.setenv("LLM_MODEL", "m")
 
-    args = build_parser().parse_args(["profile", "refresh", "--records", str(records_file), "--output", str(output_file)])
+    args = build_parser().parse_args(
+        ["profile", "refresh", "--records", str(records_file), "--output", str(output_file)]
+    )
 
     code = profile_refresh(args)
 
@@ -2046,7 +2282,11 @@ def test_profile_refresh_resume_ignores_truncated_checkpoint_tail(tmp_path, monk
                     "name": "repo",
                     "url": "https://github.com/one/repo",
                     "github": {"description": "One repo", "topics": []},
-                    "llm_profile": {"summary": "One repo summary", "confidence": "low", "abstained": False},
+                    "llm_profile": {
+                        "summary": "One repo summary",
+                        "confidence": "low",
+                        "abstained": False,
+                    },
                 },
                 {
                     "schema_version": 1,
@@ -2054,7 +2294,11 @@ def test_profile_refresh_resume_ignores_truncated_checkpoint_tail(tmp_path, monk
                     "name": "repo",
                     "url": "https://github.com/two/repo",
                     "github": {"description": "Two repo", "topics": []},
-                    "llm_profile": {"summary": "Two repo summary", "confidence": "low", "abstained": False},
+                    "llm_profile": {
+                        "summary": "Two repo summary",
+                        "confidence": "low",
+                        "abstained": False,
+                    },
                 },
             ]
         ),
@@ -2083,7 +2327,17 @@ def test_profile_refresh_resume_ignores_truncated_checkpoint_tail(tmp_path, monk
         "abstained": False,
     }
 
-    args = build_parser().parse_args(["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--resume"])
+    args = build_parser().parse_args(
+        [
+            "profile",
+            "refresh",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--resume",
+        ]
+    )
 
     with patch("xists.cli.generate_llm_profile", return_value=refreshed_profile):
         code = profile_refresh(args)
@@ -2105,7 +2359,11 @@ def test_profile_refresh_dry_run_is_non_destructive(tmp_path, monkeypatch, capsy
                     "name": "repo",
                     "url": "https://github.com/one/repo",
                     "github": {"description": "One repo", "topics": []},
-                    "llm_profile": {"summary": "One repo summary", "confidence": "low", "abstained": False},
+                    "llm_profile": {
+                        "summary": "One repo summary",
+                        "confidence": "low",
+                        "abstained": False,
+                    },
                 },
                 _make_record("two/repo"),
             ]
@@ -2114,7 +2372,19 @@ def test_profile_refresh_dry_run_is_non_destructive(tmp_path, monkeypatch, capsy
     )
     output_file = tmp_path / "records-v2.json"
 
-    args = build_parser().parse_args(["profile", "refresh", "--records", str(records_file), "--output", str(output_file), "--dry-run", "--format", "json"])
+    args = build_parser().parse_args(
+        [
+            "profile",
+            "refresh",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--dry-run",
+            "--format",
+            "json",
+        ]
+    )
 
     with patch("xists.cli.generate_llm_profile") as generate:
         code = profile_refresh(args)
@@ -2136,10 +2406,23 @@ def test_ingest_github_dry_run_is_non_destructive(tmp_path, monkeypatch, capsys)
     output_file.write_text(json.dumps([_make_record("a/b")]), encoding="utf-8")
 
     args = build_parser().parse_args(
-        ["ingest", "github", "--repos", str(repos_file), "--output", str(output_file), "--dry-run", "--format", "json"]
+        [
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--dry-run",
+            "--format",
+            "json",
+        ]
     )
 
-    with patch("xists.cli.llm_config_from_env") as llm_config, patch("xists.cli.collect_record") as collect:
+    with (
+        patch("xists.cli.llm_config_from_env") as llm_config,
+        patch("xists.cli.collect_record") as collect,
+    ):
         code = ingest_github(args)
 
     assert code == 0
@@ -2187,7 +2470,16 @@ def test_index_verify_reports_stale_missing_and_fingerprint_gaps(tmp_path, capsy
     )
 
     args = build_parser().parse_args(
-        ["index", "verify", "--records", str(records_file), "--index", str(index_file), "--format", "json"]
+        [
+            "index",
+            "verify",
+            "--records",
+            str(records_file),
+            "--index",
+            str(index_file),
+            "--format",
+            "json",
+        ]
     )
 
     code = index_verify(args)
@@ -2236,7 +2528,16 @@ def test_index_verify_reports_version_and_dimension_mismatches(tmp_path, capsys)
     )
 
     args = build_parser().parse_args(
-        ["index", "verify", "--records", str(records_file), "--index", str(index_file), "--format", "json"]
+        [
+            "index",
+            "verify",
+            "--records",
+            str(records_file),
+            "--index",
+            str(index_file),
+            "--format",
+            "json",
+        ]
     )
 
     code = index_verify(args)
@@ -2279,7 +2580,9 @@ def test_index_verify_text_reports_status(tmp_path, capsys):
         encoding="utf-8",
     )
 
-    args = build_parser().parse_args(["index", "verify", "--records", str(records_file), "--index", str(index_file)])
+    args = build_parser().parse_args(
+        ["index", "verify", "--records", str(records_file), "--index", str(index_file)]
+    )
 
     code = index_verify(args)
 
@@ -2327,21 +2630,29 @@ def test_data_quality_workflow_runs_on_local_files(tmp_path, capsys):
         encoding="utf-8",
     )
 
-    validate_args = build_parser().parse_args(["records", "validate", "--records", str(records_file)])
+    validate_args = build_parser().parse_args(
+        ["records", "validate", "--records", str(records_file)]
+    )
     assert records_validate(validate_args) == 0
     assert "ok: true" in capsys.readouterr().out
 
-    records_stats_args = build_parser().parse_args(["records", "stats", "--records", str(records_file), "--format", "json"])
+    records_stats_args = build_parser().parse_args(
+        ["records", "stats", "--records", str(records_file), "--format", "json"]
+    )
     assert records_stats(records_stats_args) == 0
     records_stats_payload = json.loads(capsys.readouterr().out)
     assert records_stats_payload["record_count"] == 2
     assert records_stats_payload["quality"]["missing_search_text"] == 0
 
-    verify_args = build_parser().parse_args(["index", "verify", "--records", str(records_file), "--index", str(index_file)])
+    verify_args = build_parser().parse_args(
+        ["index", "verify", "--records", str(records_file), "--index", str(index_file)]
+    )
     assert index_verify(verify_args) == 0
     assert "status: ok" in capsys.readouterr().out
 
-    index_stats_args = build_parser().parse_args(["index", "stats", "--index", str(index_file), "--format", "json"])
+    index_stats_args = build_parser().parse_args(
+        ["index", "stats", "--index", str(index_file), "--format", "json"]
+    )
     assert index_stats(index_stats_args) == 0
     index_stats_payload = json.loads(capsys.readouterr().out)
     assert index_stats_payload["vector_count"] == 2
@@ -2396,17 +2707,25 @@ def test_ingest_github_uses_graphql_batches(tmp_path, monkeypatch):
 
     args = build_parser().parse_args(
         [
-            "ingest", "github",
-            "--repos", str(repos_file),
-            "--output", str(output_file),
-            "--report", str(tmp_path / "report.json"),
-            "--github-api", "graphql",
-            "--github-batch-size", "2",
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--report",
+            str(tmp_path / "report.json"),
+            "--github-api",
+            "graphql",
+            "--github-batch-size",
+            "2",
         ]
     )
 
-    with patch("xists.cli.collect_records_graphql", side_effect=fake_collect), \
-         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+    with (
+        patch("xists.cli.collect_records_graphql", side_effect=fake_collect),
+        patch("xists.cli.generate_llm_profile", side_effect=fake_generate),
+    ):
         code = ingest_github(args)
 
     assert code == 0
@@ -2440,19 +2759,27 @@ def test_ingest_github_graphql_batch_reports_errors(tmp_path, monkeypatch):
 
     args = build_parser().parse_args(
         [
-            "ingest", "github",
-            "--repos", str(repos_file),
-            "--output", str(output_file),
-            "--report", str(tmp_path / "report.json"),
-            "--github-api", "graphql",
-            "--github-batch-size", "2",
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--report",
+            str(tmp_path / "report.json"),
+            "--github-api",
+            "graphql",
+            "--github-batch-size",
+            "2",
         ]
     )
 
-    with patch("xists.cli.collect_records_graphql", side_effect=fake_collect), \
-         patch("xists.cli.collect_record_graphql", side_effect=fake_collect_one), \
-         patch("xists.cli.collect_record", side_effect=fake_collect_one), \
-         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+    with (
+        patch("xists.cli.collect_records_graphql", side_effect=fake_collect),
+        patch("xists.cli.collect_record_graphql", side_effect=fake_collect_one),
+        patch("xists.cli.collect_record", side_effect=fake_collect_one),
+        patch("xists.cli.generate_llm_profile", side_effect=fake_generate),
+    ):
         code = ingest_github(args)
 
     assert code == 1
@@ -2480,10 +2807,19 @@ def test_profile_refresh_isolates_llm_failure_and_writes_report(tmp_path, monkey
             raise LLMError("temporary endpoint error")
         return record["llm_profile"]
 
-    args = build_parser().parse_args([
-        "profile", "refresh", "--records", str(records_file), "--output", str(output_file),
-        "--report", str(report_file), "--force",
-    ])
+    args = build_parser().parse_args(
+        [
+            "profile",
+            "refresh",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--report",
+            str(report_file),
+            "--force",
+        ]
+    )
     with patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
         code = profile_refresh(args)
 
@@ -2501,7 +2837,9 @@ def test_profile_refresh_isolates_llm_failure_and_writes_report(tmp_path, monkey
 
 def test_profile_refresh_retry_failed_processes_current_profile(tmp_path, monkeypatch):
     records_file = tmp_path / "records.json"
-    records_file.write_text(json.dumps([_make_record("a/b"), _make_record("c/d")]), encoding="utf-8")
+    records_file.write_text(
+        json.dumps([_make_record("a/b"), _make_record("c/d")]), encoding="utf-8"
+    )
     output_file = tmp_path / "records-v2.json"
     report_file = tmp_path / "refresh-report.json"
     report_file.write_text(json.dumps({"failed": [{"repo_id": "a/b"}]}), encoding="utf-8")
@@ -2515,10 +2853,18 @@ def test_profile_refresh_retry_failed_processes_current_profile(tmp_path, monkey
         refreshed.append(record["repo_id"])
         return record["llm_profile"]
 
-    args = build_parser().parse_args([
-        "profile", "refresh", "--records", str(records_file), "--output", str(output_file),
-        "--retry-failed", str(report_file),
-    ])
+    args = build_parser().parse_args(
+        [
+            "profile",
+            "refresh",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--retry-failed",
+            str(report_file),
+        ]
+    )
     with patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
         assert profile_refresh(args) == 0
 
@@ -2545,12 +2891,27 @@ def test_ingest_github_retry_failed_replaces_existing_record(tmp_path, monkeypat
         record["llm_profile"]["summary"] = "retried"
         return record
 
-    args = build_parser().parse_args([
-        "ingest", "github", "--repos", str(repos_file), "--output", str(output_file),
-        "--report", str(tmp_path / "new-report.json"), "--retry-failed", str(retry_report),
-    ])
-    with patch("xists.cli.collect_record", side_effect=fake_collect), \
-         patch("xists.cli.generate_llm_profile", side_effect=lambda record, config, **_: record["llm_profile"]):
+    args = build_parser().parse_args(
+        [
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--report",
+            str(tmp_path / "new-report.json"),
+            "--retry-failed",
+            str(retry_report),
+        ]
+    )
+    with (
+        patch("xists.cli.collect_record", side_effect=fake_collect),
+        patch(
+            "xists.cli.generate_llm_profile",
+            side_effect=lambda record, config, **_: record["llm_profile"],
+        ),
+    ):
         assert ingest_github(args) == 0
 
     assert collected == ["c/d"]
@@ -2581,18 +2942,26 @@ def test_ingest_github_graphql_batch_falls_back_to_single_repo(tmp_path, monkeyp
 
     args = build_parser().parse_args(
         [
-            "ingest", "github",
-            "--repos", str(repos_file),
-            "--output", str(output_file),
-            "--report", str(tmp_path / "report.json"),
-            "--github-api", "graphql",
-            "--github-batch-size", "2",
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--report",
+            str(tmp_path / "report.json"),
+            "--github-api",
+            "graphql",
+            "--github-batch-size",
+            "2",
         ]
     )
 
-    with patch("xists.cli.collect_records_graphql", side_effect=fake_collect_batch), \
-         patch("xists.cli.collect_record_graphql", side_effect=fake_collect_one), \
-         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+    with (
+        patch("xists.cli.collect_records_graphql", side_effect=fake_collect_batch),
+        patch("xists.cli.collect_record_graphql", side_effect=fake_collect_one),
+        patch("xists.cli.generate_llm_profile", side_effect=fake_generate),
+    ):
         code = ingest_github(args)
 
     assert code == 0
@@ -2622,17 +2991,24 @@ def test_ingest_github_rest_falls_back_to_graphql_for_single_repo(tmp_path, monk
 
     args = build_parser().parse_args(
         [
-            "ingest", "github",
-            "--repos", str(repos_file),
-            "--output", str(output_file),
-            "--report", str(tmp_path / "report.json"),
-            "--github-api", "rest",
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--report",
+            str(tmp_path / "report.json"),
+            "--github-api",
+            "rest",
         ]
     )
 
-    with patch("xists.cli.collect_record", side_effect=fake_collect_rest), \
-         patch("xists.cli.collect_record_graphql", side_effect=fake_collect_graphql), \
-         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+    with (
+        patch("xists.cli.collect_record", side_effect=fake_collect_rest),
+        patch("xists.cli.collect_record_graphql", side_effect=fake_collect_graphql),
+        patch("xists.cli.generate_llm_profile", side_effect=fake_generate),
+    ):
         code = ingest_github(args)
 
     assert code == 0
@@ -2662,11 +3038,22 @@ def test_ingest_github_skips_existing_records(tmp_path, monkeypatch):
         return record.get("llm_profile", {})
 
     args = build_parser().parse_args(
-        ["ingest", "github", "--repos", str(repos_file), "--output", str(output_file), "--report", str(tmp_path / "report.json")]
+        [
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--report",
+            str(tmp_path / "report.json"),
+        ]
     )
 
-    with patch("xists.cli.collect_record", side_effect=fake_collect), \
-         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+    with (
+        patch("xists.cli.collect_record", side_effect=fake_collect),
+        patch("xists.cli.generate_llm_profile", side_effect=fake_generate),
+    ):
         code = ingest_github(args)
 
     assert code == 0
@@ -2707,11 +3094,25 @@ def test_ingest_github_creates_new_file_when_no_existing(tmp_path, monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "tok")
 
     args = build_parser().parse_args(
-        ["ingest", "github", "--repos", str(repos_file), "--output", str(output_file), "--report", str(tmp_path / "report.json")]
+        [
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--report",
+            str(tmp_path / "report.json"),
+        ]
     )
 
-    with patch("xists.cli.collect_record", side_effect=lambda rid, **kw: _make_record(rid)), \
-         patch("xists.cli.generate_llm_profile", side_effect=lambda r, c, **kw: r.get("llm_profile", {})):
+    with (
+        patch("xists.cli.collect_record", side_effect=lambda rid, **kw: _make_record(rid)),
+        patch(
+            "xists.cli.generate_llm_profile",
+            side_effect=lambda r, c, **kw: r.get("llm_profile", {}),
+        ),
+    ):
         code = ingest_github(args)
 
     assert code == 0
@@ -2726,19 +3127,26 @@ def test_index_build_rebuilds_legacy_vectors_without_fingerprints(tmp_path, monk
     monkeypatch.setenv("EMBEDDING_MODEL", "BAAI/bge-m3")
 
     records_file = tmp_path / "records.json"
-    records_file.write_text(json.dumps([_make_record("a/b"), _make_record("c/d")]), encoding="utf-8")
+    records_file.write_text(
+        json.dumps([_make_record("a/b"), _make_record("c/d")]), encoding="utf-8"
+    )
 
     output_file = tmp_path / "index.json"
-    output_file.write_text(json.dumps({
-        "index_version": 1,
-        "embedding_model": "BAAI/bge-m3",
-        "embedding_base_url": "http://localhost:6597/v1",
-        "dimension": 4,
-        "built_at": "2026-01-01T00:00:00+00:00",
-        "record_count": 1,
-        "skipped": [],
-        "vectors": [{"repo_id": "a/b", "vector": [1.0, 0.0, 0.0, 0.0]}],
-    }), encoding="utf-8")
+    output_file.write_text(
+        json.dumps(
+            {
+                "index_version": 1,
+                "embedding_model": "BAAI/bge-m3",
+                "embedding_base_url": "http://localhost:6597/v1",
+                "dimension": 4,
+                "built_at": "2026-01-01T00:00:00+00:00",
+                "record_count": 1,
+                "skipped": [],
+                "vectors": [{"repo_id": "a/b", "vector": [1.0, 0.0, 0.0, 0.0]}],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         return [[0.0, 1.0, 0.0, 0.0] for _ in inputs]
@@ -2795,24 +3203,29 @@ def test_index_build_refreshes_metadata_when_reusing_vector(tmp_path, monkeypatc
     records_file.write_text(json.dumps([record]), encoding="utf-8")
 
     output_file = tmp_path / "index.json"
-    output_file.write_text(json.dumps({
-        "index_version": INDEX_VERSION,
-        "record_schema_version": RECORD_SCHEMA_VERSION,
-        "embedding_model": "BAAI/bge-m3",
-        "embedding_base_url": "http://localhost:6597/v1",
-        "embedding_input_version": EMBEDDING_INPUT_VERSION,
-        "dimension": 2,
-        "built_at": "2026-01-01T00:00:00+00:00",
-        "record_count": 1,
-        "skipped": [],
-        "vectors": [
+    output_file.write_text(
+        json.dumps(
             {
-                "repo_id": "vuejs/core",
-                "embedding_input_fingerprint": embedding_input_fingerprint(record),
-                "vector": [1.0, 0.0],
+                "index_version": INDEX_VERSION,
+                "record_schema_version": RECORD_SCHEMA_VERSION,
+                "embedding_model": "BAAI/bge-m3",
+                "embedding_base_url": "http://localhost:6597/v1",
+                "embedding_input_version": EMBEDDING_INPUT_VERSION,
+                "dimension": 2,
+                "built_at": "2026-01-01T00:00:00+00:00",
+                "record_count": 1,
+                "skipped": [],
+                "vectors": [
+                    {
+                        "repo_id": "vuejs/core",
+                        "embedding_input_fingerprint": embedding_input_fingerprint(record),
+                        "vector": [1.0, 0.0],
+                    }
+                ],
             }
-        ],
-    }), encoding="utf-8")
+        ),
+        encoding="utf-8",
+    )
 
     def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         raise AssertionError("unchanged vectors should be reused without embedding calls")
@@ -2844,14 +3257,19 @@ def test_index_build_rejects_model_mismatch(tmp_path, monkeypatch):
     records_file.write_text(json.dumps([_make_record("a/b")]), encoding="utf-8")
 
     output_file = tmp_path / "index.json"
-    output_file.write_text(json.dumps({
-        "index_version": 1,
-        "embedding_model": "different-model",
-        "dimension": 4,
-        "record_count": 1,
-        "skipped": [],
-        "vectors": [{"repo_id": "a/b", "vector": [1.0, 0.0, 0.0, 0.0]}],
-    }), encoding="utf-8")
+    output_file.write_text(
+        json.dumps(
+            {
+                "index_version": 1,
+                "embedding_model": "different-model",
+                "dimension": 4,
+                "record_count": 1,
+                "skipped": [],
+                "vectors": [{"repo_id": "a/b", "vector": [1.0, 0.0, 0.0, 0.0]}],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     args = build_parser().parse_args(
         ["index", "build", "--records", str(records_file), "--output", str(output_file)]
@@ -2883,12 +3301,23 @@ def test_ingest_github_force_reprocesses_existing(tmp_path, monkeypatch):
         return record.get("llm_profile", {})
 
     args = build_parser().parse_args(
-        ["ingest", "github", "--repos", str(repos_file), "--output", str(output_file),
-         "--report", str(tmp_path / "report.json"), "--force"]
+        [
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--report",
+            str(tmp_path / "report.json"),
+            "--force",
+        ]
     )
 
-    with patch("xists.cli.collect_record", side_effect=fake_collect), \
-         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+    with (
+        patch("xists.cli.collect_record", side_effect=fake_collect),
+        patch("xists.cli.generate_llm_profile", side_effect=fake_generate),
+    ):
         code = ingest_github(args)
 
     assert code == 0
@@ -2922,12 +3351,22 @@ def test_ingest_github_checkpoint_writes_after_each_record(tmp_path, monkeypatch
         return record.get("llm_profile", {})
 
     args = build_parser().parse_args(
-        ["ingest", "github", "--repos", str(repos_file), "--output", str(output_file),
-         "--report", str(tmp_path / "report.json")]
+        [
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--report",
+            str(tmp_path / "report.json"),
+        ]
     )
 
-    with patch("xists.cli.collect_record", side_effect=fake_collect), \
-         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+    with (
+        patch("xists.cli.collect_record", side_effect=fake_collect),
+        patch("xists.cli.generate_llm_profile", side_effect=fake_generate),
+    ):
         code = ingest_github(args)
 
     # Third repo crashed, but first two should be saved.
@@ -2937,7 +3376,9 @@ def test_ingest_github_checkpoint_writes_after_each_record(tmp_path, monkeypatch
     assert [r["repo_id"] for r in saved] == ["a/b", "c/d"]
 
 
-def test_ingest_github_multithread_checkpoint_survives_midstream_interruption(tmp_path, monkeypatch):
+def test_ingest_github_multithread_checkpoint_survives_midstream_interruption(
+    tmp_path, monkeypatch
+):
     repos_file = tmp_path / "repos.txt"
     repos_file.write_text("a/b\nc/d\n", encoding="utf-8")
     output_file = tmp_path / "records.json"
@@ -2955,17 +3396,30 @@ def test_ingest_github_multithread_checkpoint_survives_midstream_interruption(tm
         assert first_completed.wait(timeout=1)
         raise RuntimeError("simulated interruption")
 
-    args = build_parser().parse_args([
-        "ingest", "github", "--repos", str(repos_file), "--output", str(output_file),
-        "--report", str(tmp_path / "report.json"), "--workers", "2",
-    ])
+    args = build_parser().parse_args(
+        [
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--report",
+            str(tmp_path / "report.json"),
+            "--workers",
+            "2",
+        ]
+    )
     with patch("xists.cli._ingest_one", side_effect=fake_ingest_one):
         with pytest.raises(RuntimeError, match="simulated interruption"):
             ingest_github(args)
 
     checkpoint_file = Path(f"{output_file}.partial.jsonl")
     assert not output_file.exists()
-    assert [json.loads(line)["repo_id"] for line in checkpoint_file.read_text(encoding="utf-8").splitlines()] == ["a/b"]
+    assert [
+        json.loads(line)["repo_id"]
+        for line in checkpoint_file.read_text(encoding="utf-8").splitlines()
+    ] == ["a/b"]
 
 
 def test_ingest_github_resume_reuses_partial_checkpoint(tmp_path, monkeypatch):
@@ -2985,16 +3439,31 @@ def test_ingest_github_resume_reuses_partial_checkpoint(tmp_path, monkeypatch):
         collected.append(repo_id)
         return _make_record(repo_id)
 
-    args = build_parser().parse_args([
-        "ingest", "github", "--repos", str(repos_file), "--output", str(output_file), "--resume",
-    ])
-    with patch("xists.cli.collect_record", side_effect=fake_collect), \
-         patch("xists.cli.generate_llm_profile", side_effect=lambda record, config: record["llm_profile"]):
+    args = build_parser().parse_args(
+        [
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--resume",
+        ]
+    )
+    with (
+        patch("xists.cli.collect_record", side_effect=fake_collect),
+        patch(
+            "xists.cli.generate_llm_profile",
+            side_effect=lambda record, config: record["llm_profile"],
+        ),
+    ):
         code = ingest_github(args)
 
     assert code == 0
     assert collected == ["c/d"]
-    assert [record["repo_id"] for record in json.loads(output_file.read_text(encoding="utf-8"))] == ["a/b", "c/d"]
+    assert [
+        record["repo_id"] for record in json.loads(output_file.read_text(encoding="utf-8"))
+    ] == ["a/b", "c/d"]
     assert not checkpoint_file.exists()
 
 
@@ -3015,16 +3484,31 @@ def test_ingest_github_resume_ignores_truncated_checkpoint_tail(tmp_path, monkey
         collected.append(repo_id)
         return _make_record(repo_id)
 
-    args = build_parser().parse_args([
-        "ingest", "github", "--repos", str(repos_file), "--output", str(output_file), "--resume",
-    ])
-    with patch("xists.cli.collect_record", side_effect=fake_collect), \
-         patch("xists.cli.generate_llm_profile", side_effect=lambda record, config: record["llm_profile"]):
+    args = build_parser().parse_args(
+        [
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--resume",
+        ]
+    )
+    with (
+        patch("xists.cli.collect_record", side_effect=fake_collect),
+        patch(
+            "xists.cli.generate_llm_profile",
+            side_effect=lambda record, config: record["llm_profile"],
+        ),
+    ):
         code = ingest_github(args)
 
     assert code == 0
     assert collected == ["c/d"]
-    assert [record["repo_id"] for record in json.loads(output_file.read_text(encoding="utf-8"))] == ["a/b", "c/d"]
+    assert [
+        record["repo_id"] for record in json.loads(output_file.read_text(encoding="utf-8"))
+    ] == ["a/b", "c/d"]
     assert not checkpoint_file.exists()
 
 
@@ -3035,7 +3519,9 @@ def test_ingest_github_rejects_existing_checkpoint_without_resume(tmp_path, caps
     checkpoint_file = Path(f"{output_file}.partial.jsonl")
     checkpoint_file.write_text(json.dumps(_make_record("a/b")) + "\n", encoding="utf-8")
 
-    args = build_parser().parse_args(["ingest", "github", "--repos", str(repos_file), "--output", str(output_file)])
+    args = build_parser().parse_args(
+        ["ingest", "github", "--repos", str(repos_file), "--output", str(output_file)]
+    )
 
     assert ingest_github(args) == 1
     output = capsys.readouterr().err
@@ -3067,12 +3553,23 @@ def test_ingest_github_force_ignores_existing(tmp_path, monkeypatch):
         return record.get("llm_profile", {})
 
     args = build_parser().parse_args(
-        ["ingest", "github", "--repos", str(repos_file), "--output", str(output_file),
-         "--report", str(tmp_path / "report.json"), "--force"]
+        [
+            "ingest",
+            "github",
+            "--repos",
+            str(repos_file),
+            "--output",
+            str(output_file),
+            "--report",
+            str(tmp_path / "report.json"),
+            "--force",
+        ]
     )
 
-    with patch("xists.cli.collect_record", side_effect=fake_collect), \
-         patch("xists.cli.generate_llm_profile", side_effect=fake_generate):
+    with (
+        patch("xists.cli.collect_record", side_effect=fake_collect),
+        patch("xists.cli.generate_llm_profile", side_effect=fake_generate),
+    ):
         code = ingest_github(args)
 
     assert code == 0
@@ -3090,16 +3587,21 @@ def test_index_build_force_rebuilds_from_scratch(tmp_path, monkeypatch):
     records_file.write_text(json.dumps([_make_record("a/b")]), encoding="utf-8")
 
     output_file = tmp_path / "index.json"
-    output_file.write_text(json.dumps({
-        "index_version": 1,
-        "embedding_model": "BAAI/bge-m3",
-        "embedding_base_url": "http://localhost:6597/v1",
-        "dimension": 4,
-        "built_at": "2026-01-01T00:00:00+00:00",
-        "record_count": 1,
-        "skipped": [],
-        "vectors": [{"repo_id": "a/b", "vector": [1.0, 0.0, 0.0, 0.0]}],
-    }), encoding="utf-8")
+    output_file.write_text(
+        json.dumps(
+            {
+                "index_version": 1,
+                "embedding_model": "BAAI/bge-m3",
+                "embedding_base_url": "http://localhost:6597/v1",
+                "dimension": 4,
+                "built_at": "2026-01-01T00:00:00+00:00",
+                "record_count": 1,
+                "skipped": [],
+                "vectors": [{"repo_id": "a/b", "vector": [1.0, 0.0, 0.0, 0.0]}],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     def fake_call_embeddings(config, inputs, *, timeout=60, input_type=None):
         return [[0.0, 0.0, 1.0, 0.0] for _ in inputs]
@@ -3195,7 +3697,9 @@ def test_index_build_checkpoints_large_builds_in_bounded_intervals(tmp_path, mon
     records_file.write_text(json.dumps(records), encoding="utf-8")
     output_file = tmp_path / "index.json"
     writes: list[Path] = []
-    original_checkpoint = __import__("xists.cli", fromlist=["_index_write_checkpoint"])._index_write_checkpoint
+    original_checkpoint = __import__(
+        "xists.cli", fromlist=["_index_write_checkpoint"]
+    )._index_write_checkpoint
 
     def record_checkpoint(output, **kwargs):
         writes.append(output)
@@ -3204,8 +3708,12 @@ def test_index_build_checkpoints_large_builds_in_bounded_intervals(tmp_path, mon
     args = build_parser().parse_args(
         ["index", "build", "--records", str(records_file), "--output", str(output_file)]
     )
-    with patch("xists.cli.call_embeddings", side_effect=lambda _config, inputs, **_kwargs: [[1.0] for _ in inputs]), patch(
-        "xists.cli._index_write_checkpoint", side_effect=record_checkpoint
+    with (
+        patch(
+            "xists.cli.call_embeddings",
+            side_effect=lambda _config, inputs, **_kwargs: [[1.0] for _ in inputs],
+        ),
+        patch("xists.cli._index_write_checkpoint", side_effect=record_checkpoint),
     ):
         assert index_build(args) == 0
 
@@ -3239,7 +3747,10 @@ def test_index_build_resume_completes_partial_checkpoint(tmp_path, monkeypatch):
     resumed_args = build_parser().parse_args(
         ["index", "build", "--records", str(records_file), "--output", str(output_file), "--resume"]
     )
-    with patch("xists.cli.call_embeddings", side_effect=lambda _config, inputs, **_kwargs: [[1.0] for _ in inputs]):
+    with patch(
+        "xists.cli.call_embeddings",
+        side_effect=lambda _config, inputs, **_kwargs: [[1.0] for _ in inputs],
+    ):
         assert index_build(resumed_args) == 0
 
     index = json.loads(output_file.read_text())
@@ -3319,7 +3830,16 @@ def test_index_migrate_v3_to_v4_output_dir_json(tmp_path, capsys):
 
     out_dir = tmp_path / "migrated_dir"
     args = build_parser().parse_args(
-        ["index", "migrate", "--input", str(v3_file), "--output-dir", str(out_dir), "--format", "json"]
+        [
+            "index",
+            "migrate",
+            "--input",
+            str(v3_file),
+            "--output-dir",
+            str(out_dir),
+            "--format",
+            "json",
+        ]
     )
     assert index_migrate(args) == 0
 
@@ -3341,7 +3861,14 @@ def test_index_migrate_errors_and_unsupported_version(tmp_path):
     unsupported_file = tmp_path / "v1_index.json"
     unsupported_file.write_text(json.dumps({"index_version": 1, "vectors": []}), encoding="utf-8")
     args_unsupported = build_parser().parse_args(
-        ["index", "migrate", "--input", str(unsupported_file), "--output", str(tmp_path / "out.json")]
+        [
+            "index",
+            "migrate",
+            "--input",
+            str(unsupported_file),
+            "--output",
+            str(tmp_path / "out.json"),
+        ]
     )
     assert index_migrate(args_unsupported) == 1
 
@@ -3360,20 +3887,34 @@ def test_index_build_resilient_checkpoint_recovery_on_truncated_json(tmp_path, m
 
     # Create a corrupted/truncated partial JSON file simulating sudden crash mid-write
     truncated_json = (
-        '{\n'
+        "{\n"
         '  "index_version": 4,\n'
-        '  "record_schema_version": ' + str(RECORD_SCHEMA_VERSION) + ',\n'
+        '  "record_schema_version": ' + str(RECORD_SCHEMA_VERSION) + ",\n"
         '  "embedding_model": "BAAI/bge-m3",\n'
         '  "embedding_base_url": "http://localhost:6597/v1",\n'
-        '  "embedding_input_version": ' + str(EMBEDDING_INPUT_VERSION) + ',\n'
+        '  "embedding_input_version": ' + str(EMBEDDING_INPUT_VERSION) + ",\n"
         '  "dimension": 1,\n'
         '  "record_count": 5,\n'
         '  "skipped": [],\n'
         '  "vectors": [\n'
-        '    {"repo_id": "r0/repo", "embedding_input_fingerprint": "' + embedding_input_fingerprint(records[0]) + '", "metadata": {}, "vector": "' + encode_vector([1.0]) + '"},\n'
-        '    {"repo_id": "r1/repo", "embedding_input_fingerprint": "' + embedding_input_fingerprint(records[1]) + '", "metadata": {}, "vector": "' + encode_vector([1.0]) + '"},\n'
-        '    {"repo_id": "r2/repo", "embedding_input_fingerprint": "' + embedding_input_fingerprint(records[2]) + '", "metadata": {}, "vector": "' + encode_vector([1.0]) + '"}\n'
-        '    {"repo_id": "r3/repo", "embedding_input_fingerprint": "' + embedding_input_fingerprint(records[3]) + '", "m'
+        '    {"repo_id": "r0/repo", "embedding_input_fingerprint": "'
+        + embedding_input_fingerprint(records[0])
+        + '", "metadata": {}, "vector": "'
+        + encode_vector([1.0])
+        + '"},\n'
+        '    {"repo_id": "r1/repo", "embedding_input_fingerprint": "'
+        + embedding_input_fingerprint(records[1])
+        + '", "metadata": {}, "vector": "'
+        + encode_vector([1.0])
+        + '"},\n'
+        '    {"repo_id": "r2/repo", "embedding_input_fingerprint": "'
+        + embedding_input_fingerprint(records[2])
+        + '", "metadata": {}, "vector": "'
+        + encode_vector([1.0])
+        + '"}\n'
+        '    {"repo_id": "r3/repo", "embedding_input_fingerprint": "'
+        + embedding_input_fingerprint(records[3])
+        + '", "m'
         # Intentionally truncated here!
     )
     checkpoint_file.write_text(truncated_json, encoding="utf-8")

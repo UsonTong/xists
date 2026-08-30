@@ -1,9 +1,6 @@
 import json
-from pathlib import Path
-from unittest.mock import patch
 
 from xists.cli import build_parser, index_pull, search, workspace_init
-from xists.search.pull import compute_file_sha256
 
 
 def test_cli_workspace_init_demo(tmp_path, monkeypatch, capsys):
@@ -30,7 +27,9 @@ def test_cli_workspace_init_demo(tmp_path, monkeypatch, capsys):
 
 def test_cli_index_pull_demo_text_and_json(tmp_path, monkeypatch, capsys):
     target_dir = tmp_path / "pulled_dir"
-    args_text = build_parser().parse_args(["index", "pull", "demo", "--output-dir", str(target_dir)])
+    args_text = build_parser().parse_args(
+        ["index", "pull", "demo", "--output-dir", str(target_dir)]
+    )
     assert args_text.func is index_pull
 
     ret = index_pull(args_text)
@@ -43,12 +42,18 @@ def test_cli_index_pull_demo_text_and_json(tmp_path, monkeypatch, capsys):
     assert "200" in out_text or "204" in out_text
 
     # JSON format with --force
-    args_json = build_parser().parse_args([
-        "index", "pull", "demo",
-        "--output-dir", str(target_dir),
-        "--force",
-        "--format", "json",
-    ])
+    args_json = build_parser().parse_args(
+        [
+            "index",
+            "pull",
+            "demo",
+            "--output-dir",
+            str(target_dir),
+            "--force",
+            "--format",
+            "json",
+        ]
+    )
     ret_json = index_pull(args_json)
     assert ret_json == 0
     out_json = capsys.readouterr().out
@@ -76,11 +81,15 @@ def test_cli_search_demo_without_api_keys(monkeypatch, capsys):
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    args_json = build_parser().parse_args([
-        "search", "python web framework",
-        "--demo",
-        "--format", "json",
-    ])
+    args_json = build_parser().parse_args(
+        [
+            "search",
+            "python web framework",
+            "--demo",
+            "--format",
+            "json",
+        ]
+    )
     assert args_json.func is search
     assert args_json.demo is True
 
@@ -95,11 +104,15 @@ def test_cli_search_demo_without_api_keys(monkeypatch, capsys):
     assert "fastapi/fastapi" in top_repos or "flask/flask" in top_repos
 
     # Text mode
-    args_text = build_parser().parse_args([
-        "search", "vector database",
-        "--demo",
-        "--format", "text",
-    ])
+    args_text = build_parser().parse_args(
+        [
+            "search",
+            "vector database",
+            "--demo",
+            "--format",
+            "text",
+        ]
+    )
     ret_text = search(args_text)
     assert ret_text == 0
     out_text = capsys.readouterr().out
@@ -112,11 +125,15 @@ def test_cli_search_offline_mode(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
-    args = build_parser().parse_args([
-        "search", "code editor",
-        "--offline",
-        "--format", "json",
-    ])
+    args = build_parser().parse_args(
+        [
+            "search",
+            "code editor",
+            "--offline",
+            "--format",
+            "json",
+        ]
+    )
     assert args.offline is True
     ret = search(args)
     assert ret == 0

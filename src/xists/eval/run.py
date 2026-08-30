@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any
 
 from xists import __version__
-from xists.eval.judge import judge_top1_vs_expected
 from xists.eval.inspect import build_summary, build_summary_text, build_top_misses
+from xists.eval.judge import judge_top1_vs_expected
 from xists.eval.schema import load_dataset
 from xists.profile.llm import LLMConfig
 from xists.search.embed import EmbeddingConfig
@@ -68,7 +68,7 @@ def evaluate_dataset(
     query_transform_mode: str = "off",
     query_transform_model: str | None = None,
 ) -> dict[str, Any]:
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(UTC)
     started_clock = perf_counter()
 
     dataset = load_dataset(cases_path)
@@ -101,7 +101,9 @@ def evaluate_dataset(
         ranked = rank_many_fn(queries, index, config, top_k=top_k, batch_size=batch_size)
 
     if len(ranked) != len(dataset["cases"]):
-        raise ValueError(f"Evaluation returned {len(ranked)} results for {len(dataset['cases'])} cases")
+        raise ValueError(
+            f"Evaluation returned {len(ranked)} results for {len(dataset['cases'])} cases"
+        )
 
     exact_hit_at_1 = 0
     exact_hit_at_k = 0
@@ -119,7 +121,7 @@ def evaluate_dataset(
     top1_miss_acceptable_count = 0
     top1_miss_serious_count = 0
     top1_miss_insufficient_evidence_count = 0
-    judge_summary = {
+    judge_summary: dict[str, Any] = {
         "enabled": judge_enabled,
         "model": llm_judge_config.model if llm_judge_config else None,
         "prompt_version": None,
@@ -148,7 +150,9 @@ def evaluate_dataset(
         top_result_score_breakdown = top_result.get("score_breakdown") if top_result else None
         top_result_rerank_score = top_result.get("rerank_score") if top_result else None
         top_result_ranking_evidence = top_result.get("ranking_evidence") if top_result else None
-        top_result_confidence_evidence = top_result.get("confidence_evidence") if top_result else None
+        top_result_confidence_evidence = (
+            top_result.get("confidence_evidence") if top_result else None
+        )
         exact_match = top_result_repo_id == expected_repo_id
         acceptable_match = top_result_repo_id in acceptable_set if top_result_repo_id else False
 
@@ -184,12 +188,15 @@ def evaluate_dataset(
                 top1_status = "acceptable"
                 top1_miss_acceptable_count += 1
             elif judge_enabled and top_result_repo_id:
+                assert llm_judge_config is not None
                 expected_record = records_by_repo_id.get(expected_repo_id)
                 if expected_record is None:
                     raise ValueError(f"Expected repo not found in records file: {expected_repo_id}")
                 top1_record = records_by_repo_id.get(top_result_repo_id)
                 if top1_record is None:
-                    raise ValueError(f"Top result repo not found in records file: {top_result_repo_id}")
+                    raise ValueError(
+                        f"Top result repo not found in records file: {top_result_repo_id}"
+                    )
                 judge_result = judge_top1_vs_expected(
                     case["query"],
                     expected_record=expected_record,
@@ -225,9 +232,15 @@ def evaluate_dataset(
                 "expected_repo_id": expected_repo_id,
                 "top_result_repo_id": top_result_repo_id,
                 "top_result_why": top_result_why if isinstance(top_result_why, list) else [],
-                "top_result_diagnostics": top_result_diagnostics if isinstance(top_result_diagnostics, dict) else {},
-                "top_result_matched_terms": top_result_matched_terms if isinstance(top_result_matched_terms, list) else [],
-                "top_result_score_breakdown": top_result_score_breakdown if isinstance(top_result_score_breakdown, dict) else {},
+                "top_result_diagnostics": top_result_diagnostics
+                if isinstance(top_result_diagnostics, dict)
+                else {},
+                "top_result_matched_terms": top_result_matched_terms
+                if isinstance(top_result_matched_terms, list)
+                else [],
+                "top_result_score_breakdown": top_result_score_breakdown
+                if isinstance(top_result_score_breakdown, dict)
+                else {},
                 "top_result_rerank_score": (
                     float(top_result_rerank_score)
                     if isinstance(top_result_rerank_score, (int, float))
@@ -251,11 +264,17 @@ def evaluate_dataset(
                 "top1_status": top1_status,
                 "judge_ran": judge_result is not None,
                 "judge_verdict": judge_result.get("verdict") if judge_result else None,
-                "judge_difference_size": judge_result.get("difference_size") if judge_result else None,
+                "judge_difference_size": judge_result.get("difference_size")
+                if judge_result
+                else None,
                 "judge_confidence": judge_result.get("confidence") if judge_result else None,
                 "judge_reason_short": judge_result.get("reason_short") if judge_result else None,
-                "judge_query_specificity": judge_result.get("query_specificity") if judge_result else None,
-                "judge_language_ecosystem_material": judge_result.get("language_ecosystem_material") if judge_result else None,
+                "judge_query_specificity": judge_result.get("query_specificity")
+                if judge_result
+                else None,
+                "judge_language_ecosystem_material": judge_result.get("language_ecosystem_material")
+                if judge_result
+                else None,
                 "judge": judge_result,
             }
         )
@@ -310,7 +329,7 @@ def evaluate_dataset(
     }
     summary = build_summary(summary_seed)
 
-    finished_at = datetime.now(timezone.utc)
+    finished_at = datetime.now(UTC)
     retrieval_configuration = {
         "embedding_model": index.get("embedding_model"),
         "embedding_input_version": index.get("embedding_input_version"),
@@ -320,7 +339,9 @@ def evaluate_dataset(
         "ranking_strategy": ranking_strategy,
         "rerank_candidate_limit": rerank_candidate_limit if ranking_strategy == "rerank" else None,
         "exploratory_threshold": exploratory_threshold,
-        "rerank_abstain_threshold": rerank_abstain_threshold if ranking_strategy == "rerank" else None,
+        "rerank_abstain_threshold": rerank_abstain_threshold
+        if ranking_strategy == "rerank"
+        else None,
         "confidence_calibration": confidence_calibration,
         "query_transform_mode": query_transform_mode,
         "query_transform_model": query_transform_model,
@@ -338,7 +359,9 @@ def evaluate_dataset(
         "ranking_strategy": ranking_strategy,
         "rerank_candidate_limit": rerank_candidate_limit if ranking_strategy == "rerank" else None,
         "exploratory_threshold": exploratory_threshold,
-        "rerank_abstain_threshold": rerank_abstain_threshold if ranking_strategy == "rerank" else None,
+        "rerank_abstain_threshold": rerank_abstain_threshold
+        if ranking_strategy == "rerank"
+        else None,
         "confidence_calibration": confidence_calibration,
         "query_transform_mode": query_transform_mode,
         "query_transform_model": query_transform_model,
@@ -356,8 +379,12 @@ def evaluate_dataset(
             "top1_miss_acceptable_count": top1_miss_acceptable_count,
             "top1_miss_serious_count": top1_miss_serious_count,
             "top1_miss_insufficient_evidence_count": top1_miss_insufficient_evidence_count,
-            "top1_miss_acceptable_rate": _round_metric(_safe_divide(top1_miss_acceptable_count, top1_miss_count)),
-            "top1_miss_serious_rate": _round_metric(_safe_divide(top1_miss_serious_count, top1_miss_count)),
+            "top1_miss_acceptable_rate": _round_metric(
+                _safe_divide(top1_miss_acceptable_count, top1_miss_count)
+            ),
+            "top1_miss_serious_rate": _round_metric(
+                _safe_divide(top1_miss_serious_count, top1_miss_count)
+            ),
             "top1_miss_insufficient_evidence_rate": _round_metric(
                 _safe_divide(top1_miss_insufficient_evidence_count, top1_miss_count)
             ),

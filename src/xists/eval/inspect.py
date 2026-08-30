@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 MISS_STATUS_ORDER = {
     "serious_mismatch": 0,
     "insufficient_evidence": 1,
@@ -31,11 +30,15 @@ def build_summary(report: dict[str, Any]) -> dict[str, Any]:
     top1_summary = report.get("top1_summary") or {}
     case_count = int(report.get("case_count") or 0)
 
-    exact_top1_count = sum(1 for result in report.get("results", []) if result.get("top1_status") == "exact")
+    exact_top1_count = sum(
+        1 for result in report.get("results", []) if result.get("top1_status") == "exact"
+    )
     acceptable_substitute_top1_count = int(top1_summary.get("top1_miss_acceptable_count") or 0)
     acceptable_top1_count = exact_top1_count + acceptable_substitute_top1_count
     serious_mismatch_count = int(top1_summary.get("top1_miss_serious_count") or 0)
-    insufficient_evidence_count = int(top1_summary.get("top1_miss_insufficient_evidence_count") or 0)
+    insufficient_evidence_count = int(
+        top1_summary.get("top1_miss_insufficient_evidence_count") or 0
+    )
     abstain_count = sum(1 for result in report.get("results", []) if result.get("abstained"))
     wrong_high_confidence_count = int(confidence.get("wrong_high_confidence_top_1_count") or 0)
     recall_at_1_count = sum(
@@ -144,7 +147,9 @@ def case_brief(result: dict[str, Any]) -> dict[str, Any]:
     return brief
 
 
-def build_top_misses(results: list[dict[str, Any]], *, limit: int | None = None) -> list[dict[str, Any]]:
+def build_top_misses(
+    results: list[dict[str, Any]], *, limit: int | None = None
+) -> list[dict[str, Any]]:
     """Collect non-exact cases, sorted to put the most actionable misses first."""
 
     misses = [case_brief(result) for result in results if result.get("top1_status") != "exact"]
@@ -216,8 +221,15 @@ def inspect_report(
         )
     )
 
-    summary = report.get("summary") if isinstance(report.get("summary"), dict) else build_summary(report)
-    summary_text = report.get("summary_text") if isinstance(report.get("summary_text"), list) else build_summary_text(summary)
+    raw_summary = report.get("summary")
+    summary: dict[str, Any] = (
+        raw_summary if isinstance(raw_summary, dict) else build_summary(report)
+    )
+    summary_text = (
+        report.get("summary_text")
+        if isinstance(report.get("summary_text"), list)
+        else build_summary_text(summary)
+    )
 
     return {
         "dataset_name": report.get("dataset_name"),

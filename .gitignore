@@ -40,3 +40,9 @@ data/scale-*-repair-report*.json
 data/scale-*-failure-diagnostics.json
 data/scale-cross-domain-*-report.json
 data/scale-*-retry*.json
+
+# Scratch and evaluation output files
+eval-report-100.json
+*.key
+records-10k.json
+uv.lock

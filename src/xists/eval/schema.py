@@ -64,7 +64,9 @@ def normalize_dataset(raw: Any) -> dict[str, Any]:
     families: dict[str, list[str]] = {}
     for family_name, repo_ids in raw_families.items():
         normalized_name = _expect_string(family_name, field="families key")
-        families[normalized_name] = _expect_string_list(repo_ids, field=f"families.{normalized_name}")
+        families[normalized_name] = _expect_string_list(
+            repo_ids, field=f"families.{normalized_name}"
+        )
 
     raw_cases = raw.get("cases")
     if not isinstance(raw_cases, list) or not raw_cases:
@@ -97,7 +99,9 @@ def normalize_dataset(raw: Any) -> dict[str, Any]:
         tags = _expect_string_list(raw_case.get("tags"), field="tags", case_id=case_id)
         notes = raw_case.get("notes")
         if notes is not None and (not isinstance(notes, str) or not notes.strip()):
-            raise EvaluationDatasetError(f"case {case_id}: notes must be a non-empty string when provided")
+            raise EvaluationDatasetError(
+                f"case {case_id}: notes must be a non-empty string when provided"
+            )
 
         unknown_families = [name for name in acceptable_families if name not in families]
         if unknown_families:

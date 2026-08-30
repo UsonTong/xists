@@ -47,7 +47,11 @@ def calibrate_confidence(
         rerank_score = result.get("rerank_score")
         semantic_rank = ranking.get("semantic_rank")
         rerank_rank = ranking.get("rerank_rank")
-        reranker_available = isinstance(rerank_score, (int, float)) and isinstance(semantic_rank, int) and isinstance(rerank_rank, int)
+        reranker_available = (
+            isinstance(rerank_score, (int, float))
+            and isinstance(semantic_rank, int)
+            and isinstance(rerank_rank, int)
+        )
         support: list[str] = []
         downgrade: list[str] = []
 

@@ -29,7 +29,9 @@ SEARCHES = 20
 def test_twenty_searches_on_2k_index_stay_under_five_seconds():
     records = MODULE.generate_records(COUNT)
     index = MODULE.generate_index(records, dimension=DIMENSION, seed=42)
-    config = EmbeddingConfig(api_key="smoke", base_url="http://smoke.invalid/v1", model=MODULE.SYNTHETIC_MODEL)
+    config = EmbeddingConfig(
+        api_key="smoke", base_url="http://smoke.invalid/v1", model=MODULE.SYNTHETIC_MODEL
+    )
     rng = np.random.RandomState(0)
     queries = rng.standard_normal((SEARCHES, DIMENSION))
     queries /= np.linalg.norm(queries, axis=1, keepdims=True)
@@ -41,4 +43,6 @@ def test_twenty_searches_on_2k_index_stay_under_five_seconds():
         assert result["results"]
     elapsed = time.perf_counter() - start
 
-    assert elapsed < 5.0, f"20 searches took {elapsed:.2f}s on a {COUNT}x{DIMENSION} index (expected < 5s)"
+    assert elapsed < 5.0, (
+        f"20 searches took {elapsed:.2f}s on a {COUNT}x{DIMENSION} index (expected < 5s)"
+    )

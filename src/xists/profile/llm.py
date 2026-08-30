@@ -16,7 +16,7 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from xists.records import normalize_llm_profile
@@ -36,7 +36,7 @@ PROFILE_SYSTEM_PROMPT = (
     "- Never invent facts. If the evidence does not support a field, leave it "
     "empty (empty array) or null (summary).\n"
     "- If the evidence is too thin to describe the repository, set "
-    "\"abstained\" to true, set \"confidence\" to \"low\", and keep the other "
+    '"abstained" to true, set "confidence" to "low", and keep the other '
     "fields empty.\n"
     "- Do not copy marketing language. Be concrete and neutral.\n"
     "- aliases are alternate names or canonical short forms the project is "
@@ -108,6 +108,7 @@ def llm_config_from_env() -> LLMConfig:
             f"Missing environment variables: {', '.join(missing)}. "
             "Set them in your .env (see .env.example)."
         )
+    assert api_key is not None and base_url is not None and model is not None
 
     return LLMConfig(api_key=api_key, base_url=base_url, model=model)
 
@@ -195,7 +196,9 @@ def parse_llm_profile_response(content: str) -> dict[str, Any]:
     return profile
 
 
-def call_llm(config: LLMConfig, messages: list[dict[str, str]], *, timeout: int = 600) -> LLMResponse:
+def call_llm(
+    config: LLMConfig, messages: list[dict[str, str]], *, timeout: int = 600
+) -> LLMResponse:
     """Call an OpenAI-compatible chat completions endpoint."""
 
     payload = {
@@ -211,7 +214,9 @@ def call_llm(config: LLMConfig, messages: list[dict[str, str]], *, timeout: int 
         "User-Agent": USER_AGENT,
     }
 
-    request = urllib.request.Request(config.chat_completions_url, data=body, headers=headers, method="POST")
+    request = urllib.request.Request(
+        config.chat_completions_url, data=body, headers=headers, method="POST"
+    )
     last_error: Exception | None = None
     for attempt in range(3):
         try:
@@ -273,7 +278,7 @@ def generate_llm_profile(
         {
             "provider": "openai_compatible",
             "model": config.model,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "prompt_version": PROFILE_PROMPT_VERSION,
             "prompt_hash": profile_prompt_hash(),
             "duration_seconds": duration_seconds,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -23,7 +23,10 @@ from xists.search.index import (
 def _profile_quality_score(record_or_meta: dict[str, Any]) -> float:
     """Calculate heuristic quality score to resolve duplicate conflicts."""
     score = 0.0
-    profile = record_or_meta.get("llm_profile") if "llm_profile" in record_or_meta else record_or_meta
+    raw_profile = (
+        record_or_meta.get("llm_profile") if "llm_profile" in record_or_meta else record_or_meta
+    )
+    profile: dict[str, Any] = raw_profile if isinstance(raw_profile, dict) else {}
     confidence = str(profile.get("confidence") or "").lower()
     if confidence == "high":
         score += 10.0
@@ -128,9 +131,15 @@ def merge_indices(
             for entry in entries:
                 vec = decode_vector(entry.get("vector"), dimension=dim)
                 rows.append(vec if vec is not None else np.zeros(dim or 0, dtype=np.float32))
-            mat = np.asarray(rows, dtype=np.float32) if rows else np.empty((0, dim or 0), dtype=np.float32)
+            mat = (
+                np.asarray(rows, dtype=np.float32)
+                if rows
+                else np.empty((0, dim or 0), dtype=np.float32)
+            )
 
-        records_list = loaded_records_by_index[idx_i] if idx_i < len(loaded_records_by_index) else []
+        records_list = (
+            loaded_records_by_index[idx_i] if idx_i < len(loaded_records_by_index) else []
+        )
         records_by_id = {
             str(r.get("repo_id") or r.get("repo_id_requested")).lower(): r
             for r in records_list
@@ -176,11 +185,13 @@ def merge_indices(
 
     for item in merged_entries_map.values():
         entry = item["entry"]
-        final_entries.append({
-            "repo_id": entry.get("repo_id"),
-            "embedding_input_fingerprint": entry.get("embedding_input_fingerprint"),
-            "metadata": entry.get("metadata", {}),
-        })
+        final_entries.append(
+            {
+                "repo_id": entry.get("repo_id"),
+                "embedding_input_fingerprint": entry.get("embedding_input_fingerprint"),
+                "metadata": entry.get("metadata", {}),
+            }
+        )
         if item["record"]:
             final_records.append(item["record"])
         if item["vector"] is not None:
@@ -200,7 +211,7 @@ def merge_indices(
         "embedding_base_url": loaded_indices[0].get("embedding_base_url"),
         "embedding_input_version": EMBEDDING_INPUT_VERSION,
         "dimension": base_dimension,
-        "built_at": datetime.now(timezone.utc).isoformat(),
+        "built_at": datetime.now(UTC).isoformat(),
         "record_count": len(final_entries),
         "skipped": [],
         "vectors": final_entries,
@@ -212,7 +223,9 @@ def merge_indices(
     if out_rec and final_records:
         out_rec.parent.mkdir(parents=True, exist_ok=True)
         temp_rec = out_rec.with_name(f".{out_rec.name}.tmp.{datetime.now().timestamp()}")
-        temp_rec.write_text(json.dumps(final_records, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_rec.write_text(
+            json.dumps(final_records, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         temp_rec.replace(out_rec)
 
     elapsed_ms = round((perf_counter() - started) * 1000, 3)

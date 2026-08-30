@@ -1,7 +1,6 @@
-import json
 import importlib.util
+import json
 from pathlib import Path
-
 
 SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "check_eval_report.py"
 SPEC = importlib.util.spec_from_file_location("check_eval_report", SCRIPT_PATH)

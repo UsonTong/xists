@@ -33,8 +33,12 @@ def test_resolve_workspace_uses_configured_root_in_empty_directory(tmp_path, mon
     assert workspace.eval_report == workspace_root_path / "eval-report.json"
 
 
-@pytest.mark.parametrize("legacy_filename", ("repos.txt", "records.json", "index.json", "eval-cases.json"))
-def test_resolve_workspace_uses_legacy_directory_for_any_legacy_file(tmp_path, monkeypatch, legacy_filename):
+@pytest.mark.parametrize(
+    "legacy_filename", ("repos.txt", "records.json", "index.json", "eval-cases.json")
+)
+def test_resolve_workspace_uses_legacy_directory_for_any_legacy_file(
+    tmp_path, monkeypatch, legacy_filename
+):
     workspace_root_path = tmp_path / "workspace"
     legacy_directory = tmp_path / "legacy"
     legacy_directory.mkdir()
@@ -112,7 +116,16 @@ def test_parser_explicit_paths_override_workspace_defaults_for_all_workflows(tmp
 
     parser = build_parser()
     ingest = parser.parse_args(
-        ["ingest", "github", "--repos", "input.txt", "--output", "output.json", "--report", "report.json"]
+        [
+            "ingest",
+            "github",
+            "--repos",
+            "input.txt",
+            "--output",
+            "output.json",
+            "--report",
+            "report.json",
+        ]
     )
     index = parser.parse_args(
         ["index", "build", "--records", "input.json", "--output", "index-output.json"]
@@ -122,7 +135,16 @@ def test_parser_explicit_paths_override_workspace_defaults_for_all_workflows(tmp
     )
     search = parser.parse_args(["search", "query", "--index", "search-index.json"])
     evaluation = parser.parse_args(
-        ["eval", "run", "--cases", "cases.json", "--index", "eval-index.json", "--output", "evaluation.json"]
+        [
+            "eval",
+            "run",
+            "--cases",
+            "cases.json",
+            "--index",
+            "eval-index.json",
+            "--output",
+            "evaluation.json",
+        ]
     )
 
     assert (ingest.repos, ingest.output, ingest.report) == (
@@ -140,7 +162,9 @@ def test_parser_explicit_paths_override_workspace_defaults_for_all_workflows(tmp
     )
 
 
-def test_workspace_environment_priority_is_shell_then_current_directory_then_workspace(tmp_path, monkeypatch):
+def test_workspace_environment_priority_is_shell_then_current_directory_then_workspace(
+    tmp_path, monkeypatch
+):
     workspace_root_path = tmp_path / "workspace"
     current_directory = tmp_path / "current"
     workspace_root_path.mkdir()
@@ -152,15 +176,17 @@ def test_workspace_environment_priority_is_shell_then_current_directory_then_wor
         encoding="utf-8",
     )
     (current_directory / ".env").write_text(
-        "XISTS_TEST_CURRENT_WINS=current\n"
-        "XISTS_TEST_SHELL_WINS=current\n",
+        "XISTS_TEST_CURRENT_WINS=current\nXISTS_TEST_SHELL_WINS=current\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("XISTS_TEST_SHELL_WINS", "shell")
     monkeypatch.delenv("XISTS_TEST_FROM_WORKSPACE", raising=False)
     monkeypatch.delenv("XISTS_TEST_CURRENT_WINS", raising=False)
 
-    load_workspace_environment(resolve_workspace(cwd=current_directory, environ={"XISTS_HOME": str(workspace_root_path)}), cwd=current_directory)
+    load_workspace_environment(
+        resolve_workspace(cwd=current_directory, environ={"XISTS_HOME": str(workspace_root_path)}),
+        cwd=current_directory,
+    )
 
     assert os.environ["XISTS_TEST_FROM_WORKSPACE"] == "workspace"
     assert os.environ["XISTS_TEST_CURRENT_WINS"] == "current"
@@ -193,7 +219,9 @@ def test_init_command_creates_only_the_configured_workspace(tmp_path, monkeypatc
     args = build_parser().parse_args(["init"])
 
     assert args.func is workspace_init
-    with patch("urllib.request.urlopen", side_effect=AssertionError("init must not access the network")):
+    with patch(
+        "urllib.request.urlopen", side_effect=AssertionError("init must not access the network")
+    ):
         assert workspace_init(args) == 0
     assert workspace_root_path.is_dir()
     assert (workspace_root_path / ".env").is_file()

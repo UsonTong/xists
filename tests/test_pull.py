@@ -1,16 +1,11 @@
 import io
 import json
 import tarfile
-import tempfile
-import urllib.request
-import zipfile
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from xists.search.pull import (
-    INDEX_PRESETS,
     compute_file_sha256,
     pull_index,
 )
@@ -68,7 +63,11 @@ def test_pull_index_sha256_checksum_verification(tmp_path):
     # Pulling with invalid sha raises ValueError
     bad_dir = tmp_path / "bad_checksum"
     with pytest.raises(ValueError, match="SHA-256 checksum mismatch"):
-        pull_index("demo", bad_dir, sha256="0000000000000000000000000000000000000000000000000000000000000000")
+        pull_index(
+            "demo",
+            bad_dir,
+            sha256="0000000000000000000000000000000000000000000000000000000000000000",
+        )
 
 
 def test_pull_index_unknown_preset_raises_value_error(tmp_path):
@@ -95,10 +94,13 @@ def test_pull_index_remote_tar_archive(tmp_path):
     class MockResponse:
         def __init__(self, content):
             self.content = content
+
         def __enter__(self):
             return self
+
         def __exit__(self, *args):
             pass
+
         def read(self, amt=None):
             return self.content.read(amt)
 
@@ -124,10 +126,13 @@ def test_pull_index_safe_extraction_prevents_path_traversal(tmp_path):
     class MockResponse:
         def __init__(self, content):
             self.content = content
+
         def __enter__(self):
             return self
+
         def __exit__(self, *args):
             pass
+
         def read(self, amt=None):
             return self.content.read(amt)
 

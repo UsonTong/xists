@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
@@ -7,9 +6,9 @@ import pytest
 
 from xists.cli import build_parser, index_append, index_merge, index_prune
 from xists.records import RECORD_SCHEMA_VERSION
-from xists.search.append import append_records_to_index, append_repo_to_index
+from xists.search.append import append_records_to_index
 from xists.search.embed import EmbeddingConfig
-from xists.search.index import INDEX_VERSION, load_index, save_index
+from xists.search.index import load_index, save_index
 from xists.search.merge import merge_indices
 from xists.search.prune import prune_index
 
@@ -42,26 +41,47 @@ def sample_workspace(tmp_path, mock_embedding_config):
             "repo_id": "owner/repo1",
             "name": "repo1",
             "url": "https://github.com/owner/repo1",
-            "github": {"description": "First test repository", "stars": 100, "archived": False, "disabled": False},
-            "llm_profile": {"summary": "First summary", "search_text": "first search text", "confidence": "high"},
+            "github": {
+                "description": "First test repository",
+                "stars": 100,
+                "archived": False,
+                "disabled": False,
+            },
+            "llm_profile": {
+                "summary": "First summary",
+                "search_text": "first search text",
+                "confidence": "high",
+            },
         },
         {
             "schema_version": RECORD_SCHEMA_VERSION,
             "repo_id": "owner/repo2",
             "name": "repo2",
             "url": "https://github.com/owner/repo2",
-            "github": {"description": "Second test repository (archived)", "stars": 50, "archived": True, "disabled": False},
-            "llm_profile": {"summary": "Second summary", "search_text": "second search text", "confidence": "medium"},
+            "github": {
+                "description": "Second test repository (archived)",
+                "stars": 50,
+                "archived": True,
+                "disabled": False,
+            },
+            "llm_profile": {
+                "summary": "Second summary",
+                "search_text": "second search text",
+                "confidence": "medium",
+            },
         },
     ]
     records_file = tmp_path / "records.json"
     records_file.write_text(json.dumps(records, indent=2), encoding="utf-8")
 
     index_file = tmp_path / "index.json"
-    matrix = np.array([
-        [1.0, 0.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0, 0.0],
-    ], dtype=np.float32)
+    matrix = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
 
     index_doc = {
         "index_version": 4,
@@ -95,8 +115,17 @@ def test_append_records_to_index_adds_new_repo(sample_workspace, mock_embedding_
         "repo_id": "owner/repo3",
         "name": "repo3",
         "url": "https://github.com/owner/repo3",
-        "github": {"description": "Third test repository", "stars": 200, "archived": False, "disabled": False},
-        "llm_profile": {"summary": "Third summary", "search_text": "third search text", "confidence": "high"},
+        "github": {
+            "description": "Third test repository",
+            "stars": 200,
+            "archived": False,
+            "disabled": False,
+        },
+        "llm_profile": {
+            "summary": "Third summary",
+            "search_text": "third search text",
+            "confidence": "high",
+        },
     }
 
     with patch("xists.search.append.call_embeddings", side_effect=_mock_call_embeddings):
@@ -126,13 +155,17 @@ def test_append_records_to_index_adds_new_repo(sample_workspace, mock_embedding_
     assert saved_records[2]["repo_id"] == "owner/repo3"
 
 
-def test_append_records_idempotent_skip_when_fingerprint_matches(sample_workspace, mock_embedding_config):
+def test_append_records_idempotent_skip_when_fingerprint_matches(
+    sample_workspace, mock_embedding_config
+):
     tmp_path, records_file, index_file = sample_workspace
     existing_records = json.loads(records_file.read_text(encoding="utf-8"))
 
     # Append same records without change -> should skip re-embedding
-    with patch("xists.search.append.call_embeddings", side_effect=_mock_call_embeddings) as mock_embed:
-        result = append_records_to_index(
+    with patch(
+        "xists.search.append.call_embeddings", side_effect=_mock_call_embeddings
+    ) as mock_embed:
+        append_records_to_index(
             existing_records,
             index_path=index_file,
             records_path=records_file,
@@ -142,7 +175,9 @@ def test_append_records_idempotent_skip_when_fingerprint_matches(sample_workspac
         assert mock_embed.call_count == 1  # only repo1 was fp1 vs calculated
 
     # Running a second time with exact same records -> 0 embed calls
-    with patch("xists.search.append.call_embeddings", side_effect=_mock_call_embeddings) as mock_embed:
+    with patch(
+        "xists.search.append.call_embeddings", side_effect=_mock_call_embeddings
+    ) as mock_embed:
         result2 = append_records_to_index(
             existing_records,
             index_path=index_file,
@@ -172,7 +207,14 @@ def test_merge_indices_combines_matrices_and_deduplicates(tmp_path):
     }
     mat1 = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
     save_index(idx1_file, doc1, matrix=mat1, version=4)
-    rec1_file.write_text(json.dumps([{"repo_id": "org/repoA"}, {"repo_id": "org/repoB", "llm_profile": {"confidence": "low"}}]))
+    rec1_file.write_text(
+        json.dumps(
+            [
+                {"repo_id": "org/repoA"},
+                {"repo_id": "org/repoB", "llm_profile": {"confidence": "low"}},
+            ]
+        )
+    )
 
     # Index 2: repoB (high quality), repoC
     doc2 = {
@@ -180,13 +222,26 @@ def test_merge_indices_combines_matrices_and_deduplicates(tmp_path):
         "embedding_model": "bge-m3",
         "dimension": 2,
         "vectors": [
-            {"repo_id": "org/repoB", "metadata": {"name": "repoB", "confidence": "high", "summary": "Better summary"}},
+            {
+                "repo_id": "org/repoB",
+                "metadata": {"name": "repoB", "confidence": "high", "summary": "Better summary"},
+            },
             {"repo_id": "org/repoC", "metadata": {"name": "repoC"}},
         ],
     }
     mat2 = np.array([[0.5, 0.5], [0.0, 0.5]], dtype=np.float32)
     save_index(idx2_file, doc2, matrix=mat2, version=4)
-    rec2_file.write_text(json.dumps([{"repo_id": "org/repoB", "llm_profile": {"confidence": "high", "summary": "Better summary"}}, {"repo_id": "org/repoC"}]))
+    rec2_file.write_text(
+        json.dumps(
+            [
+                {
+                    "repo_id": "org/repoB",
+                    "llm_profile": {"confidence": "high", "summary": "Better summary"},
+                },
+                {"repo_id": "org/repoC"},
+            ]
+        )
+    )
 
     out_idx = tmp_path / "merged_idx.json"
     out_rec = tmp_path / "merged_rec.json"
@@ -213,8 +268,18 @@ def test_merge_indices_combines_matrices_and_deduplicates(tmp_path):
 def test_merge_indices_rejects_model_mismatch(tmp_path):
     idx1 = tmp_path / "i1.json"
     idx2 = tmp_path / "i2.json"
-    save_index(idx1, {"embedding_model": "model-A", "dimension": 4, "vectors": []}, matrix=np.empty((0, 4), dtype=np.float32), version=4)
-    save_index(idx2, {"embedding_model": "model-B", "dimension": 4, "vectors": []}, matrix=np.empty((0, 4), dtype=np.float32), version=4)
+    save_index(
+        idx1,
+        {"embedding_model": "model-A", "dimension": 4, "vectors": []},
+        matrix=np.empty((0, 4), dtype=np.float32),
+        version=4,
+    )
+    save_index(
+        idx2,
+        {"embedding_model": "model-B", "dimension": 4, "vectors": []},
+        matrix=np.empty((0, 4), dtype=np.float32),
+        version=4,
+    )
 
     with pytest.raises(ValueError, match="different embedding models"):
         merge_indices([idx1, idx2], output_index_path=tmp_path / "merged.json")
@@ -274,12 +339,18 @@ def test_cli_index_append_and_prune_and_merge(sample_workspace, monkeypatch, cap
     monkeypatch.setenv("EMBEDDING_MODEL", "test-model")
 
     # 1. Test CLI index prune
-    args_prune = build_parser().parse_args([
-        "index", "prune",
-        "--index", str(index_file),
-        "--records", str(records_file),
-        "--format", "json",
-    ])
+    args_prune = build_parser().parse_args(
+        [
+            "index",
+            "prune",
+            "--index",
+            str(index_file),
+            "--records",
+            str(records_file),
+            "--format",
+            "json",
+        ]
+    )
     assert args_prune.func is index_prune
     ret_prune = index_prune(args_prune)
     assert ret_prune == 0
@@ -294,18 +365,34 @@ def test_cli_index_append_and_prune_and_merge(sample_workspace, monkeypatch, cap
         "repo_id": "owner/extra_repo",
         "name": "extra_repo",
         "url": "https://github.com/owner/extra_repo",
-        "github": {"description": "Extra test repo", "stars": 300, "archived": False, "disabled": False},
-        "llm_profile": {"summary": "Extra summary", "search_text": "extra search text", "confidence": "high"},
+        "github": {
+            "description": "Extra test repo",
+            "stars": 300,
+            "archived": False,
+            "disabled": False,
+        },
+        "llm_profile": {
+            "summary": "Extra summary",
+            "search_text": "extra search text",
+            "confidence": "high",
+        },
     }
     extra_records_file.write_text(json.dumps([extra_record]), encoding="utf-8")
 
-    args_append = build_parser().parse_args([
-        "index", "append",
-        "--input", str(extra_records_file),
-        "--index", str(index_file),
-        "--records", str(records_file),
-        "--format", "json",
-    ])
+    args_append = build_parser().parse_args(
+        [
+            "index",
+            "append",
+            "--input",
+            str(extra_records_file),
+            "--index",
+            str(index_file),
+            "--records",
+            str(records_file),
+            "--format",
+            "json",
+        ]
+    )
     assert args_append.func is index_append
 
     with patch("xists.search.append.call_embeddings", side_effect=_mock_call_embeddings):
@@ -323,18 +410,36 @@ def test_cli_index_append_and_prune_and_merge(sample_workspace, monkeypatch, cap
         "repo_id": "owner/collected_repo",
         "name": "collected_repo",
         "url": "https://github.com/owner/collected_repo",
-        "github": {"description": "Collected repo", "stars": 400, "archived": False, "disabled": False},
-        "llm_profile": {"summary": "Collected summary", "search_text": "collected search text", "confidence": "high"},
+        "github": {
+            "description": "Collected repo",
+            "stars": 400,
+            "archived": False,
+            "disabled": False,
+        },
+        "llm_profile": {
+            "summary": "Collected summary",
+            "search_text": "collected search text",
+            "confidence": "high",
+        },
     }
-    args_repo_append = build_parser().parse_args([
-        "index", "append",
-        "--repo", "owner/collected_repo",
-        "--index", str(index_file),
-        "--records", str(records_file),
-        "--format", "text",
-    ])
-    with patch("xists.search.append.collect_record", return_value=mock_collected), \
-         patch("xists.search.append.call_embeddings", side_effect=_mock_call_embeddings):
+    args_repo_append = build_parser().parse_args(
+        [
+            "index",
+            "append",
+            "--repo",
+            "owner/collected_repo",
+            "--index",
+            str(index_file),
+            "--records",
+            str(records_file),
+            "--format",
+            "text",
+        ]
+    )
+    with (
+        patch("xists.search.append.collect_record", return_value=mock_collected),
+        patch("xists.search.append.call_embeddings", side_effect=_mock_call_embeddings),
+    ):
         ret_repo_append = index_append(args_repo_append)
         assert ret_repo_append == 0
 
@@ -351,15 +456,24 @@ def test_cli_index_append_and_prune_and_merge(sample_workspace, monkeypatch, cap
             {"repo_id": "owner/another_repo", "metadata": {"name": "another_repo"}},
         ],
     }
-    save_index(idx2_file, doc2, matrix=np.array([[0.1, 0.2, 0.3, 0.4]], dtype=np.float32), version=4)
+    save_index(
+        idx2_file, doc2, matrix=np.array([[0.1, 0.2, 0.3, 0.4]], dtype=np.float32), version=4
+    )
     out_merged = tmp_path / "final_merged.json"
 
-    args_merge = build_parser().parse_args([
-        "index", "merge",
-        "--indices", str(index_file), str(idx2_file),
-        "--output", str(out_merged),
-        "--format", "json",
-    ])
+    args_merge = build_parser().parse_args(
+        [
+            "index",
+            "merge",
+            "--indices",
+            str(index_file),
+            str(idx2_file),
+            "--output",
+            str(out_merged),
+            "--format",
+            "json",
+        ]
+    )
     assert args_merge.func is index_merge
     ret_merge = index_merge(args_merge)
     assert ret_merge == 0
@@ -373,21 +487,29 @@ def test_cli_index_append_and_merge_error_handling(sample_workspace, capsys):
     tmp_path, records_file, index_file = sample_workspace
 
     # Error when neither --repo nor --input is given
-    args_no_input = build_parser().parse_args([
-        "index", "append",
-        "--index", str(index_file),
-    ])
+    args_no_input = build_parser().parse_args(
+        [
+            "index",
+            "append",
+            "--index",
+            str(index_file),
+        ]
+    )
     assert index_append(args_no_input) == 2
     err = capsys.readouterr().err
     assert "Either --repo owner/repo or --input" in err
 
     # Error when merge given < 2 indices
-    args_single_merge = build_parser().parse_args([
-        "index", "merge",
-        "--indices", str(index_file),
-        "--output", str(tmp_path / "out.json"),
-    ])
+    args_single_merge = build_parser().parse_args(
+        [
+            "index",
+            "merge",
+            "--indices",
+            str(index_file),
+            "--output",
+            str(tmp_path / "out.json"),
+        ]
+    )
     assert index_merge(args_single_merge) == 2
     err_merge = capsys.readouterr().err
     assert "At least two index files are required" in err_merge
-

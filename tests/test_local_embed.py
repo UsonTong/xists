@@ -1,13 +1,10 @@
 import numpy as np
-import pytest
-from pathlib import Path
 
 from xists.search.local_embed import (
     LOCAL_MODEL_REGISTRY,
     compute_deterministic_text_embedding,
     embed_query_local,
     get_cache_model_dir,
-    is_onnxruntime_available,
 )
 
 
@@ -20,9 +17,13 @@ def test_deterministic_text_embedding_returns_unit_vector():
 
 
 def test_deterministic_text_embedding_similarity():
-    vec1 = compute_deterministic_text_embedding("fastapi high performance web framework", dimension=1024)
+    vec1 = compute_deterministic_text_embedding(
+        "fastapi high performance web framework", dimension=1024
+    )
     vec2 = compute_deterministic_text_embedding("fastapi python web framework", dimension=1024)
-    vec_unrelated = compute_deterministic_text_embedding("cooking recipe Italian pasta sauce", dimension=1024)
+    vec_unrelated = compute_deterministic_text_embedding(
+        "cooking recipe Italian pasta sauce", dimension=1024
+    )
 
     dot_similar = np.dot(vec1, vec2)
     dot_unrelated = np.dot(vec1, vec_unrelated)

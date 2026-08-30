@@ -3,11 +3,11 @@ import json
 import pytest
 
 from xists.profile.llm import (
+    PROFILE_PROMPT_VERSION,
     LLMConfig,
     LLMError,
     LLMNotConfiguredError,
     LLMResponse,
-    PROFILE_PROMPT_VERSION,
     attach_llm_profile,
     build_profile_messages,
     call_llm,
@@ -193,7 +193,7 @@ def test_parse_llm_profile_response_tolerates_missing_v2_fields():
 
 
 def test_parse_llm_profile_response_strips_code_fence():
-    content = "```json\n{\"summary\": \"x\", \"confidence\": \"low\", \"abstained\": true}\n```"
+    content = '```json\n{"summary": "x", "confidence": "low", "abstained": true}\n```'
     profile = parse_llm_profile_response(content)
     assert profile["summary"] == "x"
     assert profile["abstained"] is True
@@ -272,7 +272,11 @@ def test_generate_llm_profile_records_token_usage():
 
     profile = generate_llm_profile(make_record(), config, caller=fake_caller)
 
-    assert profile["token_usage"] == {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+    assert profile["token_usage"] == {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 15,
+    }
 
 
 def test_attach_llm_profile():

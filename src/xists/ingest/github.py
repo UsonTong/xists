@@ -11,10 +11,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from xists import __version__
 from xists.records import RECORD_SCHEMA_VERSION
@@ -24,9 +25,19 @@ GITHUB_GRAPHQL_URL = "https://api.github.com/graphql"
 GITHUB_API_VERSION = "2022-11-28"
 USER_AGENT = "xists-record-ingest"
 README_CANDIDATES = (
-    "README.md", "README.markdown", "README.rst", "README.txt", "README",
-    "readme.md", "readme.markdown", "readme.rst", "readme.txt", "readme",
-    "Readme.md", "Readme.markdown", "Readme",
+    "README.md",
+    "README.markdown",
+    "README.rst",
+    "README.txt",
+    "README",
+    "readme.md",
+    "readme.markdown",
+    "readme.rst",
+    "readme.txt",
+    "readme",
+    "Readme.md",
+    "Readme.markdown",
+    "Readme",
 )
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
 
@@ -94,14 +105,17 @@ fragment RepoSnapshotFields on Repository {
 }
 """
 
-GRAPHQL_REPO_SNAPSHOT_QUERY = """
+GRAPHQL_REPO_SNAPSHOT_QUERY = (
+    """
 query($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
     ...RepoSnapshotFields
   }
   rateLimit { cost remaining limit resetAt }
 }
-""" + GRAPHQL_REPOSITORY_FRAGMENT
+"""
+    + GRAPHQL_REPOSITORY_FRAGMENT
+)
 
 
 class GitHubAPIError(RuntimeError):
@@ -174,7 +188,7 @@ class TokenPool:
 
         reset_at = min(reset_times)
         wait_seconds = max(0.0, reset_at - self._clock()) + 5.0
-        reset_text = datetime.fromtimestamp(reset_at, timezone.utc).isoformat()
+        reset_text = datetime.fromtimestamp(reset_at, UTC).isoformat()
         if wait_seconds > max_wait:
             raise GitHubAPIError(
                 f"GitHub rate limit resets at {reset_text}; waiting {wait_seconds:.0f}s exceeds "
@@ -244,7 +258,9 @@ def request_json(path: str, token: str | None = None) -> dict[str, Any]:
             except Exception:
                 message = str(error)
             rate_limit_reset = _rate_limit_reset_from_headers(error.headers)
-            last_error = GitHubAPIError(message, status=error.code, rate_limit_reset=rate_limit_reset)
+            last_error = GitHubAPIError(
+                message, status=error.code, rate_limit_reset=rate_limit_reset
+            )
             if rate_limit_reset is not None and error.code in {403, 429}:
                 raise last_error from error
             if error.code not in RETRYABLE_HTTP_STATUSES or attempt == 2:
@@ -258,7 +274,9 @@ def request_json(path: str, token: str | None = None) -> dict[str, Any]:
     raise last_error or GitHubAPIError("GitHub request failed")
 
 
-def request_graphql(query: str, variables: dict[str, Any], token: str | None = None) -> dict[str, Any]:
+def request_graphql(
+    query: str, variables: dict[str, Any], token: str | None = None
+) -> dict[str, Any]:
     if not token:
         raise GitHubAPIError("GitHub GraphQL API requires GITHUB_TOKEN")
 
@@ -287,7 +305,9 @@ def request_graphql(query: str, variables: dict[str, Any], token: str | None = N
             except Exception:
                 message = str(error)
             rate_limit_reset = _rate_limit_reset_from_headers(error.headers)
-            last_error = GitHubAPIError(message, status=error.code, rate_limit_reset=rate_limit_reset)
+            last_error = GitHubAPIError(
+                message, status=error.code, rate_limit_reset=rate_limit_reset
+            )
             if rate_limit_reset is not None and error.code in {403, 429}:
                 raise last_error from error
             if error.code not in RETRYABLE_HTTP_STATUSES or attempt == 2:
@@ -314,14 +334,18 @@ def request_graphql(query: str, variables: dict[str, Any], token: str | None = N
         if is_rate_limited:
             reset_at = rate_limit.get("resetAt")
             try:
-                rate_limit_reset = datetime.fromisoformat(str(reset_at).replace("Z", "+00:00")).timestamp()
+                rate_limit_reset = datetime.fromisoformat(
+                    str(reset_at).replace("Z", "+00:00")
+                ).timestamp()
             except (TypeError, ValueError):
                 rate_limit_reset = None
         raise GitHubAPIError(message, rate_limit_reset=rate_limit_reset)
     return payload
 
 
-def _snapshot_from_graphql_repository(requested: str, owner: str, repository: dict[str, Any]) -> GitHubSnapshot:
+def _snapshot_from_graphql_repository(
+    requested: str, owner: str, repository: dict[str, Any]
+) -> GitHubSnapshot:
     repo_url = repository.get("url")
     topics = [
         node["topic"]["name"]
@@ -354,9 +378,19 @@ def _snapshot_from_graphql_repository(requested: str, owner: str, repository: di
     readme = None
     readme_text = None
     readme_keys = (
-        "readmeMd", "readmeMarkdown", "readmeRst", "readmeTxt", "readmePlain",
-        "readmemd", "readmeMarkdownLower", "readmeRstLower", "readmeTxtLower", "readmePlainLower",
-        "readmeMdMixed", "readmeMarkdownMixed", "readmeMixed",
+        "readmeMd",
+        "readmeMarkdown",
+        "readmeRst",
+        "readmeTxt",
+        "readmePlain",
+        "readmemd",
+        "readmeMarkdownLower",
+        "readmeRstLower",
+        "readmeTxtLower",
+        "readmePlainLower",
+        "readmeMdMixed",
+        "readmeMarkdownMixed",
+        "readmeMixed",
     )
     for key, path in zip(readme_keys, README_CANDIDATES):
         blob = repository.get(key)
@@ -395,14 +429,18 @@ def _snapshot_from_graphql_repository(requested: str, owner: str, repository: di
 def fetch_snapshot_graphql(repo_id: str, token: str | None = None) -> GitHubSnapshot:
     requested = parse_github_repo(repo_id)
     owner, name = requested.split("/", 1)
-    payload = request_graphql(GRAPHQL_REPO_SNAPSHOT_QUERY, {"owner": owner, "name": name}, token=token)
+    payload = request_graphql(
+        GRAPHQL_REPO_SNAPSHOT_QUERY, {"owner": owner, "name": name}, token=token
+    )
     repository = (payload.get("data") or {}).get("repository")
     if not repository:
         raise GitHubAPIError(f"GitHub repository not found: {requested}", status=404)
     return _snapshot_from_graphql_repository(requested, owner, repository)
 
 
-def build_graphql_batch_query(repo_ids: list[str]) -> tuple[str, dict[str, Any], dict[str, tuple[str, str]]]:
+def build_graphql_batch_query(
+    repo_ids: list[str],
+) -> tuple[str, dict[str, Any], dict[str, tuple[str, str]]]:
     if not repo_ids:
         raise ValueError("repo_ids must not be empty")
 
@@ -545,14 +583,23 @@ def structure_signals(paths: list[str], readme_present: bool) -> list[str]:
         signals.append("has_docs_directory")
     if any_prefix("examples") or any_prefix("fixtures"):
         signals.append("has_examples_or_fixtures")
-    if any_prefix("tests") or any_contains("__tests__") or any(path.endswith((".test.js", ".test.ts", "_test.go")) for path in paths):
+    if (
+        any_prefix("tests")
+        or any_contains("__tests__")
+        or any(path.endswith((".test.js", ".test.ts", "_test.go")) for path in paths)
+    ):
         signals.append("has_tests")
     if any_prefix("scripts"):
         signals.append("has_scripts_directory")
     return signals
 
 
-def evidence_gaps(metadata: dict[str, Any], readme_excerpt: str | None, paths: list[str], tree: dict[str, Any] | None) -> list[str]:
+def evidence_gaps(
+    metadata: dict[str, Any],
+    readme_excerpt: str | None,
+    paths: list[str],
+    tree: dict[str, Any] | None,
+) -> list[str]:
     gaps: list[str] = []
     if not metadata.get("description"):
         gaps.append("missing_github_description")
@@ -648,13 +695,15 @@ def build_record(snapshot: GitHubSnapshot) -> dict[str, Any]:
         "structure": {
             "signals": signals,
             "tree_file_count": len(paths),
-            "tree_truncated": None if snapshot.tree is None else bool(snapshot.tree.get("truncated")),
+            "tree_truncated": None
+            if snapshot.tree is None
+            else bool(snapshot.tree.get("truncated")),
         },
         "evidence": evidence,
         "evidence_gaps": evidence_gaps(metadata, readme_excerpt, paths, snapshot.tree),
         "lifecycle_state": "candidate",
         "snapshot_source": "github_api",
-        "snapshot_time": datetime.now(timezone.utc).isoformat(),
+        "snapshot_time": datetime.now(UTC).isoformat(),
     }
 
 
@@ -669,7 +718,9 @@ def collect_record_graphql(repo_id: str, token: str | None = None) -> dict[str, 
 
 
 def collect_records_graphql(repo_ids: list[str], token: str | None = None) -> list[dict[str, Any]]:
-    records = [build_record(snapshot) for snapshot in fetch_snapshots_graphql(repo_ids, token=token)]
+    records = [
+        build_record(snapshot) for snapshot in fetch_snapshots_graphql(repo_ids, token=token)
+    ]
     for record in records:
         record["snapshot_source"] = "github_graphql"
     return records

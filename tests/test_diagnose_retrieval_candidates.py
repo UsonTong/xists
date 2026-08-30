@@ -3,8 +3,9 @@ from pathlib import Path
 
 import pytest
 
-
-MODULE_PATH = Path(__file__).resolve().parent.parent / "scripts" / "diagnose_retrieval_candidates.py"
+MODULE_PATH = (
+    Path(__file__).resolve().parent.parent / "scripts" / "diagnose_retrieval_candidates.py"
+)
 SPEC = importlib.util.spec_from_file_location("diagnose_retrieval_candidates", MODULE_PATH)
 diagnostic = importlib.util.module_from_spec(SPEC)
 assert SPEC is not None and SPEC.loader is not None

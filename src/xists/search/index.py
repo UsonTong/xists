@@ -10,12 +10,13 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.embed import (
     EMBEDDING_INPUT_VERSION,
     EmbeddingConfig,
@@ -24,7 +25,6 @@ from xists.search.embed import (
     embedding_input_fingerprint,
     embedding_text_from_record,
 )
-from xists.records import RECORD_SCHEMA_VERSION
 
 INDEX_VERSION = 4
 LEGACY_INDEX_VERSION = 3
@@ -46,7 +46,9 @@ def decode_vector(value: Any, *, dimension: int | None = None) -> np.ndarray | N
 
     if isinstance(value, str):
         try:
-            vector = np.frombuffer(base64.b64decode(value.encode("ascii"), validate=True), dtype="<f4")
+            vector = np.frombuffer(
+                base64.b64decode(value.encode("ascii"), validate=True), dtype="<f4"
+            )
         except (ValueError, TypeError):
             return None
     elif isinstance(value, np.ndarray):
@@ -131,9 +133,7 @@ def build_index(
     dimension: int | None = None
     for start in range(0, len(embeddable), batch_size):
         batch = embeddable[start : start + batch_size]
-        results = call_embeddings(
-            config, [item["text"] for item in batch], input_type="passage"
-        )
+        results = call_embeddings(config, [item["text"] for item in batch], input_type="passage")
         if len(results) != len(batch):
             raise EmbeddingError(
                 f"Embedding count mismatch: sent {len(batch)}, received {len(results)}"
@@ -155,7 +155,11 @@ def build_index(
                 }
             )
 
-    matrix = np.asarray(raw_vectors, dtype=np.float32) if raw_vectors else np.empty((0, dimension or 0), dtype=np.float32)
+    matrix = (
+        np.asarray(raw_vectors, dtype=np.float32)
+        if raw_vectors
+        else np.empty((0, dimension or 0), dtype=np.float32)
+    )
 
     return {
         "index_version": INDEX_VERSION,
@@ -164,7 +168,7 @@ def build_index(
         "embedding_base_url": config.base_url,
         "embedding_input_version": EMBEDDING_INPUT_VERSION,
         "dimension": dimension,
-        "built_at": datetime.now(timezone.utc).isoformat(),
+        "built_at": datetime.now(UTC).isoformat(),
         "record_count": len(vectors),
         "skipped": skipped,
         "vectors": vectors,
@@ -212,7 +216,9 @@ def save_index(
                 vec_matrix = np.empty((0, dimension or 0), dtype=np.float32)
 
         # Atomic write of sidecar .npy
-        temp_vec_path = vectors_path.with_name(f".{vectors_path.name}.tmp.{datetime.now().timestamp()}")
+        temp_vec_path = vectors_path.with_name(
+            f".{vectors_path.name}.tmp.{datetime.now().timestamp()}"
+        )
         with temp_vec_path.open("wb") as f:
             np.save(f, vec_matrix)
         temp_vec_path.replace(vectors_path)
@@ -231,16 +237,22 @@ def save_index(
             "record_schema_version": index.get("record_schema_version", RECORD_SCHEMA_VERSION),
             "embedding_model": index.get("embedding_model", ""),
             "embedding_base_url": index.get("embedding_base_url"),
-            "embedding_input_version": index.get("embedding_input_version", EMBEDDING_INPUT_VERSION),
-            "dimension": int(vec_matrix.shape[1]) if vec_matrix.ndim == 2 and vec_matrix.shape[1] > 0 else index.get("dimension"),
-            "built_at": index.get("built_at") or datetime.now(timezone.utc).isoformat(),
+            "embedding_input_version": index.get(
+                "embedding_input_version", EMBEDDING_INPUT_VERSION
+            ),
+            "dimension": int(vec_matrix.shape[1])
+            if vec_matrix.ndim == 2 and vec_matrix.shape[1] > 0
+            else index.get("dimension"),
+            "built_at": index.get("built_at") or datetime.now(UTC).isoformat(),
             "record_count": len(clean_vectors),
             "skipped": index.get("skipped", []),
             "vectors_file": vectors_filename,
             "vectors": clean_vectors,
         }
         temp_json_path = file_path.with_name(f".{file_path.name}.tmp.{datetime.now().timestamp()}")
-        temp_json_path.write_text(json.dumps(clean_document, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_json_path.write_text(
+            json.dumps(clean_document, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         temp_json_path.replace(file_path)
     else:
         # Legacy v3 single-file Base64
@@ -267,9 +279,11 @@ def save_index(
             "record_schema_version": index.get("record_schema_version", RECORD_SCHEMA_VERSION),
             "embedding_model": index.get("embedding_model", ""),
             "embedding_base_url": index.get("embedding_base_url"),
-            "embedding_input_version": index.get("embedding_input_version", EMBEDDING_INPUT_VERSION),
+            "embedding_input_version": index.get(
+                "embedding_input_version", EMBEDDING_INPUT_VERSION
+            ),
             "dimension": dimension,
-            "built_at": index.get("built_at") or datetime.now(timezone.utc).isoformat(),
+            "built_at": index.get("built_at") or datetime.now(UTC).isoformat(),
             "record_count": len(clean_vectors),
             "skipped": index.get("skipped", []),
             "vectors": clean_vectors,

@@ -10,7 +10,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from xists.api import load_index, search as public_search
+from xists.api import load_index
+from xists.api import search as public_search
 from xists.search.embed import EmbeddingConfig, embedding_config_from_env
 
 
@@ -43,7 +44,7 @@ def _fastmcp_class() -> Any:
     try:
         from mcp.server.fastmcp import FastMCP
     except ModuleNotFoundError as error:
-        if error.name == "mcp" or error.name.startswith("mcp."):
+        if error.name == "mcp" or (error.name is not None and error.name.startswith("mcp.")):
             raise MCPNotInstalledError(
                 'MCP support is not installed. Install it with: pip install "xists[mcp]"'
             ) from error
@@ -151,9 +152,7 @@ def run_server(index_path: Path) -> None:
     except Exception as error:
         raise MCPStartupError(str(error)) from error
     if not index_path.exists():
-        raise MCPStartupError(
-            f"Index file not found: {index_path}. Run 'xists index build' first."
-        )
+        raise MCPStartupError(f"Index file not found: {index_path}. Run 'xists index build' first.")
     try:
         index = load_index(index_path)
     except (OSError, json.JSONDecodeError, ValueError) as error:

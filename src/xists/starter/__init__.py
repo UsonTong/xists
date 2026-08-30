@@ -48,7 +48,11 @@ def _tokenize_terms(text: str) -> list[str]:
     if not text:
         return []
     # Split by whitespace, punctuation, hyphens, underscores
-    terms = [t for t in re.split(r"[\s,._/\\:;!?'\"()\[\]{}#~`*+=<>@$%^&|]+", text.lower()) if len(t) >= 2]
+    terms = [
+        t
+        for t in re.split(r"[\s,._/\\:;!?'\"()\[\]{}#~`*+=<>@$%^&|]+", text.lower())
+        if len(t) >= 2
+    ]
     return terms
 
 
@@ -70,10 +74,41 @@ def starter_metadata_search(
 
     is_framework_query = "framework" in query_set or "frameworks" in query_set
     is_library_query = "library" in query_set or "lib" in query_set
-    is_tool_query = any(t in query_set for t in ("tool", "tools", "cli", "runtime", "engine", "server", "editor", "database", "db"))
-    is_collection_query = any(t in query_set for t in ("awesome", "list", "collection", "curated", "tutorial", "primer", "guide", "learn"))
+    is_tool_query = any(
+        t in query_set
+        for t in ("tool", "tools", "cli", "runtime", "engine", "server", "editor", "database", "db")
+    )
+    is_collection_query = any(
+        t in query_set
+        for t in (
+            "awesome",
+            "list",
+            "collection",
+            "curated",
+            "tutorial",
+            "primer",
+            "guide",
+            "learn",
+        )
+    )
 
-    known_languages = {"python", "rust", "javascript", "typescript", "go", "golang", "c++", "cpp", "c#", "java", "ruby", "php", "swift", "kotlin", "zig"}
+    known_languages = {
+        "python",
+        "rust",
+        "javascript",
+        "typescript",
+        "go",
+        "golang",
+        "c++",
+        "cpp",
+        "c#",
+        "java",
+        "ruby",
+        "php",
+        "swift",
+        "kotlin",
+        "zig",
+    }
     query_languages = query_set.intersection(known_languages)
     if "golang" in query_languages:
         query_languages.add("go")
@@ -84,8 +119,10 @@ def starter_metadata_search(
         repo_id = str(record.get("repo_id") or "")
         name = str(record.get("name") or "")
         url = str(record.get("url") or "")
-        github = record.get("github") if isinstance(record.get("github"), dict) else {}
-        profile = record.get("llm_profile") if isinstance(record.get("llm_profile"), dict) else {}
+        raw_github = record.get("github")
+        github: dict[str, Any] = raw_github if isinstance(raw_github, dict) else {}
+        raw_profile = record.get("llm_profile")
+        profile: dict[str, Any] = raw_profile if isinstance(raw_profile, dict) else {}
 
         description = str(github.get("description") or "").lower()
         language = str(github.get("language") or "").lower()
@@ -95,9 +132,13 @@ def starter_metadata_search(
         summary = str(profile.get("summary") or "").lower()
         project_type = str(profile.get("project_type") or "").lower()
         use_cases = [str(u).lower() for u in (profile.get("use_cases") or []) if isinstance(u, str)]
-        capabilities = [str(c).lower() for c in (profile.get("capabilities") or []) if isinstance(c, str)]
+        capabilities = [
+            str(c).lower() for c in (profile.get("capabilities") or []) if isinstance(c, str)
+        ]
         aliases = [str(a).lower() for a in (profile.get("aliases") or []) if isinstance(a, str)]
-        search_phrases = [str(p).lower() for p in (profile.get("search_phrases") or []) if isinstance(p, str)]
+        search_phrases = [
+            str(p).lower() for p in (profile.get("search_phrases") or []) if isinstance(p, str)
+        ]
         search_text = str(profile.get("search_text") or "").lower()
         ecosystem = [str(e).lower() for e in (profile.get("ecosystem") or []) if isinstance(e, str)]
         replaces = [str(r).lower() for r in (profile.get("replaces") or []) if isinstance(r, str)]
@@ -123,10 +164,10 @@ def starter_metadata_search(
         # 2. Phrase matching across summary / search_text / description
         if norm_query in search_text or norm_query in summary or norm_query in description:
             score += 1.5
-            why_reasons.append(f"matched exact phrase: \"{norm_query}\"")
+            why_reasons.append(f'matched exact phrase: "{norm_query}"')
         elif len(query_terms) >= 2:
             for i in range(len(query_terms) - 1):
-                subphrase = f"{query_terms[i]} {query_terms[i+1]}"
+                subphrase = f"{query_terms[i]} {query_terms[i + 1]}"
                 if subphrase in search_text or subphrase in summary or subphrase in description:
                     score += 0.6
                     break
@@ -146,13 +187,11 @@ def starter_metadata_search(
             elif any(term in p for p in search_phrases):
                 score += 0.7
                 term_matched = True
-            elif any(term in u for u in use_cases):
-                score += 0.5
-                term_matched = True
-            elif any(term in c for c in capabilities):
-                score += 0.5
-                term_matched = True
-            elif any(term in e for e in ecosystem):
+            elif (
+                any(term in u for u in use_cases)
+                or any(term in c for c in capabilities)
+                or any(term in e for e in ecosystem)
+            ):
                 score += 0.5
                 term_matched = True
             elif term in description or term in summary:
@@ -182,7 +221,11 @@ def starter_metadata_search(
             if language in query_languages or any(ql in ecosystem for ql in query_languages):
                 score += 1.0
                 why_reasons.append(f"matched language: {language.title()}")
-            elif language and language not in query_languages and not any(ql in ecosystem for ql in query_languages):
+            elif (
+                language
+                and language not in query_languages
+                and not any(ql in ecosystem for ql in query_languages)
+            ):
                 score -= 0.8
 
         # 6. Project Type Intent Alignment
@@ -196,11 +239,24 @@ def starter_metadata_search(
             if project_type in ("library", "framework"):
                 score += 1.0
         elif is_tool_query:
-            if project_type in ("tool", "cli", "runtime", "engine", "service", "platform", "database"):
+            if project_type in (
+                "tool",
+                "cli",
+                "runtime",
+                "engine",
+                "service",
+                "platform",
+                "database",
+            ):
                 score += 1.0
 
         # 7. Collection / Awesome-list / Primer Demotion when not explicitly asked
-        if not is_collection_query and project_type in ("collection", "awesome_list", "tutorial", "educational"):
+        if not is_collection_query and project_type in (
+            "collection",
+            "awesome_list",
+            "tutorial",
+            "educational",
+        ):
             score -= 1.8
 
         # 8. Popularity / star factor (small logarithmic boost)
@@ -221,30 +277,36 @@ def starter_metadata_search(
             if not why_reasons and matched_terms:
                 why_reasons.append(f"matched keywords: {', '.join(sorted(matched_terms))}")
 
-            scored_entries.append({
-                "repo_id": repo_id,
-                "url": url,
-                "score": round(score, 4),
-                "semantic_score": 0.0,
-                "metadata_score": round(score, 4),
-                "confidence": confidence,
-                "summary": record.get("llm_profile", {}).get("summary") or github.get("description") or "",
-                "use_cases": record.get("llm_profile", {}).get("use_cases") or [],
-                "capabilities": record.get("llm_profile", {}).get("capabilities") or [],
-                "topics": github.get("topics") or [],
-                "stars": stars,
-                "language": github.get("language") or "",
-                "matched_terms": sorted(matched_terms),
-                "why": why_reasons if why_reasons else ["offline lexical match"],
-                "score_breakdown": {
+            scored_entries.append(
+                {
+                    "repo_id": repo_id,
+                    "url": url,
+                    "score": round(score, 4),
                     "semantic_score": 0.0,
                     "metadata_score": round(score, 4),
-                    "final_score": round(score, 4),
-                },
-            })
+                    "confidence": confidence,
+                    "summary": profile.get("summary") or github.get("description") or "",
+                    "use_cases": profile.get("use_cases") or [],
+                    "capabilities": profile.get("capabilities") or [],
+                    "topics": github.get("topics") or [],
+                    "stars": stars,
+                    "language": github.get("language") or "",
+                    "matched_terms": sorted(matched_terms),
+                    "why": why_reasons if why_reasons else ["offline lexical match"],
+                    "score_breakdown": {
+                        "semantic_score": 0.0,
+                        "metadata_score": round(score, 4),
+                        "final_score": round(score, 4),
+                    },
+                }
+            )
 
-    scored_entries.sort(key=lambda item: (item["score"], item["stars"], item["repo_id"]), reverse=True)
-    presented = [item for item in scored_entries if item["confidence"] != "abstain"][:max(top_k, 0)]
+    scored_entries.sort(
+        key=lambda item: (item["score"], item["stars"], item["repo_id"]), reverse=True
+    )
+    presented = [item for item in scored_entries if item["confidence"] != "abstain"][
+        : max(top_k, 0)
+    ]
 
     elapsed_ms = round((perf_counter() - started) * 1000, 3)
 

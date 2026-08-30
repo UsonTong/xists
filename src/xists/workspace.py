@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping
-
+from typing import Any
 
 LEGACY_FILENAMES = (
     "repos.txt",
@@ -117,4 +117,3 @@ def populate_demo_workspace(root: Path, *, force: bool = False) -> dict[str, Any
 
     root = root.expanduser().resolve()
     return pull_index("demo", root, force=force)
-

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import os
 import re
@@ -13,7 +12,9 @@ from typing import Any
 
 import numpy as np
 
-LOCAL_CACHE_DIR = Path(os.environ.get("XISTS_CACHE_DIR", Path.home() / ".cache" / "xists" / "models")).resolve()
+LOCAL_CACHE_DIR = Path(
+    os.environ.get("XISTS_CACHE_DIR", Path.home() / ".cache" / "xists" / "models")
+).resolve()
 
 LOCAL_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
     "bge-small-en-v1.5": {
@@ -34,7 +35,8 @@ LOCAL_MODEL_REGISTRY: dict[str, dict[str, Any]] = {
 def is_onnxruntime_available() -> bool:
     """Check if onnxruntime is available in the current Python environment."""
     try:
-        import onnxruntime  # noqa: F401
+        import onnxruntime  # type: ignore[import-not-found]  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -112,6 +114,7 @@ def embed_query_local(
     if is_onnxruntime_available() and allow_download and model_name in LOCAL_MODEL_REGISTRY:
         try:
             import onnxruntime as ort  # noqa: F401
+
             # ONNX inference path if weights exist locally
             model_info = LOCAL_MODEL_REGISTRY[model_name]
             model_dir = get_cache_model_dir(model_name)

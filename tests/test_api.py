@@ -4,10 +4,8 @@ import pytest
 
 from xists.api import load_index, search
 from xists.records import RECORD_SCHEMA_VERSION
-from xists.search.embed import EmbeddingConfig, EmbeddingError
-from xists.search.embed import EMBEDDING_INPUT_VERSION
+from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingConfig, EmbeddingError
 from xists.search.query import IndexMismatchError
-
 
 CONFIG = EmbeddingConfig(
     api_key="test-key",
@@ -87,7 +85,9 @@ def test_search_forwards_explicit_optional_ranking_arguments(monkeypatch):
         return {"query": query, "abstained": True, "results": []}
 
     monkeypatch.setattr("xists.api.rank", fake_rank)
-    reranker = lambda _query, _documents: [0.5]
+
+    def reranker(_query: str, _documents: list[str]) -> list[float]:
+        return [0.5]
 
     result = search(
         "query",

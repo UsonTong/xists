@@ -2,7 +2,6 @@ import importlib.util
 import json
 from pathlib import Path
 
-
 MODULE_PATH = Path(__file__).resolve().parent.parent / "scripts" / "generate_stratified_eval.py"
 SPEC = importlib.util.spec_from_file_location("generate_stratified_eval", MODULE_PATH)
 MODULE = importlib.util.module_from_spec(SPEC)

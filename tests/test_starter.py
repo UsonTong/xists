@@ -1,6 +1,3 @@
-import pytest
-from pathlib import Path
-
 from xists.records import RECORD_SCHEMA_VERSION, records_validation_report
 from xists.search.index import INDEX_VERSION
 from xists.starter import (
@@ -68,9 +65,13 @@ def test_starter_metadata_search_concept_queries():
         assert not res["abstained"], f"Abstained on {query}"
         matching_repos = [r["repo_id"] for r in res["results"][:5]]
         if isinstance(expected_repo, tuple):
-            assert any(r in matching_repos for r in expected_repo), f"Expected one of {expected_repo} in top 5 for '{query}', got {matching_repos}"
+            assert any(r in matching_repos for r in expected_repo), (
+                f"Expected one of {expected_repo} in top 5 for '{query}', got {matching_repos}"
+            )
         else:
-            assert expected_repo in matching_repos, f"Expected {expected_repo} in top 5 for '{query}', got {matching_repos}"
+            assert expected_repo in matching_repos, (
+                f"Expected {expected_repo} in top 5 for '{query}', got {matching_repos}"
+            )
 
 
 def test_starter_metadata_search_abstains_on_unrelated_queries():

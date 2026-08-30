@@ -23,16 +23,22 @@ def test_query_transform_config_requires_all_values(monkeypatch):
 
 
 def test_transform_queries_preserves_input_order_and_uses_json_contract():
-    config = QueryTransformConfig(api_key="key", base_url="https://example.test/v1", model="test-model")
+    config = QueryTransformConfig(
+        api_key="key", base_url="https://example.test/v1", model="test-model"
+    )
     observed = {}
 
     def fake_caller(llm_config, messages, *, timeout):
         observed["config"] = llm_config
         observed["messages"] = messages
         observed["timeout"] = timeout
-        return LLMResponse(content=json.dumps({"queries": ["Vue open-source project", "Kafka streaming"]}))
+        return LLMResponse(
+            content=json.dumps({"queries": ["Vue open-source project", "Kafka streaming"]})
+        )
 
-    transformed = transform_queries(config, ["查找 Vue 开源项目", "Kafka 流处理"], caller=fake_caller)
+    transformed = transform_queries(
+        config, ["查找 Vue 开源项目", "Kafka 流处理"], caller=fake_caller
+    )
 
     assert transformed == ["Vue open-source project", "Kafka streaming"]
     assert observed["config"].model == "test-model"
@@ -42,7 +48,9 @@ def test_transform_queries_preserves_input_order_and_uses_json_contract():
 
 
 def test_transform_queries_rejects_invalid_response_shape():
-    config = QueryTransformConfig(api_key="key", base_url="https://example.test/v1", model="test-model")
+    config = QueryTransformConfig(
+        api_key="key", base_url="https://example.test/v1", model="test-model"
+    )
 
     with pytest.raises(QueryTransformError, match="one query"):
         transform_queries(
@@ -53,7 +61,9 @@ def test_transform_queries_rejects_invalid_response_shape():
 
 
 def test_transform_queries_accepts_a_non_json_prefix_before_the_json_object():
-    config = QueryTransformConfig(api_key="key", base_url="https://example.test/v1", model="test-model")
+    config = QueryTransformConfig(
+        api_key="key", base_url="https://example.test/v1", model="test-model"
+    )
 
     transformed = transform_queries(
         config,
@@ -65,7 +75,9 @@ def test_transform_queries_accepts_a_non_json_prefix_before_the_json_object():
 
 
 def test_transform_queries_rejects_non_whitespace_after_the_json_object():
-    config = QueryTransformConfig(api_key="key", base_url="https://example.test/v1", model="test-model")
+    config = QueryTransformConfig(
+        api_key="key", base_url="https://example.test/v1", model="test-model"
+    )
 
     with pytest.raises(QueryTransformError, match="exactly one JSON object"):
         transform_queries(
@@ -76,7 +88,9 @@ def test_transform_queries_rejects_non_whitespace_after_the_json_object():
 
 
 def test_transform_queries_uses_small_ordered_batches():
-    config = QueryTransformConfig(api_key="key", base_url="https://example.test/v1", model="test-model")
+    config = QueryTransformConfig(
+        api_key="key", base_url="https://example.test/v1", model="test-model"
+    )
     requests = []
 
     def fake_caller(llm_config, messages, *, timeout):

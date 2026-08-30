@@ -89,7 +89,10 @@ def profile_refresh_reason(
         return None if profile.get("search_text") else "missing_search_text"
     if schema_version != RECORD_SCHEMA_VERSION:
         return "schema_version_mismatch"
-    if expected_prompt_version is not None and profile.get("prompt_version") != expected_prompt_version:
+    if (
+        expected_prompt_version is not None
+        and profile.get("prompt_version") != expected_prompt_version
+    ):
         return "profile_prompt_version_mismatch"
     if profile.get("search_text") is None:
         return "missing_search_text"
@@ -129,8 +132,13 @@ def records_validation_report(
         repo_id = record_repo_id(record)
         schema_versions[record_schema_version(record)] += 1
         profile = record_profile(record)
-        prompt_versions[profile.get("prompt_version") if isinstance(profile.get("prompt_version"), int) else None] += 1
-        github = record.get("github") if isinstance(record.get("github"), dict) else {}
+        prompt_versions[
+            profile.get("prompt_version")
+            if isinstance(profile.get("prompt_version"), int)
+            else None
+        ] += 1
+        github_raw = record.get("github")
+        github: dict[str, Any] = github_raw if isinstance(github_raw, dict) else {}
         if github.get("archived") is True:
             archived += 1
         if github.get("disabled") is True:
@@ -185,7 +193,10 @@ def records_validation_report(
             issues["warnings"]["missing_project_type"] += 1
         if not profile.get("ecosystem"):
             issues["warnings"]["missing_ecosystem"] += 1
-        if expected_profile_prompt_version is not None and profile.get("prompt_version") != expected_profile_prompt_version:
+        if (
+            expected_profile_prompt_version is not None
+            and profile.get("prompt_version") != expected_profile_prompt_version
+        ):
             issues["warnings"]["profile_prompt_version_mismatch"] += 1
         if profile.get("confidence") == "low":
             low_confidence.append(repo_id)
@@ -227,3 +238,16 @@ def records_validation_report(
         "short_search_text": short_search_text,
         "ok": not issues["errors"],
     }
+
+
+__all__ = [
+    "CONFIDENCE_VALUES",
+    "MIN_SEARCH_TEXT_CHARS",
+    "RECORD_SCHEMA_VERSION",
+    "normalize_llm_profile",
+    "profile_refresh_reason",
+    "record_profile",
+    "record_repo_id",
+    "record_schema_version",
+    "records_validation_report",
+]

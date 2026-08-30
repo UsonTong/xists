@@ -6,7 +6,6 @@ import urllib.error
 import pytest
 
 from xists import __version__
-from xists.records import RECORD_SCHEMA_VERSION
 from xists.ingest.github import (
     GITHUB_API_VERSION,
     GitHubAPIError,
@@ -15,9 +14,9 @@ from xists.ingest.github import (
     build_graphql_batch_query,
     build_record,
     clean_readme_excerpt,
+    evidence_gaps,
     fetch_snapshot_graphql,
     fetch_snapshots_graphql,
-    evidence_gaps,
     github_token_from_env,
     github_token_from_file,
     parse_github_repo,
@@ -25,6 +24,7 @@ from xists.ingest.github import (
     structure_signals,
     tree_paths,
 )
+from xists.records import RECORD_SCHEMA_VERSION
 
 
 def test_parse_github_repo_accepts_owner_repo():
@@ -197,9 +197,16 @@ def test_build_record_creates_traceable_record():
     assert record["name"] == "react"
     assert record["url"] == "https://github.com/react/react"
     assert record["github"]["topics"] == ["javascript", "react", "ui"]
-    assert record["readme"]["excerpt"] == "React is a JavaScript library for building user interfaces."
+    assert (
+        record["readme"]["excerpt"] == "React is a JavaScript library for building user interfaces."
+    )
     assert record["structure"] == {
-        "signals": ["has_readme", "has_package_json", "has_packages_directory", "has_scripts_directory"],
+        "signals": [
+            "has_readme",
+            "has_package_json",
+            "has_packages_directory",
+            "has_scripts_directory",
+        ],
         "tree_file_count": 4,
         "tree_truncated": False,
     }
@@ -397,15 +404,20 @@ def _fake_graphql_repository():
         "readmeMixed": None,
         "tree": {
             "entries": [
-                {"name": "README.md", "type": "blob",
-                 "object": {"entries": []}},
-                {"name": "packages", "type": "tree",
-                 "object": {"entries": [
-                     {"name": "react", "type": "tree",
-                      "object": {"entries": [
-                          {"name": "__tests__", "type": "tree"}
-                      ]}}
-                 ]}},
+                {"name": "README.md", "type": "blob", "object": {"entries": []}},
+                {
+                    "name": "packages",
+                    "type": "tree",
+                    "object": {
+                        "entries": [
+                            {
+                                "name": "react",
+                                "type": "tree",
+                                "object": {"entries": [{"name": "__tests__", "type": "tree"}]},
+                            }
+                        ]
+                    },
+                },
             ]
         },
     }
@@ -451,7 +463,12 @@ def test_collect_record_graphql_sets_snapshot_source(monkeypatch):
 def test_collect_records_graphql_sets_snapshot_source(monkeypatch):
     from xists.ingest.github import collect_records_graphql
 
-    repo2 = {**_fake_graphql_repository(), "nameWithOwner": "vuejs/core", "name": "core", "url": "https://github.com/vuejs/core"}
+    repo2 = {
+        **_fake_graphql_repository(),
+        "nameWithOwner": "vuejs/core",
+        "name": "core",
+        "url": "https://github.com/vuejs/core",
+    }
 
     def fake_request(query, variables, *, token=None):
         return {"data": {"r0": _fake_graphql_repository(), "r1": repo2}}
@@ -490,10 +507,18 @@ def test_fetch_snapshots_graphql_maps_multiple_repositories(monkeypatch):
                     "defaultBranchRef": {"name": "main"},
                     "repositoryTopics": {"nodes": []},
                     "readmeMd": {"text": "# React"},
-                    "readmeMarkdown": None, "readmeRst": None, "readmeTxt": None, "readmePlain": None,
-                    "readmemd": None, "readmeMarkdownLower": None, "readmeRstLower": None,
-                    "readmeTxtLower": None, "readmePlainLower": None, "readmeMdMixed": None,
-                    "readmeMarkdownMixed": None, "readmeMixed": None,
+                    "readmeMarkdown": None,
+                    "readmeRst": None,
+                    "readmeTxt": None,
+                    "readmePlain": None,
+                    "readmemd": None,
+                    "readmeMarkdownLower": None,
+                    "readmeRstLower": None,
+                    "readmeTxtLower": None,
+                    "readmePlainLower": None,
+                    "readmeMdMixed": None,
+                    "readmeMarkdownMixed": None,
+                    "readmeMixed": None,
                     "tree": {"entries": []},
                 },
                 "r1": {
@@ -516,10 +541,18 @@ def test_fetch_snapshots_graphql_maps_multiple_repositories(monkeypatch):
                     "defaultBranchRef": {"name": "main"},
                     "repositoryTopics": {"nodes": []},
                     "readmeMd": {"text": "# Vue"},
-                    "readmeMarkdown": None, "readmeRst": None, "readmeTxt": None, "readmePlain": None,
-                    "readmemd": None, "readmeMarkdownLower": None, "readmeRstLower": None,
-                    "readmeTxtLower": None, "readmePlainLower": None, "readmeMdMixed": None,
-                    "readmeMarkdownMixed": None, "readmeMixed": None,
+                    "readmeMarkdown": None,
+                    "readmeRst": None,
+                    "readmeTxt": None,
+                    "readmePlain": None,
+                    "readmemd": None,
+                    "readmeMarkdownLower": None,
+                    "readmeRstLower": None,
+                    "readmeTxtLower": None,
+                    "readmePlainLower": None,
+                    "readmeMdMixed": None,
+                    "readmeMarkdownMixed": None,
+                    "readmeMixed": None,
                     "tree": {"entries": []},
                 },
             }
@@ -557,9 +590,7 @@ def test_request_graphql_extracts_rate_limit_reset(monkeypatch):
                             "resetAt": "2026-08-16T12:00:00Z",
                         }
                     },
-                    "errors": [
-                        {"message": "API rate limit exceeded", "type": "RATE_LIMITED"}
-                    ],
+                    "errors": [{"message": "API rate limit exceeded", "type": "RATE_LIMITED"}],
                 }
             ).encode("utf-8")
 
@@ -570,4 +601,3 @@ def test_request_graphql_extracts_rate_limit_reset(monkeypatch):
 
     assert exc_info.value.rate_limit_reset is not None
     assert "rate limit" in str(exc_info.value).lower()
-

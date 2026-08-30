@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -55,7 +55,9 @@ def append_records_to_index(
     started = perf_counter()
     idx_path = Path(index_path).resolve()
     if not idx_path.is_file():
-        raise FileNotFoundError(f"Target index file not found: {idx_path}. Use 'xists index build' to initialize.")
+        raise FileNotFoundError(
+            f"Target index file not found: {idx_path}. Use 'xists index build' to initialize."
+        )
 
     # 1. Load existing index and matrix
     index_doc = load_index(idx_path, mmap=False)
@@ -96,7 +98,9 @@ def append_records_to_index(
 
     # Map existing items by lowercase repo_id
     existing_vec_map: dict[str, int] = {
-        str(v.get("repo_id")).lower(): idx for idx, v in enumerate(existing_vectors_entries) if "repo_id" in v
+        str(v.get("repo_id")).lower(): idx
+        for idx, v in enumerate(existing_vectors_entries)
+        if "repo_id" in v
     }
     existing_rec_map: dict[str, int] = {
         str(r.get("repo_id") or r.get("repo_id_requested")).lower(): idx
@@ -114,7 +118,9 @@ def append_records_to_index(
             ) from error
 
     # 4. Classify candidates into (skip, update, add)
-    to_embed: list[tuple[dict[str, Any], str, str, str | None]] = []  # (record, repo_id, text, action)
+    to_embed: list[
+        tuple[dict[str, Any], str, str, str | None]
+    ] = []  # (record, repo_id, text, action)
     added_count = 0
     updated_count = 0
     skipped_count = 0
@@ -161,9 +167,9 @@ def append_records_to_index(
             vectors_chunk = call_embeddings(config, chunk, input_type="passage")
             new_vectors.extend(vectors_chunk)
 
-        for (r, repo_id, _, action), vec in zip(to_embed, new_vectors):
+        for (r, repo_id, _, action), float_vec in zip(to_embed, new_vectors):
             rid_low = repo_id.lower()
-            norm_vec = np.asarray(vec, dtype=np.float32)
+            norm_vec = np.asarray(float_vec, dtype=np.float32)
             if dimension is not None and norm_vec.size != dimension:
                 raise ValueError(
                     f"Vector dimension mismatch for {repo_id}: expected {dimension}, got {norm_vec.size}"
@@ -209,7 +215,7 @@ def append_records_to_index(
     index_doc["dimension"] = dimension
     index_doc["record_count"] = len(existing_vectors_entries)
     index_doc["vectors"] = existing_vectors_entries
-    index_doc["built_at"] = datetime.now(timezone.utc).isoformat()
+    index_doc["built_at"] = datetime.now(UTC).isoformat()
     if "_matrix" in index_doc:
         index_doc["_matrix"] = matrix
 
@@ -217,7 +223,9 @@ def append_records_to_index(
 
     if rec_path:
         temp_rec_path = rec_path.with_name(f".{rec_path.name}.tmp.{datetime.now().timestamp()}")
-        temp_rec_path.write_text(json.dumps(existing_records, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_rec_path.write_text(
+            json.dumps(existing_records, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         temp_rec_path.replace(rec_path)
 
     elapsed_ms = round((perf_counter() - started) * 1000, 3)

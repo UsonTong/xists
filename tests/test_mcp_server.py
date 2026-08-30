@@ -1,7 +1,6 @@
 import asyncio
 import json
 import os
-from pathlib import Path
 import sys
 
 import pytest
@@ -64,7 +63,9 @@ def test_missing_optional_sdk_has_actionable_error(monkeypatch):
     import xists.mcp_server as server
 
     def missing_sdk():
-        raise MCPNotInstalledError('MCP support is not installed. Install it with: pip install "xists[mcp]"')
+        raise MCPNotInstalledError(
+            'MCP support is not installed. Install it with: pip install "xists[mcp]"'
+        )
 
     monkeypatch.setattr(server, "_fastmcp_class", missing_sdk)
 
@@ -76,7 +77,9 @@ def test_run_server_checks_optional_sdk_before_embedding_config(tmp_path, monkey
     import xists.mcp_server as server
 
     def missing_sdk():
-        raise MCPNotInstalledError('MCP support is not installed. Install it with: pip install "xists[mcp]"')
+        raise MCPNotInstalledError(
+            'MCP support is not installed. Install it with: pip install "xists[mcp]"'
+        )
 
     monkeypatch.setattr(server, "_fastmcp_class", missing_sdk)
     monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
@@ -128,8 +131,9 @@ def test_server_registers_search_inspect_and_index_tools(monkeypatch):
 
 
 def test_search_projects_rejects_invalid_top_k(monkeypatch):
-    import xists.mcp_server as server_module
     from mcp.server.fastmcp.exceptions import ToolError
+
+    import xists.mcp_server as server_module
 
     server = server_module.create_server(_index(), object())
 
@@ -140,7 +144,9 @@ def test_search_projects_rejects_invalid_top_k(monkeypatch):
 def test_search_projects_rejects_an_empty_query():
     from mcp.server.fastmcp.exceptions import ToolError
 
-    server = __import__("xists.mcp_server", fromlist=["create_server"]).create_server(_index(), object())
+    server = __import__("xists.mcp_server", fromlist=["create_server"]).create_server(
+        _index(), object()
+    )
 
     with pytest.raises(ToolError, match="query must be a non-empty string"):
         asyncio.run(server.call_tool("search_projects", {"query": "  "}))
@@ -178,7 +184,11 @@ def test_stdio_server_runs_tools_without_corrupting_protocol(tmp_path):
     with stderr_path.open("w+", encoding="utf-8") as stderr:
         tools, stats, inspected = asyncio.run(exercise_server(stderr))
 
-    assert {tool.name for tool in tools.tools} == {"search_projects", "inspect_project", "index_stats"}
+    assert {tool.name for tool in tools.tools} == {
+        "search_projects",
+        "inspect_project",
+        "index_stats",
+    }
     assert stats.isError is False
     assert stats.structuredContent["indexed_project_count"] == 1
     assert inspected.isError is False

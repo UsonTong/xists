@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
 from typing import Any
@@ -55,7 +55,11 @@ def prune_index(
         for entry in entries:
             vec = decode_vector(entry.get("vector"), dimension=dimension)
             rows.append(vec if vec is not None else np.zeros(dimension or 0, dtype=np.float32))
-        matrix = np.asarray(rows, dtype=np.float32) if rows else np.empty((0, dimension or 0), dtype=np.float32)
+        matrix = (
+            np.asarray(rows, dtype=np.float32)
+            if rows
+            else np.empty((0, dimension or 0), dtype=np.float32)
+        )
 
     # Load records
     existing_records: list[dict[str, Any]] = []
@@ -84,9 +88,12 @@ def prune_index(
     for i, entry in enumerate(entries):
         repo_id = str(entry.get("repo_id") or "")
         rid_low = repo_id.lower()
-        meta = entry.get("metadata") or {}
-        rec = records_by_id.get(rid_low) or {}
-        github = rec.get("github") if isinstance(rec.get("github"), dict) else {}
+        raw_meta = entry.get("metadata")
+        meta: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
+        raw_rec = records_by_id.get(rid_low)
+        rec: dict[str, Any] = raw_rec if isinstance(raw_rec, dict) else {}
+        raw_github = rec.get("github")
+        github: dict[str, Any] = raw_github if isinstance(raw_github, dict) else {}
 
         is_archived = bool(meta.get("archived") or github.get("archived", False))
         is_disabled = bool(meta.get("disabled") or github.get("disabled", False))
@@ -104,10 +111,12 @@ def prune_index(
             prune_reasons_breakdown["blocklist"] += 1
 
         if reasons:
-            pruned_entries.append({
-                "repo_id": repo_id,
-                "reasons": reasons,
-            })
+            pruned_entries.append(
+                {
+                    "repo_id": repo_id,
+                    "reasons": reasons,
+                }
+            )
         else:
             keep_indices.append(i)
 
@@ -122,11 +131,13 @@ def prune_index(
             retained_matrix = np.empty((0, dimension or 0), dtype=np.float32)
 
         retained_entries = [entries[idx] for idx in keep_indices]
-        retained_rids = {str(e.get("repo_id")).lower() for e in retained_entries if e.get("repo_id")}
+        retained_rids = {
+            str(e.get("repo_id")).lower() for e in retained_entries if e.get("repo_id")
+        }
 
         index_doc["vectors"] = retained_entries
         index_doc["record_count"] = len(retained_entries)
-        index_doc["built_at"] = datetime.now(timezone.utc).isoformat()
+        index_doc["built_at"] = datetime.now(UTC).isoformat()
         if "_matrix" in index_doc:
             index_doc["_matrix"] = retained_matrix
 
@@ -139,7 +150,9 @@ def prune_index(
                 if str(r.get("repo_id") or r.get("repo_id_requested")).lower() in retained_rids
             ]
             temp_rec = rec_path.with_name(f".{rec_path.name}.tmp.{datetime.now().timestamp()}")
-            temp_rec.write_text(json.dumps(retained_records, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp_rec.write_text(
+                json.dumps(retained_records, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             temp_rec.replace(rec_path)
 
     elapsed_ms = round((perf_counter() - started) * 1000, 3)

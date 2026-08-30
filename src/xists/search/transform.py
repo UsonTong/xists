@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 from xists.profile.llm import LLMConfig, LLMError, LLMResponse, call_llm
 
@@ -62,6 +62,7 @@ def query_transform_config_from_env() -> QueryTransformConfig:
             "Query transformation requires a compatible chat endpoint. "
             f"Missing environment variables: {', '.join(missing)}."
         )
+    assert api_key is not None and base_url is not None and model is not None
     return QueryTransformConfig(api_key=api_key, base_url=base_url, model=model)
 
 
@@ -69,16 +70,24 @@ def _parse_transformed_queries(content: str, expected_count: int) -> list[str]:
     decoder = json.JSONDecoder()
     start = content.find("{")
     if start < 0:
-        raise QueryTransformError("Query transformation response was not valid JSON: no JSON object found")
+        raise QueryTransformError(
+            "Query transformation response was not valid JSON: no JSON object found"
+        )
     try:
         data, end = decoder.raw_decode(content, start)
     except json.JSONDecodeError as error:
-        raise QueryTransformError(f"Query transformation response was not valid JSON: {error}") from error
+        raise QueryTransformError(
+            f"Query transformation response was not valid JSON: {error}"
+        ) from error
     if content[end:].strip():
-        raise QueryTransformError("Query transformation response must contain exactly one JSON object")
+        raise QueryTransformError(
+            "Query transformation response must contain exactly one JSON object"
+        )
     values = data.get("queries") if isinstance(data, dict) else None
     if not isinstance(values, list) or len(values) != expected_count:
-        raise QueryTransformError("Query transformation response must contain one query for every input")
+        raise QueryTransformError(
+            "Query transformation response must contain one query for every input"
+        )
     transformed = [value.strip() if isinstance(value, str) else "" for value in values]
     if any(not value for value in transformed):
         raise QueryTransformError("Query transformation response contains an empty query")

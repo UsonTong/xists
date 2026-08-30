@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
-import http.client
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any
-
 
 USER_AGENT = "xists-reranker"
 RETRYABLE_HTTP_STATUSES = {429, 500, 502, 503, 504}
@@ -37,8 +36,7 @@ class RerankerConfig:
         base_url = self.base_url.rstrip("/")
         if self.protocol == "passages":
             return base_url
-        if base_url.endswith("/v1"):
-            base_url = base_url[:-3]
+        base_url = base_url.removesuffix("/v1")
         return f"{base_url}/rerank"
 
 
@@ -59,7 +57,8 @@ def reranker_config_from_env() -> RerankerConfig:
 def rerank_text_from_entry(entry: dict[str, Any]) -> str:
     """Build a generic evidence document for one indexed repository."""
 
-    metadata = entry.get("metadata") if isinstance(entry.get("metadata"), dict) else {}
+    raw_meta = entry.get("metadata")
+    metadata: dict[str, Any] = raw_meta if isinstance(raw_meta, dict) else {}
     parts: list[str] = []
     repo_id = entry.get("repo_id")
     if isinstance(repo_id, str) and repo_id.strip():
@@ -71,7 +70,9 @@ def rerank_text_from_entry(entry: dict[str, Any]) -> str:
     for key in ("topics", "use_cases", "capabilities", "ecosystem", "search_phrases"):
         values = metadata.get(key)
         if isinstance(values, list):
-            parts.extend(str(value).strip() for value in values if isinstance(value, str) and value.strip())
+            parts.extend(
+                str(value).strip() for value in values if isinstance(value, str) and value.strip()
+            )
     return "\n".join(parts)
 
 
@@ -95,14 +96,21 @@ def _parse_tei_scores(data: Any, expected_count: int) -> list[float]:
             raise RerankerError(f"Unexpected reranker result: {item!r}")
         index = item.get("index")
         score = item.get("score")
-        if not isinstance(index, int) or not 0 <= index < expected_count or not isinstance(score, (int, float)):
+        if (
+            not isinstance(index, int)
+            or not 0 <= index < expected_count
+            or not isinstance(score, (int, float))
+        ):
             raise RerankerError(f"Unexpected reranker result: {item!r}")
         if scores[index] is not None:
             raise RerankerError(f"Duplicate reranker result index: {index}")
         scores[index] = float(score)
-    if any(score is None for score in scores):
-        raise RerankerError("Reranker response omitted one or more candidate scores")
-    return [float(score) for score in scores]
+    result_scores: list[float] = []
+    for s in scores:
+        if s is None:
+            raise RerankerError("Reranker response omitted one or more candidate scores")
+        result_scores.append(s)
+    return result_scores
 
 
 def _parse_passage_scores(data: Any, expected_count: int) -> list[float]:
@@ -117,14 +125,21 @@ def _parse_passage_scores(data: Any, expected_count: int) -> list[float]:
             raise RerankerError(f"Unexpected reranker result: {item!r}")
         index = item.get("index")
         score = item.get("logit")
-        if not isinstance(index, int) or not 0 <= index < expected_count or not isinstance(score, (int, float)):
+        if (
+            not isinstance(index, int)
+            or not 0 <= index < expected_count
+            or not isinstance(score, (int, float))
+        ):
             raise RerankerError(f"Unexpected reranker result: {item!r}")
         if scores[index] is not None:
             raise RerankerError(f"Duplicate reranker result index: {index}")
         scores[index] = float(score)
-    if any(score is None for score in scores):
-        raise RerankerError("Reranker response omitted one or more candidate scores")
-    return [float(score) for score in scores]
+    result_scores: list[float] = []
+    for s in scores:
+        if s is None:
+            raise RerankerError("Reranker response omitted one or more candidate scores")
+        result_scores.append(s)
+    return result_scores
 
 
 def rerank_documents(
@@ -165,7 +180,12 @@ def rerank_documents(
             detail = error.read().decode("utf-8", errors="replace")
             if error.code not in RETRYABLE_HTTP_STATUSES or attempt == REQUEST_ATTEMPTS - 1:
                 raise RerankerError(f"Reranker HTTP {error.code}: {detail}") from error
-        except (urllib.error.URLError, http.client.RemoteDisconnected, ConnectionError, TimeoutError) as error:
+        except (
+            urllib.error.URLError,
+            http.client.RemoteDisconnected,
+            ConnectionError,
+            TimeoutError,
+        ) as error:
             if attempt == REQUEST_ATTEMPTS - 1:
                 raise RerankerError(f"Reranker request failed: {error}") from error
         sleep(2**attempt)

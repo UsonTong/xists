@@ -1,11 +1,12 @@
-import math
 import json
-from pathlib import Path
+import math
 from urllib.error import URLError
 
 import numpy as np
 import pytest
 
+from xists.records import RECORD_SCHEMA_VERSION
+from xists.search.confidence import calibrate_confidence
 from xists.search.embed import (
     EMBEDDING_INPUT_VERSION,
     EmbeddingConfig,
@@ -18,15 +19,12 @@ from xists.search.embed import (
 )
 from xists.search.index import (
     INDEX_VERSION,
-    LEGACY_INDEX_VERSION,
-    SUPPORTED_INDEX_VERSIONS,
     build_index,
     decode_vector,
     encode_vector,
     load_index,
     save_index,
 )
-from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.query import (
     IndexMismatchError,
     PreparedIndex,
@@ -37,7 +35,6 @@ from xists.search.query import (
     rank,
     rank_many,
 )
-from xists.search.confidence import calibrate_confidence
 
 CONFIG = EmbeddingConfig(api_key="k", base_url="http://localhost/v1", model="bge-m3")
 
@@ -137,6 +134,7 @@ def test_embedding_config_reads_multiple_keys_and_file(monkeypatch, tmp_path):
 
 def test_request_json_retries_transient_http_errors(monkeypatch):
     from urllib.error import HTTPError
+
     from xists.search import embed as embed_module
 
     attempts = 0
@@ -150,8 +148,10 @@ def test_request_json_retries_transient_http_errors(monkeypatch):
         class FakeResponse:
             def __enter__(self):
                 return self
+
             def __exit__(self, *args):
                 pass
+
             def read(self):
                 return b'{"data": [{"index": 0, "embedding": [1.0, 0.0]}]}'
 
@@ -167,6 +167,7 @@ def test_request_json_retries_transient_http_errors(monkeypatch):
 
 def test_request_json_fails_immediately_on_non_retryable_error(monkeypatch):
     from urllib.error import HTTPError
+
     from xists.search import embed as embed_module
 
     attempts = 0
@@ -237,9 +238,7 @@ def test_configured_embedding_request_sets_query_input_type(monkeypatch):
     captured = {}
 
     def fake_request_json(url, body, headers, timeout):
-        captured.update(
-            url=url, payload=json.loads(body), headers=headers, timeout=timeout
-        )
+        captured.update(url=url, payload=json.loads(body), headers=headers, timeout=timeout)
         return {"data": [{"index": 0, "embedding": [1.0, 0.0]}]}
 
     monkeypatch.setattr(embed_module, "_request_json", fake_request_json)
@@ -309,7 +308,10 @@ def test_call_embeddings_reports_all_attempted_endpoints(monkeypatch):
     monkeypatch.setattr(embed_module, "_request_json", fake_request_json)
 
     with pytest.raises(EmbeddingError) as error:
-        call_embeddings(EmbeddingConfig(api_key="k", base_url="http://localhost:6597/v1", model="bge-m3"), ["hello"])
+        call_embeddings(
+            EmbeddingConfig(api_key="k", base_url="http://localhost:6597/v1", model="bge-m3"),
+            ["hello"],
+        )
 
     message = str(error.value)
     assert "all configured endpoints" in message
@@ -350,7 +352,9 @@ def test_build_index_includes_search_metadata(monkeypatch):
     assert metadata["project_type"] == "library"
     assert metadata["ecosystem"] == ["javascript", "web"]
     assert metadata["search_text"].startswith("react javascript")
-    assert index["vectors"][0]["embedding_input_fingerprint"] == embedding_input_fingerprint(records[0])
+    assert index["vectors"][0]["embedding_input_fingerprint"] == embedding_input_fingerprint(
+        records[0]
+    )
 
 
 def test_build_index_skips_empty_records(monkeypatch):
@@ -388,7 +392,9 @@ def test_compact_vector_round_trip_and_legacy_rank_compatibility():
 
 
 def test_build_index_writes_compact_vectors(monkeypatch):
-    monkeypatch.setattr("xists.search.index.call_embeddings", lambda *_args, **_kwargs: [[1.0, 0.0]])
+    monkeypatch.setattr(
+        "xists.search.index.call_embeddings", lambda *_args, **_kwargs: [[1.0, 0.0]]
+    )
 
     index = build_index([make_record()], CONFIG)
 
@@ -400,7 +406,11 @@ def test_build_index_writes_compact_vectors(monkeypatch):
 def test_rank_returns_sorted_semantic_results_with_stable_shape():
     index = make_index(
         [
-            {"repo_id": "react/react", "vector": [1.0, 0.0], "metadata": {"summary": "React summary"}},
+            {
+                "repo_id": "react/react",
+                "vector": [1.0, 0.0],
+                "metadata": {"summary": "React summary"},
+            },
             {"repo_id": "unrelated/repo", "vector": [0.0, 1.0], "metadata": {}},
         ]
     )
@@ -517,7 +527,11 @@ def test_ambiguous_exact_values_do_not_claim_high_confidence():
     index = make_index(
         [
             {"repo_id": "current/vue", "vector": [1.0, 0.0], "metadata": {"aliases": ["vue"]}},
-            {"repo_id": "legacy/vue", "vector": vector_for_cosine(0.9), "metadata": {"name": "vue"}},
+            {
+                "repo_id": "legacy/vue",
+                "vector": vector_for_cosine(0.9),
+                "metadata": {"name": "vue"},
+            },
         ]
     )
 
@@ -609,7 +623,10 @@ def test_cjk_context_pins_a_distinct_ascii_name():
 
     assert result["results"][0]["repo_id"] == "kubernetes/kubernetes"
     assert result["results"][0]["diagnostics"]["identity_match"] == "contextual"
-    assert result["results"][0]["diagnostics"]["identity_evidence"]["kind"] == "contextual_name_mention"
+    assert (
+        result["results"][0]["diagnostics"]["identity_evidence"]["kind"]
+        == "contextual_name_mention"
+    )
 
 
 def test_cjk_ecosystem_mention_cannot_overturn_a_clear_semantic_winner():
@@ -671,7 +688,9 @@ def test_unsupported_semantic_match_is_exploratory_not_high_confidence():
         [{"repo_id": "unrelated/repo", "vector": vector_for_cosine(0.58), "metadata": {}}]
     )
 
-    result = rank("unsupported specialized system", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+    result = rank(
+        "unsupported specialized system", index, CONFIG, embed=lambda config, query: [1.0, 0.0]
+    )
 
     assert result["results"][0]["confidence"] == "exploratory"
 
@@ -729,8 +748,16 @@ def test_semantic_strategy_does_not_apply_identity_or_metadata_adjustments():
 def test_rerank_strategy_fuses_semantic_recall_and_generic_rerank_evidence():
     index = make_index(
         [
-            {"repo_id": "first/repo", "vector": [1.0, 0.0], "metadata": {"description": "First candidate"}},
-            {"repo_id": "second/repo", "vector": vector_for_cosine(0.8), "metadata": {"description": "Second candidate"}},
+            {
+                "repo_id": "first/repo",
+                "vector": [1.0, 0.0],
+                "metadata": {"description": "First candidate"},
+            },
+            {
+                "repo_id": "second/repo",
+                "vector": vector_for_cosine(0.8),
+                "metadata": {"description": "Second candidate"},
+            },
         ]
     )
     calls = []
@@ -758,7 +785,9 @@ def test_rerank_strategy_fuses_semantic_recall_and_generic_rerank_evidence():
         "rerank_rank": 2,
         "fusion": "reciprocal_rank",
     }
-    assert calls == [("general query", ["first/repo\nFirst candidate", "second/repo\nSecond candidate"])]
+    assert calls == [
+        ("general query", ["first/repo\nFirst candidate", "second/repo\nSecond candidate"])
+    ]
 
 
 def test_evidence_calibration_keeps_agreeing_rerank_winner_high_confidence():
@@ -803,7 +832,9 @@ def test_evidence_calibration_downgrades_conflicting_rerank_without_reordering()
     }
 
     baseline = rank("general query", index, CONFIG, **kwargs)
-    calibrated = rank("general query", index, CONFIG, confidence_calibration="evidence-v1", **kwargs)
+    calibrated = rank(
+        "general query", index, CONFIG, confidence_calibration="evidence-v1", **kwargs
+    )
 
     assert [item["repo_id"] for item in calibrated["results"]] == [
         item["repo_id"] for item in baseline["results"]
@@ -818,7 +849,10 @@ def test_evidence_calibration_downgrades_conflicting_rerank_without_reordering()
 
 
 def test_evidence_calibration_downgrades_high_confidence_without_reranker_evidence():
-    result = {"confidence": "high_confidence", "diagnostics": {"identity_evidence": {"kind": "none"}}}
+    result = {
+        "confidence": "high_confidence",
+        "diagnostics": {"identity_evidence": {"kind": "none"}},
+    }
 
     calibrated = calibrate_confidence([result], ranking_strategy="rerank", mode="evidence-v1")
 
@@ -843,7 +877,9 @@ def test_evidence_calibration_keeps_contextual_identity_weak_in_rerank_results()
     }
 
     baseline = rank("Node Web 框架", index, CONFIG, **kwargs)
-    calibrated = rank("Node Web 框架", index, CONFIG, confidence_calibration="evidence-v1", **kwargs)
+    calibrated = rank(
+        "Node Web 框架", index, CONFIG, confidence_calibration="evidence-v1", **kwargs
+    )
 
     assert [item["repo_id"] for item in calibrated["results"]] == [
         item["repo_id"] for item in baseline["results"]
@@ -939,7 +975,11 @@ def test_rerank_abstain_threshold_preserves_an_exact_repository_identity():
 def test_semantic_winner_is_not_overturned_by_ordinary_metadata():
     index = make_index(
         [
-            {"repo_id": "semantic/winner", "vector": [1.0, 0.0], "metadata": {"description": "General project."}},
+            {
+                "repo_id": "semantic/winner",
+                "vector": [1.0, 0.0],
+                "metadata": {"description": "General project."},
+            },
             {
                 "repo_id": "metadata/match",
                 "vector": vector_for_cosine(0.6),
@@ -953,14 +993,24 @@ def test_semantic_winner_is_not_overturned_by_ordinary_metadata():
         ]
     )
 
-    result = rank("python workflow automation platform", index, CONFIG, top_k=2, embed=lambda config, query: [1.0, 0.0])
+    result = rank(
+        "python workflow automation platform",
+        index,
+        CONFIG,
+        top_k=2,
+        embed=lambda config, query: [1.0, 0.0],
+    )
     assert result["results"][0]["repo_id"] == "semantic/winner"
 
 
 def test_lightweight_metadata_can_break_a_close_tie():
     index = make_index(
         [
-            {"repo_id": "generic/repo", "vector": vector_for_cosine(0.91), "metadata": {"summary": "Generic tool."}},
+            {
+                "repo_id": "generic/repo",
+                "vector": vector_for_cosine(0.91),
+                "metadata": {"summary": "Generic tool."},
+            },
             {
                 "repo_id": "fastapi/fastapi",
                 "vector": vector_for_cosine(0.9),
@@ -975,7 +1025,9 @@ def test_lightweight_metadata_can_break_a_close_tie():
         ]
     )
 
-    result = rank("python api framework", index, CONFIG, top_k=2, embed=lambda config, query: [1.0, 0.0])
+    result = rank(
+        "python api framework", index, CONFIG, top_k=2, embed=lambda config, query: [1.0, 0.0]
+    )
     assert result["results"][0]["repo_id"] == "fastapi/fastapi"
     assert result["results"][0]["metadata_score"] > 0
     assert {"api", "framework"}.issubset(set(result["results"][0]["matched_terms"]))
@@ -990,12 +1042,22 @@ def test_archived_repository_is_downranked():
     }
     index = make_index(
         [
-            {"repo_id": "old/tool", "vector": [1.0, 0.0], "metadata": {**metadata, "archived": True}},
-            {"repo_id": "new/tool", "vector": [1.0, 0.0], "metadata": {**metadata, "archived": False}},
+            {
+                "repo_id": "old/tool",
+                "vector": [1.0, 0.0],
+                "metadata": {**metadata, "archived": True},
+            },
+            {
+                "repo_id": "new/tool",
+                "vector": [1.0, 0.0],
+                "metadata": {**metadata, "archived": False},
+            },
         ]
     )
 
-    result = rank("cli project automation", index, CONFIG, top_k=2, embed=lambda config, query: [1.0, 0.0])
+    result = rank(
+        "cli project automation", index, CONFIG, top_k=2, embed=lambda config, query: [1.0, 0.0]
+    )
     assert result["results"][0]["repo_id"] == "new/tool"
     archived = next(item for item in result["results"] if item["repo_id"] == "old/tool")
     assert archived["diagnostics"]["repository_state"] == ["archived"]
@@ -1017,7 +1079,12 @@ def test_weak_semantic_match_abstains_even_with_loose_metadata_overlap():
         ]
     )
 
-    result = rank("open source workflow automation platform", index, CONFIG, embed=lambda config, query: [1.0, 0.0])
+    result = rank(
+        "open source workflow automation platform",
+        index,
+        CONFIG,
+        embed=lambda config, query: [1.0, 0.0],
+    )
     assert result["abstained"] is True
     assert result["results"] == []
 
@@ -1056,15 +1123,27 @@ def test_rank_many_matches_rank_order():
             {
                 "repo_id": "fastapi/fastapi",
                 "vector": [1.0, 0.0],
-                "metadata": {"language": "Python", "topics": ["python", "api"], "search_phrases": ["python api framework"]},
+                "metadata": {
+                    "language": "Python",
+                    "topics": ["python", "api"],
+                    "search_phrases": ["python api framework"],
+                },
             },
-            {"repo_id": "react/react", "vector": [0.0, 1.0], "metadata": {"language": "JavaScript"}},
+            {
+                "repo_id": "react/react",
+                "vector": [0.0, 1.0],
+                "metadata": {"language": "JavaScript"},
+            },
         ]
     )
 
     single = rank("python api", index, CONFIG, top_k=2, embed=lambda config, query: [1.0, 0.0])
-    many = rank_many(["python api"], index, CONFIG, top_k=2, embed_many=lambda config, queries: [[1.0, 0.0]])[0]
-    assert [item["repo_id"] for item in many["results"]] == [item["repo_id"] for item in single["results"]]
+    many = rank_many(
+        ["python api"], index, CONFIG, top_k=2, embed_many=lambda config, queries: [[1.0, 0.0]]
+    )[0]
+    assert [item["repo_id"] for item in many["results"]] == [
+        item["repo_id"] for item in single["results"]
+    ]
 
 
 def test_rank_many_batches_embeddings():
@@ -1075,7 +1154,9 @@ def test_rank_many_batches_embeddings():
         return [[1.0, 0.0] for _ in queries]
 
     index = make_index([{"repo_id": "a/b", "vector": [1.0, 0.0], "metadata": {}}])
-    results = rank_many(["one", "two", "three"], index, CONFIG, batch_size=2, embed_many=fake_embed_many)
+    results = rank_many(
+        ["one", "two", "three"], index, CONFIG, batch_size=2, embed_many=fake_embed_many
+    )
     assert calls == [["one", "two"], ["three"]]
     assert len(results) == 3
 
@@ -1259,7 +1340,9 @@ def test_rank_rejects_dimension_mismatch():
 def test_rank_many_rejects_dimension_mismatch():
     index = make_index([{"repo_id": "react/react", "vector": [1.0, 0.0], "metadata": {}}])
     with pytest.raises(IndexMismatchError):
-        rank_many(["frontend ui"], index, CONFIG, embed_many=lambda config, queries: [[1.0, 0.0, 0.0]])
+        rank_many(
+            ["frontend ui"], index, CONFIG, embed_many=lambda config, queries: [[1.0, 0.0, 0.0]]
+        )
 
 
 def test_query_intent_keeps_basic_labels():
@@ -1272,7 +1355,9 @@ def test_query_intent_keeps_basic_labels():
 def test_query_intent_extracts_bounded_cjk_terms_without_losing_technical_identifiers():
     intent = _query_intent("自托管大语言模型应用界面，Node.js C++ C# .NET")
 
-    cjk_terms = [term for term in intent["keywords"] if any("\u3400" <= char <= "\u9fff" for char in term)]
+    cjk_terms = [
+        term for term in intent["keywords"] if any("\u3400" <= char <= "\u9fff" for char in term)
+    ]
     assert intent["type"] == "functional"
     assert intent["specificity"] > 0
     assert cjk_terms
@@ -1322,8 +1407,16 @@ def test_cjk_terms_participate_in_metadata_overlap_and_explanations():
 def test_prepared_index_creation_and_dict_protocol():
     raw_index = make_index(
         [
-            {"repo_id": "fastapi/fastapi", "vector": [1.0, 0.0], "metadata": {"name": "fastapi", "language": "Python"}},
-            {"repo_id": "expressjs/express", "vector": [0.0, 1.0], "metadata": {"name": "express", "language": "JavaScript"}},
+            {
+                "repo_id": "fastapi/fastapi",
+                "vector": [1.0, 0.0],
+                "metadata": {"name": "fastapi", "language": "Python"},
+            },
+            {
+                "repo_id": "expressjs/express",
+                "vector": [0.0, 1.0],
+                "metadata": {"name": "express", "language": "JavaScript"},
+            },
         ]
     )
 
@@ -1401,8 +1494,12 @@ def test_ranking_parity_single_and_batch_all_strategies():
 
     # Strategy 1: metadata
     single_meta = rank(query, index, CONFIG, top_k=3, embed=lambda c, q: query_vector)
-    many_meta = rank_many([query], index, CONFIG, top_k=3, embed_many=lambda c, qs: [query_vector])[0]
-    assert [r["repo_id"] for r in single_meta["results"]] == [r["repo_id"] for r in many_meta["results"]]
+    many_meta = rank_many([query], index, CONFIG, top_k=3, embed_many=lambda c, qs: [query_vector])[
+        0
+    ]
+    assert [r["repo_id"] for r in single_meta["results"]] == [
+        r["repo_id"] for r in many_meta["results"]
+    ]
     for r1, r2 in zip(single_meta["results"], many_meta["results"]):
         assert r1["score"] == pytest.approx(r2["score"], abs=1e-5)
         assert r1["semantic_score"] == pytest.approx(r2["semantic_score"], abs=1e-5)
@@ -1410,9 +1507,20 @@ def test_ranking_parity_single_and_batch_all_strategies():
         assert r1["confidence"] == r2["confidence"]
 
     # Strategy 2: semantic
-    single_sem = rank(query, index, CONFIG, top_k=3, embed=lambda c, q: query_vector, ranking_strategy="semantic")
-    many_sem = rank_many([query], index, CONFIG, top_k=3, embed_many=lambda c, qs: [query_vector], ranking_strategy="semantic")[0]
-    assert [r["repo_id"] for r in single_sem["results"]] == [r["repo_id"] for r in many_sem["results"]]
+    single_sem = rank(
+        query, index, CONFIG, top_k=3, embed=lambda c, q: query_vector, ranking_strategy="semantic"
+    )
+    many_sem = rank_many(
+        [query],
+        index,
+        CONFIG,
+        top_k=3,
+        embed_many=lambda c, qs: [query_vector],
+        ranking_strategy="semantic",
+    )[0]
+    assert [r["repo_id"] for r in single_sem["results"]] == [
+        r["repo_id"] for r in many_sem["results"]
+    ]
     for r1, r2 in zip(single_sem["results"], many_sem["results"]):
         assert r1["score"] == pytest.approx(r2["score"], abs=1e-5)
 
@@ -1440,7 +1548,9 @@ def test_ranking_parity_single_and_batch_all_strategies():
         rerank=mock_rerank,
         rerank_candidate_limit=3,
     )[0]
-    assert [r["repo_id"] for r in single_rerank["results"]] == [r["repo_id"] for r in many_rerank["results"]]
+    assert [r["repo_id"] for r in single_rerank["results"]] == [
+        r["repo_id"] for r in many_rerank["results"]
+    ]
     for r1, r2 in zip(single_rerank["results"], many_rerank["results"]):
         assert r1["score"] == pytest.approx(r2["score"], abs=1e-5)
 
@@ -1458,7 +1568,9 @@ def test_ranking_parity_prepared_vs_raw_dict():
     res_prep = rank("repo-a", prepared, CONFIG, embed=lambda c, q: [1.0, 0.0])
 
     assert [r["repo_id"] for r in res_raw["results"]] == [r["repo_id"] for r in res_prep["results"]]
-    assert res_raw["results"][0]["score"] == pytest.approx(res_prep["results"][0]["score"], abs=1e-5)
+    assert res_raw["results"][0]["score"] == pytest.approx(
+        res_prep["results"][0]["score"], abs=1e-5
+    )
 
 
 def test_zero_vector_similarity_handling():
@@ -1497,7 +1609,9 @@ def test_prepared_index_matches_model_validation():
     raw_index = make_index([{"repo_id": "a/b", "vector": [1.0, 0.0], "metadata": {}}])
     prepared = prepare_index(raw_index, CONFIG)
 
-    diff_config = EmbeddingConfig(api_key="k", base_url="http://localhost/v1", model="different-model")
+    diff_config = EmbeddingConfig(
+        api_key="k", base_url="http://localhost/v1", model="different-model"
+    )
     with pytest.raises(IndexMismatchError, match=r"different-model"):
         prepare_index(prepared, diff_config)
 

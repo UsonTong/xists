@@ -32,7 +32,11 @@ def test_normalize_dataset_expands_acceptable_sets():
         }
     )
 
-    assert dataset["cases"][0]["acceptable_set"] == ["facebook/react", "preactjs/preact", "react/react"]
+    assert dataset["cases"][0]["acceptable_set"] == [
+        "facebook/react",
+        "preactjs/preact",
+        "react/react",
+    ]
 
 
 def test_normalize_dataset_accepts_acceptable_alias_and_keeps_old_cases_compatible():
@@ -128,7 +132,7 @@ def test_evaluate_dataset_reports_exact_and_top1_status_metrics(tmp_path):
                         "query": "unknown niche thing",
                         "expected_repo_id": "unknown/repo",
                     },
-                ]
+                ],
             }
         ),
         encoding="utf-8",
@@ -334,7 +338,11 @@ def test_evaluate_dataset_reports_recall_at_k_for_acceptable_and_chinese_cases(t
                         "expected_repo_id": "react/react",
                         "acceptable": ["preactjs/preact"],
                     },
-                    {"id": "rank-five", "query": "Python API framework", "expected_repo_id": "tiangolo/fastapi"},
+                    {
+                        "id": "rank-five",
+                        "query": "Python API framework",
+                        "expected_repo_id": "tiangolo/fastapi",
+                    },
                     {"id": "miss", "query": "database", "expected_repo_id": "postgres/postgres"},
                 ],
             }
@@ -342,14 +350,24 @@ def test_evaluate_dataset_reports_recall_at_k_for_acceptable_and_chinese_cases(t
         encoding="utf-8",
     )
     index_file = tmp_path / "index.json"
-    index_file.write_text(json.dumps({"embedding_model": "bge-m3", "dimension": 2, "vectors": []}), encoding="utf-8")
+    index_file.write_text(
+        json.dumps({"embedding_model": "bge-m3", "dimension": 2, "vectors": []}), encoding="utf-8"
+    )
 
     def fake_rank_many(queries, index, config, *, top_k=10, batch_size=64):
         assert queries[1] == "轻量级 React 替代品"
         return [
             {"results": [{"repo_id": "react/react"}]},
             {"results": [{"repo_id": "preactjs/preact"}]},
-            {"results": [{"repo_id": "a/a"}, {"repo_id": "b/b"}, {"repo_id": "c/c"}, {"repo_id": "d/d"}, {"repo_id": "tiangolo/fastapi"}]},
+            {
+                "results": [
+                    {"repo_id": "a/a"},
+                    {"repo_id": "b/b"},
+                    {"repo_id": "c/c"},
+                    {"repo_id": "d/d"},
+                    {"repo_id": "tiangolo/fastapi"},
+                ]
+            },
             {"results": [{"repo_id": "mysql/mysql-server"}]},
         ]
 
@@ -389,7 +407,9 @@ def test_evaluate_dataset_with_llm_judge_keeps_hard_metrics_and_adds_analysis(tm
     )
 
     index_file = tmp_path / "index.json"
-    index_file.write_text(json.dumps({"embedding_model": "bge-m3", "dimension": 2, "vectors": []}), encoding="utf-8")
+    index_file.write_text(
+        json.dumps({"embedding_model": "bge-m3", "dimension": 2, "vectors": []}), encoding="utf-8"
+    )
 
     records_file = tmp_path / "records.json"
     records_file.write_text(
@@ -398,7 +418,11 @@ def test_evaluate_dataset_with_llm_judge_keeps_hard_metrics_and_adds_analysis(tm
                 {
                     "repo_id": "fastapi/fastapi",
                     "url": "https://github.com/fastapi/fastapi",
-                    "github": {"description": "Python web framework for building APIs", "topics": [], "language": "Python"},
+                    "github": {
+                        "description": "Python web framework for building APIs",
+                        "topics": [],
+                        "language": "Python",
+                    },
                     "readme": {"excerpt": "FastAPI framework"},
                     "structure": {"signals": ["has_readme"]},
                     "evidence": [{"kind": "github_description"}],
@@ -407,7 +431,11 @@ def test_evaluate_dataset_with_llm_judge_keeps_hard_metrics_and_adds_analysis(tm
                 {
                     "repo_id": "api-platform/api-platform",
                     "url": "https://github.com/api-platform/api-platform",
-                    "github": {"description": "API platform for web APIs", "topics": [], "language": "PHP"},
+                    "github": {
+                        "description": "API platform for web APIs",
+                        "topics": [],
+                        "language": "PHP",
+                    },
                     "readme": {"excerpt": "API Platform framework"},
                     "structure": {"signals": ["has_readme"]},
                     "evidence": [{"kind": "github_description"}],
@@ -416,7 +444,11 @@ def test_evaluate_dataset_with_llm_judge_keeps_hard_metrics_and_adds_analysis(tm
                 {
                     "repo_id": "pallets/flask",
                     "url": "https://github.com/pallets/flask",
-                    "github": {"description": "Python micro framework for building web applications", "topics": [], "language": "Python"},
+                    "github": {
+                        "description": "Python micro framework for building web applications",
+                        "topics": [],
+                        "language": "Python",
+                    },
                     "readme": {"excerpt": "Flask framework"},
                     "structure": {"signals": ["has_readme"]},
                     "evidence": [{"kind": "github_description"}],
@@ -433,7 +465,11 @@ def test_evaluate_dataset_with_llm_judge_keeps_hard_metrics_and_adds_analysis(tm
                 "query": queries[0],
                 "abstained": False,
                 "results": [
-                    {"repo_id": "api-platform/api-platform", "score": 0.8, "confidence": "high_confidence"},
+                    {
+                        "repo_id": "api-platform/api-platform",
+                        "score": 0.8,
+                        "confidence": "high_confidence",
+                    },
                     {"repo_id": "fastapi/fastapi", "score": 0.7, "confidence": "high_confidence"},
                 ],
                 "considered": 2,
@@ -441,7 +477,9 @@ def test_evaluate_dataset_with_llm_judge_keeps_hard_metrics_and_adds_analysis(tm
             {
                 "query": queries[1],
                 "abstained": False,
-                "results": [{"repo_id": "pallets/flask", "score": 0.9, "confidence": "high_confidence"}],
+                "results": [
+                    {"repo_id": "pallets/flask", "score": 0.9, "confidence": "high_confidence"}
+                ],
                 "considered": 2,
             },
         ]
@@ -515,7 +553,9 @@ def test_evaluate_dataset_tracks_insufficient_evidence_top1_bucket(tmp_path):
     )
 
     index_file = tmp_path / "index.json"
-    index_file.write_text(json.dumps({"embedding_model": "bge-m3", "dimension": 2, "vectors": []}), encoding="utf-8")
+    index_file.write_text(
+        json.dumps({"embedding_model": "bge-m3", "dimension": 2, "vectors": []}), encoding="utf-8"
+    )
 
     records_file = tmp_path / "records.json"
     records_file.write_text(
@@ -524,7 +564,11 @@ def test_evaluate_dataset_tracks_insufficient_evidence_top1_bucket(tmp_path):
                 {
                     "repo_id": "tiangolo/fastapi",
                     "url": "https://github.com/tiangolo/fastapi",
-                    "github": {"description": "Fast API framework", "topics": [], "language": "Python"},
+                    "github": {
+                        "description": "Fast API framework",
+                        "topics": [],
+                        "language": "Python",
+                    },
                     "readme": {"excerpt": "FastAPI framework"},
                     "structure": {"signals": ["has_readme"]},
                     "evidence": [{"kind": "github_description"}],
@@ -533,7 +577,11 @@ def test_evaluate_dataset_tracks_insufficient_evidence_top1_bucket(tmp_path):
                 {
                     "repo_id": "some/other-api",
                     "url": "https://github.com/some/other-api",
-                    "github": {"description": "Another API server", "topics": [], "language": "Python"},
+                    "github": {
+                        "description": "Another API server",
+                        "topics": [],
+                        "language": "Python",
+                    },
                     "readme": {"excerpt": "Another API framework"},
                     "structure": {"signals": ["has_readme"]},
                     "evidence": [{"kind": "github_description"}],
@@ -549,7 +597,9 @@ def test_evaluate_dataset_tracks_insufficient_evidence_top1_bucket(tmp_path):
             {
                 "query": queries[0],
                 "abstained": False,
-                "results": [{"repo_id": "some/other-api", "score": 0.8, "confidence": "high_confidence"}],
+                "results": [
+                    {"repo_id": "some/other-api", "score": 0.8, "confidence": "high_confidence"}
+                ],
                 "considered": 2,
             }
         ]
@@ -644,7 +694,9 @@ def test_evaluate_dataset_partitions_top1_miss_buckets(tmp_path):
     )
 
     index_file = tmp_path / "index.json"
-    index_file.write_text(json.dumps({"embedding_model": "bge-m3", "dimension": 2, "vectors": []}), encoding="utf-8")
+    index_file.write_text(
+        json.dumps({"embedding_model": "bge-m3", "dimension": 2, "vectors": []}), encoding="utf-8"
+    )
 
     records_file = tmp_path / "records.json"
     records_file.write_text(
@@ -653,7 +705,11 @@ def test_evaluate_dataset_partitions_top1_miss_buckets(tmp_path):
                 {
                     "repo_id": "react/react",
                     "url": "https://github.com/react/react",
-                    "github": {"description": "React UI library", "topics": [], "language": "JavaScript"},
+                    "github": {
+                        "description": "React UI library",
+                        "topics": [],
+                        "language": "JavaScript",
+                    },
                     "readme": {"excerpt": "React"},
                     "structure": {"signals": ["has_readme"]},
                     "evidence": [{"kind": "github_description"}],
@@ -662,7 +718,11 @@ def test_evaluate_dataset_partitions_top1_miss_buckets(tmp_path):
                 {
                     "repo_id": "preactjs/preact",
                     "url": "https://github.com/preactjs/preact",
-                    "github": {"description": "Preact UI library", "topics": [], "language": "JavaScript"},
+                    "github": {
+                        "description": "Preact UI library",
+                        "topics": [],
+                        "language": "JavaScript",
+                    },
                     "readme": {"excerpt": "Preact"},
                     "structure": {"signals": ["has_readme"]},
                     "evidence": [{"kind": "github_description"}],
@@ -671,7 +731,11 @@ def test_evaluate_dataset_partitions_top1_miss_buckets(tmp_path):
                 {
                     "repo_id": "fastapi/fastapi",
                     "url": "https://github.com/fastapi/fastapi",
-                    "github": {"description": "Python API framework", "topics": [], "language": "Python"},
+                    "github": {
+                        "description": "Python API framework",
+                        "topics": [],
+                        "language": "Python",
+                    },
                     "readme": {"excerpt": "FastAPI"},
                     "structure": {"signals": ["has_readme"]},
                     "evidence": [{"kind": "github_description"}],
@@ -689,7 +753,11 @@ def test_evaluate_dataset_partitions_top1_miss_buckets(tmp_path):
                 {
                     "repo_id": "vercel/next.js",
                     "url": "https://github.com/vercel/next.js",
-                    "github": {"description": "React framework", "topics": [], "language": "JavaScript"},
+                    "github": {
+                        "description": "React framework",
+                        "topics": [],
+                        "language": "JavaScript",
+                    },
                     "readme": {"excerpt": "Next.js"},
                     "structure": {"signals": ["has_readme"]},
                     "evidence": [{"kind": "github_description"}],
@@ -707,7 +775,11 @@ def test_evaluate_dataset_partitions_top1_miss_buckets(tmp_path):
                 {
                     "repo_id": "apache/airflow",
                     "url": "https://github.com/apache/airflow",
-                    "github": {"description": "Workflow orchestration", "topics": [], "language": "Python"},
+                    "github": {
+                        "description": "Workflow orchestration",
+                        "topics": [],
+                        "language": "Python",
+                    },
                     "readme": {"excerpt": "Airflow"},
                     "structure": {"signals": ["has_readme"]},
                     "evidence": [{"kind": "github_description"}],
@@ -716,7 +788,11 @@ def test_evaluate_dataset_partitions_top1_miss_buckets(tmp_path):
                 {
                     "repo_id": "unknown/orchestrator",
                     "url": "https://github.com/unknown/orchestrator",
-                    "github": {"description": "Another orchestrator", "topics": [], "language": "Go"},
+                    "github": {
+                        "description": "Another orchestrator",
+                        "topics": [],
+                        "language": "Go",
+                    },
                     "readme": {"excerpt": "Unknown orchestrator"},
                     "structure": {"signals": ["has_readme"]},
                     "evidence": [{"kind": "github_description"}],
@@ -732,31 +808,49 @@ def test_evaluate_dataset_partitions_top1_miss_buckets(tmp_path):
             {
                 "query": queries[0],
                 "abstained": False,
-                "results": [{"repo_id": "react/react", "score": 0.9, "confidence": "high_confidence"}],
+                "results": [
+                    {"repo_id": "react/react", "score": 0.9, "confidence": "high_confidence"}
+                ],
                 "considered": 3,
             },
             {
                 "query": queries[1],
                 "abstained": False,
-                "results": [{"repo_id": "preactjs/preact", "score": 0.8, "confidence": "high_confidence"}],
+                "results": [
+                    {"repo_id": "preactjs/preact", "score": 0.8, "confidence": "high_confidence"}
+                ],
                 "considered": 3,
             },
             {
                 "query": queries[2],
                 "abstained": False,
-                "results": [{"repo_id": "api-platform/api-platform", "score": 0.8, "confidence": "high_confidence"}],
+                "results": [
+                    {
+                        "repo_id": "api-platform/api-platform",
+                        "score": 0.8,
+                        "confidence": "high_confidence",
+                    }
+                ],
                 "considered": 3,
             },
             {
                 "query": queries[3],
                 "abstained": False,
-                "results": [{"repo_id": "some/random-repo", "score": 0.8, "confidence": "high_confidence"}],
+                "results": [
+                    {"repo_id": "some/random-repo", "score": 0.8, "confidence": "high_confidence"}
+                ],
                 "considered": 3,
             },
             {
                 "query": queries[4],
                 "abstained": False,
-                "results": [{"repo_id": "unknown/orchestrator", "score": 0.8, "confidence": "high_confidence"}],
+                "results": [
+                    {
+                        "repo_id": "unknown/orchestrator",
+                        "score": 0.8,
+                        "confidence": "high_confidence",
+                    }
+                ],
                 "considered": 3,
             },
         ]

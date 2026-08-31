@@ -1,6 +1,6 @@
 <div align="center"><a name="readme-top"></a>
 
-<img src="./docs/assets/xists-mark.svg" alt="xists" width="120" />
+<img src="https://raw.githubusercontent.com/UsonTong/xists/main/docs/assets/xists-mark.svg" alt="xists" width="120" />
 
 # xists
 

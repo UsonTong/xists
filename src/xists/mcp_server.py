@@ -60,12 +60,22 @@ def create_server(index: dict[str, Any], embedding_config: EmbeddingConfig) -> A
     metadata_by_repo = _metadata_by_repo_id(index)
 
     @server.tool(description="Search the local xists project index.")
-    def search_projects(query: str, top_k: int = 10) -> dict[str, Any]:
+    def search_projects(
+        query: str,
+        top_k: int = 10,
+        ranking_strategy: str = "hybrid",
+    ) -> dict[str, Any]:
         """Return ranked project candidates for a natural-language query."""
 
         _validate_query(query)
         _validate_top_k(top_k)
-        result = public_search(query, index, embedding_config=embedding_config, top_k=top_k)
+        result = public_search(
+            query,
+            index,
+            embedding_config=embedding_config,
+            top_k=top_k,
+            ranking_strategy=ranking_strategy,
+        )
         return _enrich_search_result(result, metadata_by_repo)
 
     @server.tool(description="Inspect the indexed profile for one repository.")

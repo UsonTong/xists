@@ -152,6 +152,32 @@ def test_search_projects_rejects_an_empty_query():
         asyncio.run(server.call_tool("search_projects", {"query": "  "}))
 
 
+def test_search_projects_forwards_ranking_strategy(monkeypatch):
+    import xists.mcp_server as server_module
+
+    captured_kwargs = {}
+
+    def fake_search(query, index, **kwargs):
+        captured_kwargs.update(kwargs)
+        return {
+            "query": query,
+            "query_intent": {"type": "functional"},
+            "abstained": False,
+            "results": [{"repo_id": "owner/project", "score": 0.8, "confidence": "high"}],
+        }
+
+    monkeypatch.setattr(server_module, "public_search", fake_search)
+    server = server_module.create_server(_index(), object())
+
+    _tool_payload(
+        server,
+        "search_projects",
+        {"query": "project", "top_k": 3, "ranking_strategy": "hybrid"},
+    )
+    assert captured_kwargs["ranking_strategy"] == "hybrid"
+    assert captured_kwargs["top_k"] == 3
+
+
 def test_stdio_server_runs_tools_without_corrupting_protocol(tmp_path):
     from mcp import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client

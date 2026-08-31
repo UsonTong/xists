@@ -613,6 +613,53 @@ def test_search_cli_json_matches_public_api_core_result(tmp_path, monkeypatch, c
         assert actual[key] == expected[key]
 
 
+def test_search_cli_hybrid_ranking_strategy(tmp_path, monkeypatch, capsys):
+    index = {
+        "index_version": INDEX_VERSION,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "fixture/embed",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "dimension": 2,
+        "record_count": 1,
+        "vectors": [
+            {
+                "repo_id": "astral-sh/uv",
+                "vector": [1.0, 0.0],
+                "metadata": {"name": "uv", "summary": "Fast Python package manager"},
+            }
+        ],
+    }
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(index), encoding="utf-8")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embeddings.example/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
+
+    monkeypatch.setattr(
+        "xists.search.embed.call_embeddings",
+        lambda _config, inputs, *, timeout=60, input_type=None: [[1.0, 0.0] for _ in inputs],
+    )
+
+    args = build_parser().parse_args(
+        [
+            "search",
+            "uv",
+            "--index",
+            str(index_file),
+            "--ranking-strategy",
+            "hybrid",
+            "--format",
+            "json",
+        ]
+    )
+
+    assert search(args) == 0
+    actual = json.loads(capsys.readouterr().out)
+    assert actual["abstained"] is False
+    assert actual["results"][0]["repo_id"] == "astral-sh/uv"
+    assert "bm25_score" in actual["results"][0]
+
+
 @pytest.mark.parametrize(
     ("command", "handler", "expected_message"),
     [

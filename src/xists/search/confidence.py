@@ -47,6 +47,7 @@ def calibrate_confidence(
         rerank_score = result.get("rerank_score")
         semantic_rank = ranking.get("semantic_rank")
         rerank_rank = ranking.get("rerank_rank")
+        bm25_rank = ranking.get("bm25_rank")
         reranker_available = (
             isinstance(rerank_score, (int, float))
             and isinstance(semantic_rank, int)
@@ -80,6 +81,15 @@ def calibrate_confidence(
                 downgrade.append("top_result_is_not_leading_in_both_rankers")
             else:
                 support.append("semantic_and_rerank_agree")
+        elif ranking_strategy == "hybrid" and identity_kind == "none":
+            if semantic_rank == 1 and bm25_rank == 1:
+                support.append("semantic_and_bm25_agree")
+            elif (
+                isinstance(semantic_rank, int)
+                and isinstance(bm25_rank, int)
+                and abs(semantic_rank - bm25_rank) > 20
+            ):
+                downgrade.append("semantic_and_bm25_diverge")
 
         final = initial
         if mode == CONFIDENCE_CALIBRATION_VERSION and initial == "high_confidence" and downgrade:
@@ -96,6 +106,7 @@ def calibrate_confidence(
             "reranker_available": reranker_available if ranking_strategy == "rerank" else None,
             "semantic_rank": semantic_rank if isinstance(semantic_rank, int) else None,
             "rerank_rank": rerank_rank if isinstance(rerank_rank, int) else None,
+            "bm25_rank": bm25_rank if isinstance(bm25_rank, int) else None,
             "top_score_margin": round(score_margin, 8) if score_margin is not None else None,
             "supporting_signals": support,
             "downgrade_reasons": downgrade,

@@ -107,6 +107,7 @@ class SearchResultItem(TypedDict, total=False):
     url: str
     score: float
     semantic_score: float
+    bm25_score: float
     metadata_score: float
     confidence: Literal["high_confidence", "medium_confidence", "exploratory", "abstain"] | str
     summary: str | None

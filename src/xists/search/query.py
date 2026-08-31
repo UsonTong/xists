@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from xists.records import RECORD_SCHEMA_VERSION
+from xists.search.bm25 import BM25Index
 from xists.search.confidence import CONFIDENCE_CALIBRATION_MODES, calibrate_confidence
 from xists.search.embed import (
     EMBEDDING_INPUT_VERSION,
@@ -25,8 +26,9 @@ from xists.search.rerank import rerank_text_from_entry
 
 HIGH_CONFIDENCE_THRESHOLD = 0.60
 EXPLORATORY_THRESHOLD = 0.35
-RANKING_STRATEGIES = ("metadata", "semantic", "rerank")
+RANKING_STRATEGIES = ("metadata", "semantic", "rerank", "hybrid")
 RERANK_FUSION_RANK_CONSTANT = 60
+HYBRID_FUSION_RANK_CONSTANT = 60
 TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9+._#-]*")
 CJK_RUN_RE = re.compile(r"[\u3400-\u9fff]+")
 CJK_TERM_LENGTHS = (3, 2)
@@ -706,13 +708,20 @@ def _metadata_adjustment_cached(
 
 
 def _score_breakdown(
-    *, semantic_score: float, metadata_score: float, final_score: float
+    *,
+    semantic_score: float,
+    metadata_score: float,
+    final_score: float,
+    bm25_score: float | None = None,
 ) -> dict[str, float]:
-    return {
+    breakdown = {
         "semantic": round(semantic_score, 6),
         "metadata": round(metadata_score, 6),
         "final": round(final_score, 6),
     }
+    if bm25_score is not None:
+        breakdown["bm25"] = round(bm25_score, 6)
+    return breakdown
 
 
 def _result_from_score(
@@ -1176,6 +1185,144 @@ def _rank_reranked_entries_prepared(
     )
 
 
+def _rank_hybrid_entries_prepared(
+    query: str,
+    prepared: PreparedIndex,
+    semantic_scores: np.ndarray,
+    top_k: int,
+    *,
+    query_ctx: dict[str, Any] | None = None,
+    exploratory_threshold: float = EXPLORATORY_THRESHOLD,
+    confidence_calibration: str = "off",
+    query_variants: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Rank index entries using Reciprocal Rank Fusion of dense embeddings and BM25 sparse index."""
+    if query_ctx is None:
+        query_ctx = _build_query_context(query)
+
+    # 1. Compute BM25 sparse scores across documents
+    if query_variants:
+        bm25_scores = np.maximum.reduce(
+            [prepared.bm25_index.score_query(variant) for variant in query_variants]
+        )
+    else:
+        bm25_scores = prepared.bm25_index.score_query(query)
+
+    # 2. Dense ranking (1-based for all documents)
+    dense_order = np.argsort(-semantic_scores, kind="stable")
+    dense_ranks = np.empty(len(prepared.entries), dtype=np.int32)
+    dense_ranks[dense_order] = np.arange(1, len(prepared.entries) + 1)
+
+    # 3. BM25 sparse ranking (1-based for matching docs with score > 0)
+    matching_indices = np.where(bm25_scores > 0)[0]
+    bm25_ranks = np.zeros(len(prepared.entries), dtype=np.int32)
+    if len(matching_indices) > 0:
+        sorted_matching = matching_indices[
+            np.argsort(-bm25_scores[matching_indices], kind="stable")
+        ]
+        bm25_ranks[sorted_matching] = np.arange(1, len(sorted_matching) + 1)
+
+    # 4. Reciprocal Rank Fusion calculation with repository prior
+    rrf_k = HYBRID_FUSION_RANK_CONSTANT
+    rrf_scores = 1.0 / (rrf_k + dense_ranks) + np.where(
+        bm25_ranks > 0, 1.0 / (rrf_k + bm25_ranks), 0.0
+    )
+
+    # 5. Build results with diagnostics, confidence, and explanations
+    results: list[dict[str, Any]] = []
+    for i, (entry, cache) in enumerate(zip(prepared.entries, prepared.metadata_caches)):
+        identity_kind = _identity_match_kind_cached(
+            query_ctx["raw_query"],
+            query_ctx["explicit_value"],
+            cache,
+        )
+        exact_identity = identity_kind in {"repo_id", "exact_value"}
+        contextual_identity = identity_kind == "contextual_name_mention"
+        sem_score = float(semantic_scores[i])
+        pop_bonus = float(cache.get("popularity_bonus") or 0.0)
+        fusion_score = float(rrf_scores[i]) + pop_bonus * 0.7
+        bm25_score = float(bm25_scores[i])
+        d_rank = int(dense_ranks[i])
+        b_rank = int(bm25_ranks[i]) if bm25_ranks[i] > 0 else None
+
+        if exact_identity:
+            confidence = "high_confidence"
+        elif d_rank == 1 and b_rank == 1 and sem_score >= exploratory_threshold:
+            confidence = "high_confidence"
+        elif sem_score >= HIGH_CONFIDENCE_THRESHOLD:
+            confidence = "high_confidence"
+        elif sem_score >= exploratory_threshold or bm25_score > 0:
+            confidence = "exploratory"
+        else:
+            confidence = "abstain"
+
+        why: list[str] = []
+        if exact_identity:
+            why.append("matched exact repository identity")
+        elif b_rank is not None and d_rank <= 10:
+            why.append(f"ranked by hybrid fusion (semantic rank #{d_rank}, BM25 rank #{b_rank})")
+        elif b_rank is not None:
+            why.append(f"ranked by BM25 sparse keyword match (BM25 rank #{b_rank})")
+        else:
+            why.append("ranked by semantic similarity")
+
+        matched_terms = sorted(
+            token
+            for token in query_ctx["keyword_tokens"]
+            if query_ctx["expanded_keyword_map"][token] & cache["text_tokens"]
+        )
+
+        identity_match = (
+            "exact" if exact_identity else "contextual" if contextual_identity else None
+        )
+
+        item = {
+            "repo_id": entry.get("repo_id"),
+            "url": cache["url"],
+            "score": fusion_score,
+            "semantic_score": sem_score,
+            "bm25_score": bm25_score,
+            "metadata_score": 0.0,
+            "confidence": confidence,
+            "score_breakdown": _score_breakdown(
+                semantic_score=sem_score,
+                metadata_score=0.0,
+                final_score=fusion_score,
+                bm25_score=bm25_score,
+            ),
+            "ranking_evidence": {
+                "semantic_rank": d_rank,
+                "bm25_rank": b_rank,
+                "fusion": "reciprocal_rank",
+            },
+            "matched_terms": matched_terms,
+            "diagnostics": {
+                "identity_match": identity_match,
+                "identity_evidence": {"kind": identity_kind},
+                "bm25_score": round(bm25_score, 6),
+            },
+            "why": why,
+            "_identity_pin": bool(exact_identity),
+        }
+        results.append(item)
+
+    _downgrade_ambiguous_exact_values(results)
+    results.sort(
+        key=lambda item: (
+            1 if item.get("_identity_pin") else 0,
+            item["score"],
+            item["semantic_score"],
+            str(item.get("repo_id") or ""),
+        ),
+        reverse=True,
+    )
+    return calibrate_confidence(
+        _present_ranked_results(results, top_k),
+        ranking_strategy="hybrid",
+        mode=confidence_calibration,
+    )
+
+
 def _validate_index_structure(index: dict[str, Any]) -> None:
     index_version = index.get("index_version")
     if index_version not in SUPPORTED_INDEX_VERSIONS:
@@ -1354,6 +1501,7 @@ class PreparedIndex:
         embedding_input_version: int,
         dimension: int | None,
         record_count: int,
+        bm25_index: BM25Index | None = None,
     ) -> None:
         self.raw_index = raw_index
         self.matrix = matrix
@@ -1369,6 +1517,9 @@ class PreparedIndex:
         self.embedding_input_version = embedding_input_version
         self.dimension = dimension
         self.record_count = record_count
+        self.bm25_index = (
+            bm25_index if bm25_index is not None else BM25Index.build_from_entries(entries)
+        )
 
     @classmethod
     def from_dict(
@@ -1425,6 +1576,7 @@ class PreparedIndex:
         repo_ids = tuple(str(entry.get("repo_id") or "") for entry in entries)
         repo_id_to_index = {repo_id: idx for idx, repo_id in enumerate(repo_ids) if repo_id}
         metadata_caches = [_precompute_entry_cache(entry) for entry in entries]
+        bm25_index = BM25Index.build_from_entries(entries)
 
         return cls(
             raw_index=index,
@@ -1441,6 +1593,7 @@ class PreparedIndex:
             embedding_input_version=index.get("embedding_input_version", EMBEDDING_INPUT_VERSION),
             dimension=dimension,
             record_count=index.get("record_count", len(entries)),
+            bm25_index=bm25_index,
         )
 
     def __getitem__(self, key: str) -> Any:
@@ -1627,6 +1780,17 @@ def rank_many(
                 confidence_calibration=confidence_calibration,
                 query_ctx=query_ctx,
             )
+        elif ranking_strategy == "hybrid":
+            results = _rank_hybrid_entries_prepared(
+                query,
+                prepared,
+                semantic_scores,
+                top_k,
+                query_ctx=query_ctx,
+                exploratory_threshold=exploratory_threshold,
+                confidence_calibration=confidence_calibration,
+                query_variants=query_variants[row] if query_variants[row] != [query] else None,
+            )
         else:
             results = _rank_scored_entries_prepared(
                 prepared,
@@ -1734,6 +1898,17 @@ def rank(
             rerank_abstain_threshold=rerank_abstain_threshold,
             confidence_calibration=confidence_calibration,
             query_ctx=query_ctx,
+        )
+    elif ranking_strategy == "hybrid":
+        results = _rank_hybrid_entries_prepared(
+            query,
+            prepared,
+            semantic_scores,
+            top_k,
+            query_ctx=query_ctx,
+            exploratory_threshold=exploratory_threshold,
+            confidence_calibration=confidence_calibration,
+            query_variants=query_variants if query_variants != [query] else None,
         )
     else:
         results = _rank_scored_entries_prepared(

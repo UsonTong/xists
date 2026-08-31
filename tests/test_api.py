@@ -119,3 +119,21 @@ def test_search_forwards_explicit_optional_ranking_arguments(monkeypatch):
         "query_variants": ["query", "canonical query"],
         "rerank_query": "canonical query",
     }
+
+
+def test_search_accepts_hybrid_ranking_strategy(monkeypatch):
+    def fake_embeddings(config, inputs, *, timeout=60, input_type=None):
+        return [[1.0, 0.0] for _ in inputs]
+
+    monkeypatch.setattr("xists.search.embed.call_embeddings", fake_embeddings)
+
+    result = search(
+        "useful project",
+        make_index(),
+        embedding_config=CONFIG,
+        ranking_strategy="hybrid",
+        top_k=2,
+    )
+    assert result["abstained"] is False
+    assert result["results"][0]["repo_id"] == "winner/repo"
+    assert "bm25_score" in result["results"][0]

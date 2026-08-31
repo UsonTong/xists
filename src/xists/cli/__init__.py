@@ -685,7 +685,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--ranking-strategy",
         choices=RANKING_STRATEGIES,
         default="metadata",
-        help="Ranking mode: metadata, semantic, or cross-encoder rerank",
+        help="Ranking mode: metadata, semantic, rerank, or hybrid",
     )
     search_parser.add_argument(
         "--rerank-candidates",
@@ -752,7 +752,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--ranking-strategy",
         choices=RANKING_STRATEGIES,
         default="metadata",
-        help="Ranking mode: metadata, semantic, or cross-encoder rerank",
+        help="Ranking mode: metadata, semantic, rerank, or hybrid",
     )
     eval_run_parser.add_argument(
         "--rerank-candidates",

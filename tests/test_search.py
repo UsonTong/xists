@@ -1675,3 +1675,115 @@ def test_save_and_load_index_v3_legacy_file(tmp_path):
 
     res = rank("fastapi", prepared, CONFIG, embed=lambda c, q: [1.0, 0.0])
     assert res["results"][0]["repo_id"] == "fastapi/fastapi"
+
+
+def test_hybrid_ranking_strategy_basic_fusion():
+    index = make_index(
+        [
+            {
+                "repo_id": "astral-sh/uv",
+                "vector": [0.6, 0.8],
+                "metadata": {
+                    "name": "uv",
+                    "summary": "An extremely fast Python package manager written in Rust.",
+                    "topics": ["python", "packaging"],
+                },
+            },
+            {
+                "repo_id": "pypa/pip",
+                "vector": [0.9, 0.4358],
+                "metadata": {
+                    "name": "pip",
+                    "summary": "The PyPA recommended tool for installing Python packages.",
+                    "topics": ["python", "pypi"],
+                },
+            },
+        ]
+    )
+
+    # Query 'uv' - dense vector is closer to pip [0.9], but BM25 matches 'uv' exclusively
+    result = rank(
+        "uv",
+        index,
+        CONFIG,
+        ranking_strategy="hybrid",
+        embed=lambda c, q: [0.9, 0.4358],  # dense favors pip
+    )
+
+    assert result["abstained"] is False
+    results = result["results"]
+    assert len(results) == 2
+
+    # astral-sh/uv is #1 because BM25 rank #1 + dense rank #2 beats pip's dense rank #1 + BM25 rank None
+    assert results[0]["repo_id"] == "astral-sh/uv"
+    assert results[0]["ranking_evidence"]["bm25_rank"] == 1
+    assert results[0]["ranking_evidence"]["semantic_rank"] == 2
+    assert results[0]["score"] == pytest.approx(1.0 / (60 + 2) + 1.0 / (60 + 1), abs=1e-6)
+
+    assert results[1]["repo_id"] == "pypa/pip"
+    assert results[1]["ranking_evidence"]["bm25_rank"] is None
+    assert results[1]["ranking_evidence"]["semantic_rank"] == 1
+    assert results[1]["score"] == pytest.approx(1.0 / (60 + 1), abs=1e-6)
+
+
+def test_hybrid_pure_semantic_recall():
+    index = make_index(
+        [
+            {
+                "repo_id": "expressjs/express",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "express",
+                    "summary": "Fast minimalist web framework for Node.js.",
+                },
+            }
+        ]
+    )
+    # Query with no lexical overlap in summary/name
+    result = rank(
+        "unrelated terms completely disjoint",
+        index,
+        CONFIG,
+        ranking_strategy="hybrid",
+        embed=lambda c, q: [1.0, 0.0],  # perfect dense vector similarity
+    )
+    assert result["abstained"] is False
+    assert result["results"][0]["repo_id"] == "expressjs/express"
+    assert result["results"][0]["bm25_score"] == 0.0
+    assert result["results"][0]["confidence"] == "high_confidence"
+
+
+def test_hybrid_ranking_parity_single_and_batch():
+    index = make_index(
+        [
+            {
+                "repo_id": "astral-sh/ruff",
+                "vector": [1.0, 0.0],
+                "metadata": {"name": "ruff", "summary": "Fast Python linter"},
+            },
+            {
+                "repo_id": "astral-sh/uv",
+                "vector": [0.0, 1.0],
+                "metadata": {"name": "uv", "summary": "Fast Python package installer"},
+            },
+        ]
+    )
+    single = rank(
+        "ruff",
+        index,
+        CONFIG,
+        ranking_strategy="hybrid",
+        embed=lambda c, q: [1.0, 0.0],
+    )
+    many = rank_many(
+        ["ruff"],
+        index,
+        CONFIG,
+        ranking_strategy="hybrid",
+        embed_many=lambda c, qs: [[1.0, 0.0]],
+    )[0]
+
+    assert [r["repo_id"] for r in single["results"]] == [r["repo_id"] for r in many["results"]]
+    for r1, r2 in zip(single["results"], many["results"]):
+        assert r1["score"] == pytest.approx(r2["score"], abs=1e-6)
+        assert r1["bm25_score"] == pytest.approx(r2["bm25_score"], abs=1e-6)

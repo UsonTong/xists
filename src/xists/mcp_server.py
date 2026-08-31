@@ -30,6 +30,9 @@ _PROFILE_FIELDS = (
     "description",
     "topics",
     "language",
+    "license",
+    "stars",
+    "forks",
     "summary",
     "use_cases",
     "capabilities",
@@ -64,17 +67,44 @@ def create_server(index: dict[str, Any], embedding_config: EmbeddingConfig) -> A
         query: str,
         top_k: int = 10,
         ranking_strategy: str = "hybrid",
+        language: str | None = None,
+        ecosystem: str | None = None,
+        project_type: str | None = None,
+        min_stars: int | None = None,
+        max_stars: int | None = None,
+        license: str | None = None,
+        topics: list[str] | None = None,
+        include_archived: bool = False,
     ) -> dict[str, Any]:
         """Return ranked project candidates for a natural-language query."""
 
         _validate_query(query)
         _validate_top_k(top_k)
+        filters: dict[str, Any] = {}
+        if language is not None:
+            filters["language"] = language
+        if ecosystem is not None:
+            filters["ecosystem"] = ecosystem
+        if project_type is not None:
+            filters["project_type"] = project_type
+        if min_stars is not None:
+            filters["min_stars"] = min_stars
+        if max_stars is not None:
+            filters["max_stars"] = max_stars
+        if license is not None:
+            filters["license"] = license
+        if topics is not None:
+            filters["topics"] = topics
+        if include_archived:
+            filters["include_archived"] = True
+
         result = public_search(
             query,
             index,
             embedding_config=embedding_config,
             top_k=top_k,
             ranking_strategy=ranking_strategy,
+            filters=filters or None,
         )
         return _enrich_search_result(result, metadata_by_repo)
 

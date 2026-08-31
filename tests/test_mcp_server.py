@@ -178,6 +178,42 @@ def test_search_projects_forwards_ranking_strategy(monkeypatch):
     assert captured_kwargs["top_k"] == 3
 
 
+def test_search_projects_forwards_filters(monkeypatch):
+    import xists.mcp_server as server_module
+
+    captured_kwargs = {}
+
+    def fake_search(query, index, **kwargs):
+        captured_kwargs.update(kwargs)
+        return {
+            "query": query,
+            "query_intent": {"type": "functional"},
+            "abstained": False,
+            "results": [{"repo_id": "owner/project", "score": 0.8, "confidence": "high"}],
+        }
+
+    monkeypatch.setattr(server_module, "public_search", fake_search)
+    server = server_module.create_server(_index(), object())
+
+    _tool_payload(
+        server,
+        "search_projects",
+        {
+            "query": "project",
+            "language": "python",
+            "min_stars": 500,
+            "license": "mit",
+            "include_archived": True,
+        },
+    )
+    assert captured_kwargs["filters"] == {
+        "language": "python",
+        "min_stars": 500,
+        "license": "mit",
+        "include_archived": True,
+    }
+
+
 def test_stdio_server_runs_tools_without_corrupting_protocol(tmp_path):
     from mcp import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client

@@ -118,6 +118,7 @@ def test_search_forwards_explicit_optional_ranking_arguments(monkeypatch):
         "confidence_calibration": "evidence-v1",
         "query_variants": ["query", "canonical query"],
         "rerank_query": "canonical query",
+        "filters": None,
     }
 
 
@@ -137,3 +138,28 @@ def test_search_accepts_hybrid_ranking_strategy(monkeypatch):
     assert result["abstained"] is False
     assert result["results"][0]["repo_id"] == "winner/repo"
     assert "bm25_score" in result["results"][0]
+
+
+def test_search_forwards_filters_to_rank(monkeypatch):
+    captured = {}
+
+    def fake_rank(query, index, config, **kwargs):
+        captured.update(kwargs)
+        return {
+            "query": query,
+            "abstained": False,
+            "results": [],
+            "filters": kwargs.get("filters"),
+        }
+
+    monkeypatch.setattr("xists.api.rank", fake_rank)
+
+    filters = {"language": "python", "min_stars": 1000, "license": "mit"}
+    result = search(
+        "web framework",
+        make_index(),
+        embedding_config=CONFIG,
+        filters=filters,
+    )
+    assert captured.get("filters") == filters
+    assert result["filters"] == filters

@@ -660,6 +660,104 @@ def test_search_cli_hybrid_ranking_strategy(tmp_path, monkeypatch, capsys):
     assert "bm25_score" in actual["results"][0]
 
 
+def test_search_cli_with_filters_json_and_text(tmp_path, monkeypatch, capsys):
+    index = {
+        "index_version": INDEX_VERSION,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "fixture/embed",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "dimension": 2,
+        "record_count": 2,
+        "vectors": [
+            {
+                "repo_id": "fastapi/fastapi",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "fastapi",
+                    "summary": "FastAPI framework for Python",
+                    "language": "Python",
+                    "stars": 75000,
+                    "license": "MIT",
+                },
+            },
+            {
+                "repo_id": "expressjs/express",
+                "vector": [0.0, 1.0],
+                "metadata": {
+                    "name": "express",
+                    "summary": "Express web framework for Node.js",
+                    "language": "JavaScript",
+                    "stars": 64000,
+                    "license": "MIT",
+                },
+            },
+        ],
+    }
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(index), encoding="utf-8")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embeddings.example/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
+
+    monkeypatch.setattr(
+        "xists.search.embed.call_embeddings",
+        lambda _config, inputs, *, timeout=60, input_type=None: [[1.0, 0.0] for _ in inputs],
+    )
+
+    # 1. JSON output with filters
+    args_json = build_parser().parse_args(
+        [
+            "search",
+            "web framework",
+            "--index",
+            str(index_file),
+            "--language",
+            "python",
+            "--min-stars",
+            "50000",
+            "--license",
+            "mit",
+            "--format",
+            "json",
+        ]
+    )
+    assert search(args_json) == 0
+    out_json = json.loads(capsys.readouterr().out)
+    assert out_json["abstained"] is False
+    assert len(out_json["results"]) == 1
+    assert out_json["results"][0]["repo_id"] == "fastapi/fastapi"
+    assert out_json["filters"] == {
+        "language": "python",
+        "min_stars": 50000,
+        "license": "mit",
+    }
+
+    # 2. Text output with filters
+    args_text = build_parser().parse_args(
+        [
+            "search",
+            "web framework",
+            "--index",
+            str(index_file),
+            "--language",
+            "python",
+            "--min-stars",
+            "50000",
+            "--license",
+            "mit",
+            "--format",
+            "text",
+        ]
+    )
+    assert search(args_text) == 0
+    out_text = capsys.readouterr().out
+    assert "Filters" in out_text
+    assert "language=python" in out_text
+    assert "min_stars=50000" in out_text
+    assert "license=mit" in out_text
+    assert "fastapi/fastapi" in out_text
+
+
 @pytest.mark.parametrize(
     ("command", "handler", "expected_message"),
     [

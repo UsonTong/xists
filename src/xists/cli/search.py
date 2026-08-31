@@ -99,6 +99,19 @@ def _format_search_text(
     _append_search_detail(
         lines, "Query", str(result.get("query") or ""), width=width, stream=stream
     )
+    active_filters = result.get("filters")
+    if isinstance(active_filters, dict) and active_filters:
+        filter_parts: list[str] = []
+        for key, val in active_filters.items():
+            if val is not None and val is not False:
+                if isinstance(val, list):
+                    filter_parts.append(f"{key}={','.join(str(x) for x in val)}")
+                else:
+                    filter_parts.append(f"{key}={val}")
+        if filter_parts:
+            _append_search_detail(
+                lines, "Filters", ", ".join(filter_parts), width=width, stream=stream
+            )
 
     if result.get("abstained") or not search_results:
         title = "No confident match" if result.get("abstained") else "No matching projects"
@@ -163,6 +176,24 @@ def search(args: argparse.Namespace) -> int:
     demo_mode = getattr(args, "demo", False)
     offline_mode = getattr(args, "offline", False)
 
+    filters: dict[str, Any] = {}
+    if getattr(args, "language", None) is not None:
+        filters["language"] = args.language
+    if getattr(args, "ecosystem", None) is not None:
+        filters["ecosystem"] = args.ecosystem
+    if getattr(args, "project_type", None) is not None:
+        filters["project_type"] = args.project_type
+    if getattr(args, "min_stars", None) is not None:
+        filters["min_stars"] = args.min_stars
+    if getattr(args, "max_stars", None) is not None:
+        filters["max_stars"] = args.max_stars
+    if getattr(args, "license", None) is not None:
+        filters["license"] = args.license
+    if getattr(args, "topics", None) is not None:
+        filters["topics"] = args.topics
+    if getattr(args, "include_archived", False):
+        filters["include_archived"] = True
+
     if offline_mode:
         records = None
         records_arg = getattr(args, "records", None)
@@ -171,7 +202,9 @@ def search(args: argparse.Namespace) -> int:
                 records = json.loads(Path(records_arg).read_text(encoding="utf-8"))
             except Exception:
                 pass
-        result = starter_metadata_search(args.query, records=records, top_k=args.top_k)
+        result = starter_metadata_search(
+            args.query, records=records, top_k=args.top_k, filters=filters or None
+        )
         if getattr(args, "format", "json") == "text":
             print(_format_search_text(result, {}, stream=sys.stdout))
         else:
@@ -182,7 +215,7 @@ def search(args: argparse.Namespace) -> int:
         config = embedding_config_from_env()
     except EmbeddingNotConfiguredError as error:
         if demo_mode:
-            result = starter_metadata_search(args.query, top_k=args.top_k)
+            result = starter_metadata_search(args.query, top_k=args.top_k, filters=filters or None)
             if getattr(args, "format", "json") == "text":
                 print(_format_search_text(result, {}, stream=sys.stdout))
             else:
@@ -234,6 +267,7 @@ def search(args: argparse.Namespace) -> int:
             exploratory_threshold=args.exploratory_threshold,
             rerank_abstain_threshold=args.rerank_abstain_threshold,
             confidence_calibration=args.confidence_calibration,
+            filters=filters or None,
             **rank_kwargs,
         )
     except IndexMismatchError as error:

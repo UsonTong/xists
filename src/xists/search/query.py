@@ -23,6 +23,7 @@ from xists.search.embed import (
 )
 from xists.search.index import INDEX_VERSION, SUPPORTED_INDEX_VERSIONS, decode_vector
 from xists.search.rerank import rerank_text_from_entry
+from xists.types import SearchFilter
 
 HIGH_CONFIDENCE_THRESHOLD = 0.60
 EXPLORATORY_THRESHOLD = 0.35
@@ -492,8 +493,23 @@ def _precompute_entry_cache(entry: dict[str, Any]) -> dict[str, Any]:
 
     language = str(metadata.get("language") or "")
     language_alias = _metadata_language_alias(language)
+    language_lower = language.strip().lower()
     popularity = _popularity_bonus(metadata)
     state_penalty, repository_state = _repository_state_penalty(metadata)
+
+    ecosystem_set = frozenset(
+        str(e).strip().lower() for e in _string_list(metadata.get("ecosystem")) if str(e).strip()
+    )
+    topics_set = frozenset(
+        str(t).strip().lower() for t in _string_list(metadata.get("topics")) if str(t).strip()
+    )
+    project_type_norm = (
+        str(metadata.get("project_type") or "").strip().lower().replace("-", "_").replace(" ", "_")
+    )
+    license_lower = str(metadata.get("license") or "").strip().lower()
+    stars = int(_numeric_metadata_value(metadata.get("stars")) or 0)
+    archived = bool(metadata.get("archived") is True)
+    disabled = bool(metadata.get("disabled") is True)
 
     return {
         "repo_id": repo_id,
@@ -505,10 +521,18 @@ def _precompute_entry_cache(entry: dict[str, Any]) -> dict[str, Any]:
         "profile_tokens": profile_tokens,
         "language": language,
         "language_alias": language_alias,
+        "language_lower": language_lower,
         "popularity_bonus": popularity,
         "state_penalty": state_penalty,
         "repository_state": repository_state,
         "url": metadata.get("url"),
+        "ecosystem_set": ecosystem_set,
+        "topics_set": topics_set,
+        "project_type_norm": project_type_norm,
+        "license_lower": license_lower,
+        "stars": stars,
+        "archived": archived,
+        "disabled": disabled,
     }
 
 
@@ -828,16 +852,20 @@ def _rank_scored_entries_prepared(
     *,
     query_ctx: dict[str, Any],
     exploratory_threshold: float = EXPLORATORY_THRESHOLD,
+    filter_mask: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
+    valid_indices = (
+        np.where(filter_mask)[0] if filter_mask is not None else range(len(prepared.entries))
+    )
     results = [
         _result_from_score_cached(
             query_ctx,
-            entry,
-            cache,
+            prepared.entries[i],
+            prepared.metadata_caches[i],
             float(semantic_scores[i]),
             exploratory_threshold=exploratory_threshold,
         )
-        for i, (entry, cache) in enumerate(zip(prepared.entries, prepared.metadata_caches))
+        for i in valid_indices
     ]
     _downgrade_ambiguous_exact_values(results)
     results.sort(
@@ -970,16 +998,20 @@ def _rank_semantic_entries_prepared(
     *,
     exploratory_threshold: float,
     query_ctx: dict[str, Any] | None = None,
+    filter_mask: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
+    valid_indices = (
+        np.where(filter_mask)[0] if filter_mask is not None else range(len(prepared.entries))
+    )
     results = [
         _semantic_result_cached(
-            entry,
-            cache,
+            prepared.entries[i],
+            prepared.metadata_caches[i],
             float(semantic_scores[i]),
             exploratory_threshold=exploratory_threshold,
             query_ctx=query_ctx,
         )
-        for i, (entry, cache) in enumerate(zip(prepared.entries, prepared.metadata_caches))
+        for i in valid_indices
     ]
     results.sort(key=lambda item: (item["score"], str(item.get("repo_id") or "")), reverse=True)
     return _present_ranked_results(results, top_k)
@@ -1081,14 +1113,24 @@ def _rank_reranked_entries_prepared(
     rerank_abstain_threshold: float | None,
     confidence_calibration: str,
     query_ctx: dict[str, Any] | None = None,
+    filter_mask: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
     if candidate_limit < 1:
         raise ValueError("rerank candidate limit must be at least 1")
     if query_ctx is None:
         query_ctx = _build_query_context(query)
 
+    valid_indices = (
+        [int(idx) for idx in np.where(filter_mask)[0]]
+        if filter_mask is not None
+        else list(range(len(prepared.entries)))
+    )
+    if not valid_indices:
+        return []
+
     identity_indices: list[int] = []
-    for i, cache in enumerate(prepared.metadata_caches):
+    for i in valid_indices:
+        cache = prepared.metadata_caches[i]
         kind = _identity_match_kind_cached(
             query_ctx["raw_query"],
             query_ctx["explicit_value"],
@@ -1098,9 +1140,7 @@ def _rank_reranked_entries_prepared(
             identity_indices.append(i)
 
     identity_ids = {prepared.repo_ids[i] for i in identity_indices if prepared.repo_ids[i]}
-    candidate_indices = [
-        i for i in range(len(prepared.entries)) if prepared.repo_ids[i] not in identity_ids
-    ]
+    candidate_indices = [i for i in valid_indices if prepared.repo_ids[i] not in identity_ids]
     candidate_indices.sort(key=lambda i: float(semantic_scores[i]), reverse=True)
     candidate_indices = candidate_indices[:candidate_limit]
 
@@ -1195,10 +1235,17 @@ def _rank_hybrid_entries_prepared(
     exploratory_threshold: float = EXPLORATORY_THRESHOLD,
     confidence_calibration: str = "off",
     query_variants: list[str] | None = None,
+    filter_mask: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
     """Rank index entries using Reciprocal Rank Fusion of dense embeddings and BM25 sparse index."""
     if query_ctx is None:
         query_ctx = _build_query_context(query)
+
+    valid_indices = (
+        np.where(filter_mask)[0] if filter_mask is not None else np.arange(len(prepared.entries))
+    )
+    if len(valid_indices) == 0:
+        return []
 
     # 1. Compute BM25 sparse scores across documents
     if query_variants:
@@ -1208,17 +1255,19 @@ def _rank_hybrid_entries_prepared(
     else:
         bm25_scores = prepared.bm25_index.score_query(query)
 
-    # 2. Dense ranking (1-based for all documents)
-    dense_order = np.argsort(-semantic_scores, kind="stable")
-    dense_ranks = np.empty(len(prepared.entries), dtype=np.int32)
-    dense_ranks[dense_order] = np.arange(1, len(prepared.entries) + 1)
+    # 2. Dense ranking (1-based for valid candidates)
+    valid_sem_scores = semantic_scores[valid_indices]
+    dense_order = np.argsort(-valid_sem_scores, kind="stable")
+    dense_ranks = np.empty(len(valid_indices), dtype=np.int32)
+    dense_ranks[dense_order] = np.arange(1, len(valid_indices) + 1)
 
-    # 3. BM25 sparse ranking (1-based for matching docs with score > 0)
-    matching_indices = np.where(bm25_scores > 0)[0]
-    bm25_ranks = np.zeros(len(prepared.entries), dtype=np.int32)
-    if len(matching_indices) > 0:
-        sorted_matching = matching_indices[
-            np.argsort(-bm25_scores[matching_indices], kind="stable")
+    # 3. BM25 sparse ranking (1-based for valid candidates with score > 0)
+    valid_bm25_scores = bm25_scores[valid_indices]
+    matching_sub_indices = np.where(valid_bm25_scores > 0)[0]
+    bm25_ranks = np.zeros(len(valid_indices), dtype=np.int32)
+    if len(matching_sub_indices) > 0:
+        sorted_matching = matching_sub_indices[
+            np.argsort(-valid_bm25_scores[matching_sub_indices], kind="stable")
         ]
         bm25_ranks[sorted_matching] = np.arange(1, len(sorted_matching) + 1)
 
@@ -1228,9 +1277,11 @@ def _rank_hybrid_entries_prepared(
         bm25_ranks > 0, 1.0 / (rrf_k + bm25_ranks), 0.0
     )
 
-    # 5. Build results with diagnostics, confidence, and explanations
+    # 5. Build results with diagnostics, confidence, and explanations for valid candidates
     results: list[dict[str, Any]] = []
-    for i, (entry, cache) in enumerate(zip(prepared.entries, prepared.metadata_caches)):
+    for sub_idx, i in enumerate(valid_indices):
+        entry = prepared.entries[i]
+        cache = prepared.metadata_caches[i]
         identity_kind = _identity_match_kind_cached(
             query_ctx["raw_query"],
             query_ctx["explicit_value"],
@@ -1240,10 +1291,10 @@ def _rank_hybrid_entries_prepared(
         contextual_identity = identity_kind == "contextual_name_mention"
         sem_score = float(semantic_scores[i])
         pop_bonus = float(cache.get("popularity_bonus") or 0.0)
-        fusion_score = float(rrf_scores[i]) + pop_bonus * 0.7
+        fusion_score = float(rrf_scores[sub_idx]) + pop_bonus * 0.7
         bm25_score = float(bm25_scores[i])
-        d_rank = int(dense_ranks[i])
-        b_rank = int(bm25_ranks[i]) if bm25_ranks[i] > 0 else None
+        d_rank = int(dense_ranks[sub_idx])
+        b_rank = int(bm25_ranks[sub_idx]) if bm25_ranks[sub_idx] > 0 else None
 
         if exact_identity:
             confidence = "high_confidence"
@@ -1520,6 +1571,142 @@ class PreparedIndex:
         self.bm25_index = (
             bm25_index if bm25_index is not None else BM25Index.build_from_entries(entries)
         )
+        self.stars_array = (
+            np.array([c["stars"] for c in metadata_caches], dtype=np.int64)
+            if metadata_caches
+            else np.empty(0, dtype=np.int64)
+        )
+        self.archived_array = (
+            np.array([c["archived"] or c["disabled"] for c in metadata_caches], dtype=bool)
+            if metadata_caches
+            else np.empty(0, dtype=bool)
+        )
+
+    def compute_filter_mask(
+        self, filters: SearchFilter | dict[str, Any] | None
+    ) -> np.ndarray | None:
+        """Compute 1D boolean mask of valid candidate indices under structured filters."""
+        if not filters or not self.entries:
+            return None
+
+        # Check if any filter condition is actually active
+        has_active_filter = False
+        for k, v in filters.items():
+            if v is not None and v is not False:
+                has_active_filter = True
+                break
+            if k == "include_archived" and v is False:
+                has_active_filter = True
+                break
+        if not has_active_filter:
+            return None
+
+        mask = np.ones(len(self.entries), dtype=bool)
+
+        # 1. Star bounds
+        min_stars = filters.get("min_stars")
+        if min_stars is not None:
+            mask &= self.stars_array >= int(min_stars)
+
+        max_stars = filters.get("max_stars")
+        if max_stars is not None:
+            mask &= self.stars_array <= int(max_stars)
+
+        # 2. Archive/disabled exclusion
+        include_archived = bool(filters.get("include_archived", False))
+        if not include_archived:
+            mask &= ~self.archived_array
+
+        # 3. Language filter
+        lang_filter = filters.get("language")
+        if lang_filter is not None and isinstance(lang_filter, str) and lang_filter.strip():
+            target_lang = lang_filter.strip().lower()
+            target_canonical = _metadata_language_alias(target_lang)
+            target_aliases = (
+                LANGUAGE_ALIASES.get(target_canonical, set()) if target_canonical else set()
+            )
+            lang_mask = np.array(
+                [
+                    bool(
+                        (target_canonical and c["language_alias"] == target_canonical)
+                        or (c["language_lower"] in target_aliases)
+                        or (target_lang == c["language_lower"])
+                        or (not target_canonical and target_lang in c["language_lower"])
+                    )
+                    for c in self.metadata_caches
+                ],
+                dtype=bool,
+            )
+            mask &= lang_mask
+
+        # 4. License filter
+        lic_filter = filters.get("license")
+        if lic_filter is not None and isinstance(lic_filter, str) and lic_filter.strip():
+            target_lic = lic_filter.strip().lower()
+            lic_mask = np.array(
+                [
+                    bool(
+                        c["license_lower"]
+                        and (c["license_lower"] == target_lic or target_lic in c["license_lower"])
+                    )
+                    for c in self.metadata_caches
+                ],
+                dtype=bool,
+            )
+            mask &= lic_mask
+
+        # 5. Ecosystem filter
+        eco_filter = filters.get("ecosystem")
+        if eco_filter is not None:
+            if isinstance(eco_filter, str):
+                target_ecos = {eco_filter.strip().lower()} if eco_filter.strip() else set()
+            elif isinstance(eco_filter, (list, tuple, set)):
+                target_ecos = {str(e).strip().lower() for e in eco_filter if str(e).strip()}
+            else:
+                target_ecos = set()
+            if target_ecos:
+                eco_mask = np.array(
+                    [bool(c["ecosystem_set"] & target_ecos) for c in self.metadata_caches],
+                    dtype=bool,
+                )
+                mask &= eco_mask
+
+        # 6. Project type filter
+        pt_filter = filters.get("project_type")
+        if pt_filter is not None and isinstance(pt_filter, str) and pt_filter.strip():
+            target_pt = pt_filter.strip().lower().replace("-", "_").replace(" ", "_")
+            pt_mask = np.array(
+                [
+                    bool(
+                        c["project_type_norm"]
+                        and (
+                            c["project_type_norm"] == target_pt
+                            or target_pt in c["project_type_norm"]
+                        )
+                    )
+                    for c in self.metadata_caches
+                ],
+                dtype=bool,
+            )
+            mask &= pt_mask
+
+        # 7. Topics filter
+        topics_filter = filters.get("topics")
+        if topics_filter is not None:
+            if isinstance(topics_filter, str):
+                req_topics = {topics_filter.strip().lower()} if topics_filter.strip() else set()
+            elif isinstance(topics_filter, (list, tuple, set)):
+                req_topics = {str(t).strip().lower() for t in topics_filter if str(t).strip()}
+            else:
+                req_topics = set()
+            if req_topics:
+                topics_mask = np.array(
+                    [req_topics.issubset(c["topics_set"]) for c in self.metadata_caches],
+                    dtype=bool,
+                )
+                mask &= topics_mask
+
+        return mask
 
     @classmethod
     def from_dict(
@@ -1689,6 +1876,7 @@ def rank_many(
     confidence_calibration: str = "off",
     query_variants: list[list[str]] | None = None,
     rerank_queries: list[str] | None = None,
+    filters: SearchFilter | dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Rank multiple queries with batched embeddings and matrix similarity."""
 
@@ -1724,6 +1912,11 @@ def rank_many(
             for query in queries
         ]
 
+    filter_mask = prepared.compute_filter_mask(filters)
+    total_candidates = (
+        int(np.sum(filter_mask)) if filter_mask is not None else len(prepared.entries)
+    )
+
     flattened_variants = [variant for variants in query_variants for variant in variants]
     query_vectors: list[list[float]] = []
     for start in range(0, len(flattened_variants), batch_size):
@@ -1757,13 +1950,16 @@ def rank_many(
         semantic_scores = variant_scores.max(axis=0)
         query_ctx = _build_query_context(query)
 
-        if ranking_strategy == "semantic":
+        if filter_mask is not None and not np.any(filter_mask):
+            results = []
+        elif ranking_strategy == "semantic":
             results = _rank_semantic_entries_prepared(
                 prepared,
                 semantic_scores,
                 top_k,
                 exploratory_threshold=exploratory_threshold,
                 query_ctx=query_ctx,
+                filter_mask=filter_mask,
             )
         elif ranking_strategy == "rerank":
             assert rerank is not None
@@ -1779,6 +1975,7 @@ def rank_many(
                 rerank_abstain_threshold=rerank_abstain_threshold,
                 confidence_calibration=confidence_calibration,
                 query_ctx=query_ctx,
+                filter_mask=filter_mask,
             )
         elif ranking_strategy == "hybrid":
             results = _rank_hybrid_entries_prepared(
@@ -1790,6 +1987,7 @@ def rank_many(
                 exploratory_threshold=exploratory_threshold,
                 confidence_calibration=confidence_calibration,
                 query_variants=query_variants[row] if query_variants[row] != [query] else None,
+                filter_mask=filter_mask,
             )
         else:
             results = _rank_scored_entries_prepared(
@@ -1798,6 +1996,7 @@ def rank_many(
                 top_k,
                 query_ctx=query_ctx,
                 exploratory_threshold=exploratory_threshold,
+                filter_mask=filter_mask,
             )
 
         item = {
@@ -1806,8 +2005,10 @@ def rank_many(
             "query_intent": _query_intent(query),
             "abstained": len(results) == 0,
             "results": results,
-            "considered": len(prepared.entries),
+            "considered": total_candidates,
         }
+        if filters:
+            item["filters"] = filters
         if query_variants[row] != [query]:
             item["query_variants"] = query_variants[row]
         ranked.append(item)
@@ -1829,6 +2030,7 @@ def rank(
     confidence_calibration: str = "off",
     query_variants: list[str] | None = None,
     rerank_query: str | None = None,
+    filters: SearchFilter | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Rank index entries against the query."""
 
@@ -1864,9 +2066,16 @@ def rank(
             "results": [],
             "considered": 0,
         }
+        if filters:
+            result["filters"] = filters
         if query_variants != [query]:
             result["query_variants"] = query_variants
         return result
+
+    filter_mask = prepared.compute_filter_mask(filters)
+    total_candidates = (
+        int(np.sum(filter_mask)) if filter_mask is not None else len(prepared.entries)
+    )
 
     q_mat = np.asarray(query_vectors, dtype=np.float32)
     q_norms = np.linalg.norm(q_mat, axis=1, keepdims=True)
@@ -1875,13 +2084,16 @@ def rank(
     semantic_scores = sim_matrix.max(axis=0)
 
     query_ctx = _build_query_context(query)
-    if ranking_strategy == "semantic":
+    if filter_mask is not None and not np.any(filter_mask):
+        results = []
+    elif ranking_strategy == "semantic":
         results = _rank_semantic_entries_prepared(
             prepared,
             semantic_scores,
             top_k,
             exploratory_threshold=exploratory_threshold,
             query_ctx=query_ctx,
+            filter_mask=filter_mask,
         )
     elif ranking_strategy == "rerank":
         if rerank is None:
@@ -1898,6 +2110,7 @@ def rank(
             rerank_abstain_threshold=rerank_abstain_threshold,
             confidence_calibration=confidence_calibration,
             query_ctx=query_ctx,
+            filter_mask=filter_mask,
         )
     elif ranking_strategy == "hybrid":
         results = _rank_hybrid_entries_prepared(
@@ -1909,6 +2122,7 @@ def rank(
             exploratory_threshold=exploratory_threshold,
             confidence_calibration=confidence_calibration,
             query_variants=query_variants if query_variants != [query] else None,
+            filter_mask=filter_mask,
         )
     else:
         results = _rank_scored_entries_prepared(
@@ -1917,6 +2131,7 @@ def rank(
             top_k,
             query_ctx=query_ctx,
             exploratory_threshold=exploratory_threshold,
+            filter_mask=filter_mask,
         )
 
     result = {
@@ -1925,8 +2140,10 @@ def rank(
         "query_intent": _query_intent(query),
         "abstained": len(results) == 0,
         "results": results,
-        "considered": len(prepared.entries),
+        "considered": total_candidates,
     }
+    if filters:
+        result["filters"] = filters
     if query_variants != [query]:
         result["query_variants"] = query_variants
     return result

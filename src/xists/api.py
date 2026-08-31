@@ -14,6 +14,7 @@ from typing import Any
 from xists.search.embed import EmbeddingConfig
 from xists.search.index import load_index as _load_index
 from xists.search.query import EXPLORATORY_THRESHOLD, rank
+from xists.types import SearchFilter
 
 
 def load_index(path: str | Path) -> dict[str, Any]:
@@ -41,6 +42,7 @@ def search(
     confidence_calibration: str = "off",
     query_variants: list[str] | None = None,
     rerank_query: str | None = None,
+    filters: SearchFilter | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Search an in-memory index using an explicitly configured embedder.
 
@@ -67,6 +69,7 @@ def search(
         confidence_calibration=confidence_calibration,
         query_variants=query_variants,
         rerank_query=rerank_query,
+        filters=filters,
     )
 
 

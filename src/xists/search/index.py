@@ -82,6 +82,7 @@ def entry_metadata(record: dict[str, Any]) -> dict[str, Any]:
         "description": github.get("description"),
         "topics": _string_list(github.get("topics")),
         "language": github.get("language"),
+        "license": github.get("license"),
         "stars": github.get("stars"),
         "forks": github.get("forks"),
         "archived": github.get("archived"),

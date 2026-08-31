@@ -1787,3 +1787,269 @@ def test_hybrid_ranking_parity_single_and_batch():
     for r1, r2 in zip(single["results"], many["results"]):
         assert r1["score"] == pytest.approx(r2["score"], abs=1e-6)
         assert r1["bm25_score"] == pytest.approx(r2["bm25_score"], abs=1e-6)
+
+
+def test_compute_filter_mask_and_faceted_search_constraints():
+    index = make_index(
+        [
+            {
+                "repo_id": "fastapi/fastapi",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "fastapi",
+                    "language": "Python",
+                    "stars": 75000,
+                    "license": "MIT",
+                    "ecosystem": ["pypi", "python"],
+                    "project_type": "framework",
+                    "topics": ["python", "api", "framework", "async"],
+                    "archived": False,
+                },
+            },
+            {
+                "repo_id": "actix/actix-web",
+                "vector": [0.9, 0.4358],
+                "metadata": {
+                    "name": "actix-web",
+                    "language": "Rust",
+                    "stars": 21000,
+                    "license": "Apache-2.0",
+                    "ecosystem": ["cargo", "rust"],
+                    "project_type": "framework",
+                    "topics": ["rust", "async", "web", "framework"],
+                    "archived": False,
+                },
+            },
+            {
+                "repo_id": "expressjs/express",
+                "vector": [0.0, 1.0],
+                "metadata": {
+                    "name": "express",
+                    "language": "JavaScript",
+                    "stars": 64000,
+                    "license": "MIT",
+                    "ecosystem": ["npm", "javascript"],
+                    "project_type": "framework",
+                    "topics": ["javascript", "web", "framework"],
+                    "archived": False,
+                },
+            },
+            {
+                "repo_id": "legacy/old-framework",
+                "vector": [0.8, 0.6],
+                "metadata": {
+                    "name": "old-framework",
+                    "language": "Python",
+                    "stars": 5000,
+                    "license": "BSD-3-Clause",
+                    "ecosystem": ["pypi"],
+                    "project_type": "framework",
+                    "topics": ["python", "web"],
+                    "archived": True,
+                },
+            },
+            {
+                "repo_id": "ziglang/zig",
+                "vector": [0.5, 0.866],
+                "metadata": {
+                    "name": "zig",
+                    "language": "Zig",
+                    "stars": 35000,
+                    "license": "MIT",
+                    "ecosystem": [],
+                    "project_type": "compiler",
+                    "topics": ["compiler", "systems"],
+                    "archived": False,
+                },
+            },
+        ]
+    )
+    prepared = prepare_index(index, CONFIG)
+
+    # 1. Language alias resolution (py -> Python)
+    mask_py = prepared.compute_filter_mask({"language": "py"})
+    assert mask_py is not None
+    assert np.array_equal(
+        mask_py, [True, False, False, False, False]
+    )  # old-framework excluded (archived)
+
+    # 2. Language alias (rust -> Rust, js -> JavaScript)
+    mask_rust = prepared.compute_filter_mask({"language": "rust"})
+    assert mask_rust is not None
+    assert np.array_equal(mask_rust, [False, True, False, False, False])
+
+    mask_js = prepared.compute_filter_mask({"language": "js"})
+    assert mask_js is not None
+    assert np.array_equal(mask_js, [False, False, True, False, False])
+
+    # 3. Custom language without built-in alias (Zig)
+    mask_zig = prepared.compute_filter_mask({"language": "zig"})
+    assert mask_zig is not None
+    assert np.array_equal(mask_zig, [False, False, False, False, True])
+
+    # 4. Star ranges
+    mask_stars = prepared.compute_filter_mask({"min_stars": 30000, "max_stars": 70000})
+    assert mask_stars is not None
+    assert np.array_equal(mask_stars, [False, False, True, False, True])  # express (64k), zig (35k)
+
+    # 5. License filter (case-insensitive)
+    mask_mit = prepared.compute_filter_mask({"license": "mit"})
+    assert mask_mit is not None
+    assert np.array_equal(mask_mit, [True, False, True, False, True])
+
+    mask_apache = prepared.compute_filter_mask({"license": "apache-2.0"})
+    assert mask_apache is not None
+    assert np.array_equal(mask_apache, [False, True, False, False, False])
+
+    # 6. Ecosystem filter
+    mask_pypi = prepared.compute_filter_mask({"ecosystem": "pypi"})
+    assert mask_pypi is not None
+    assert np.array_equal(mask_pypi, [True, False, False, False, False])
+
+    # 7. Project type filter (normalized)
+    mask_compiler = prepared.compute_filter_mask({"project_type": "compiler"})
+    assert mask_compiler is not None
+    assert np.array_equal(mask_compiler, [False, False, False, False, True])
+
+    # 8. Topics filter (subset)
+    mask_topics = prepared.compute_filter_mask({"topics": ["async", "web"]})
+    assert mask_topics is not None
+    assert np.array_equal(
+        mask_topics, [False, True, False, False, False]
+    )  # actix-web has both async and web
+
+    # 9. Include archived filter
+    mask_archived = prepared.compute_filter_mask({"language": "py", "include_archived": True})
+    assert mask_archived is not None
+    assert np.array_equal(mask_archived, [True, False, False, True, False])
+
+    # 10. Multi-constraint combination
+    res = rank(
+        "web framework",
+        prepared,
+        CONFIG,
+        top_k=5,
+        ranking_strategy="metadata",
+        filters={"language": "rust", "min_stars": 20000, "license": "apache-2.0"},
+        embed=lambda c, q: [1.0, 0.0],
+    )
+    assert res["abstained"] is False
+    assert len(res["results"]) == 1
+    assert res["results"][0]["repo_id"] == "actix/actix-web"
+    assert res["filters"] == {
+        "language": "rust",
+        "min_stars": 20000,
+        "license": "apache-2.0",
+    }
+
+
+def test_filters_across_all_ranking_strategies():
+    index = make_index(
+        [
+            {
+                "repo_id": "fastapi/fastapi",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "fastapi",
+                    "summary": "FastAPI framework for Python",
+                    "language": "Python",
+                    "stars": 75000,
+                    "license": "MIT",
+                },
+            },
+            {
+                "repo_id": "expressjs/express",
+                "vector": [0.95, 0.312],
+                "metadata": {
+                    "name": "express",
+                    "summary": "Express web framework for Node.js",
+                    "language": "JavaScript",
+                    "stars": 64000,
+                    "license": "MIT",
+                },
+            },
+            {
+                "repo_id": "gin-gonic/gin",
+                "vector": [0.9, 0.4358],
+                "metadata": {
+                    "name": "gin",
+                    "summary": "Gin is a HTTP web framework written in Go",
+                    "language": "Go",
+                    "stars": 76000,
+                    "license": "MIT",
+                },
+            },
+        ]
+    )
+
+    query_vec = [1.0, 0.0]
+    rust_filter = {"language": "rust"}
+    py_filter = {"language": "py"}
+
+    # 1. Empty match short-circuits
+    res_empty = rank(
+        "framework",
+        index,
+        CONFIG,
+        ranking_strategy="semantic",
+        filters=rust_filter,
+        embed=lambda c, q: query_vec,
+    )
+    assert res_empty["abstained"] is True
+    assert res_empty["results"] == []
+
+    # 2. Semantic strategy with Python filter
+    res_sem = rank(
+        "framework",
+        index,
+        CONFIG,
+        ranking_strategy="semantic",
+        filters=py_filter,
+        embed=lambda c, q: query_vec,
+    )
+    assert len(res_sem["results"]) == 1
+    assert res_sem["results"][0]["repo_id"] == "fastapi/fastapi"
+
+    # 3. Hybrid strategy with Python filter
+    res_hyb = rank(
+        "web framework",
+        index,
+        CONFIG,
+        ranking_strategy="hybrid",
+        filters=py_filter,
+        embed=lambda c, q: query_vec,
+    )
+    assert len(res_hyb["results"]) == 1
+    assert res_hyb["results"][0]["repo_id"] == "fastapi/fastapi"
+
+    # 4. Rerank strategy with filter - only filtered candidates sent to reranker
+    rerank_calls = []
+
+    def mock_reranker(query, docs):
+        rerank_calls.append((query, docs))
+        return [0.99] * len(docs)
+
+    res_rerank = rank(
+        "web framework",
+        index,
+        CONFIG,
+        ranking_strategy="rerank",
+        rerank=mock_reranker,
+        filters=py_filter,
+        embed=lambda c, q: query_vec,
+    )
+    assert len(res_rerank["results"]) == 1
+    assert res_rerank["results"][0]["repo_id"] == "fastapi/fastapi"
+    assert len(rerank_calls) == 1
+    assert len(rerank_calls[0][1]) == 1  # Only 1 candidate passed to cross-encoder
+
+    # 5. rank_many batch with filter
+    batch_res = rank_many(
+        ["web framework"],
+        index,
+        CONFIG,
+        filters=py_filter,
+        embed_many=lambda c, qs: [query_vec],
+    )
+    assert len(batch_res[0]["results"]) == 1
+    assert batch_res[0]["results"][0]["repo_id"] == "fastapi/fastapi"

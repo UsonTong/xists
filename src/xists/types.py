@@ -99,6 +99,19 @@ class QueryIntent(TypedDict, total=False):
     project_type: str | None
 
 
+class SearchFilter(TypedDict, total=False):
+    """Structured facet and constraint filter criteria for repository search."""
+
+    language: str | None
+    ecosystem: str | list[str] | None
+    project_type: str | None
+    min_stars: int | None
+    max_stars: int | None
+    license: str | None
+    topics: list[str] | str | None
+    include_archived: bool
+
+
 class SearchResultItem(TypedDict, total=False):
     """Ranked search result item."""
 
@@ -120,9 +133,12 @@ class SearchResponse(TypedDict, total=False):
 
     query: str
     query_intent: QueryIntent | dict[str, Any]
+    filters: SearchFilter | dict[str, Any] | None
     abstained: bool
     total_candidates: int
+    considered: int
     results: list[SearchResultItem]
+    latency_ms: float
     elapsed_ms: float
 
 
@@ -224,6 +240,7 @@ __all__ = [
     "LLMProfile",
     "QueryIntent",
     "Record",
+    "SearchFilter",
     "SearchResponse",
     "SearchResultItem",
     "StructureSignals",

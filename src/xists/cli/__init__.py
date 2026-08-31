@@ -718,6 +718,50 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional English canonical query mode: off, canonical, or merge (default: off)",
     )
     search_parser.add_argument(
+        "--language",
+        "-l",
+        type=str,
+        default=None,
+        help="Filter by primary language (e.g. python, rust, go)",
+    )
+    search_parser.add_argument(
+        "--ecosystem",
+        type=str,
+        default=None,
+        help="Filter by package ecosystem (e.g. pypi, npm, cargo)",
+    )
+    search_parser.add_argument(
+        "--project-type",
+        type=str,
+        default=None,
+        help="Filter by project type (e.g. framework, library, cli_tool)",
+    )
+    search_parser.add_argument(
+        "--min-stars", type=int, default=None, help="Minimum GitHub star count"
+    )
+    search_parser.add_argument(
+        "--max-stars", type=int, default=None, help="Maximum GitHub star count"
+    )
+    search_parser.add_argument(
+        "--license",
+        type=str,
+        default=None,
+        help="Filter by license SPDX ID or name (e.g. mit, apache-2.0)",
+    )
+    search_parser.add_argument(
+        "--topic",
+        action="append",
+        default=None,
+        dest="topics",
+        help="Filter by topic tag (can be repeated)",
+    )
+    search_parser.add_argument(
+        "--include-archived",
+        action="store_true",
+        default=False,
+        help="Include archived or disabled repositories",
+    )
+    search_parser.add_argument(
         "--format",
         choices=("text", "json"),
         default="text",

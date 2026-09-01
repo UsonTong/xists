@@ -1490,13 +1490,10 @@ def _rank_hybrid_entries_prepared(
     )
     rrf_scores = rrf_dense + rrf_sparse
 
-    # Continuous BM25 score boost
+    # Continuous BM25 score boost proportional to sparse channel strength
     max_bm25 = float(np.max(valid_bm25_scores)) if len(valid_bm25_scores) > 0 else 0.0
     if max_bm25 > 0.0 and w_s > 0:
-        bm25_boost = np.minimum(
-            0.12,
-            (valid_bm25_scores / (max_bm25 + 1.0)) * w_s * 0.15,
-        )
+        bm25_boost = (valid_bm25_scores / (max_bm25 + 1.0)) * (w_s / (k_s + 1.0)) * 0.2
     else:
         bm25_boost = np.zeros(len(valid_indices), dtype=np.float32)
 

@@ -272,6 +272,8 @@ def search(args: argparse.Namespace) -> int:
             rerank_abstain_threshold=args.rerank_abstain_threshold,
             confidence_calibration=args.confidence_calibration,
             filters=filters or None,
+            dense_weight=getattr(args, "dense_weight", None),
+            sparse_weight=getattr(args, "sparse_weight", None),
             **rank_kwargs,
         )
     except IndexMismatchError as error:

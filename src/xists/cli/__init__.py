@@ -789,6 +789,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include archived or disabled repositories",
     )
     search_parser.add_argument(
+        "--dense-weight",
+        type=float,
+        default=None,
+        help="Dense embedding channel weight for hybrid ranking (default: intent-adaptive)",
+    )
+    search_parser.add_argument(
+        "--sparse-weight",
+        type=float,
+        default=None,
+        help="BM25 sparse channel weight for hybrid ranking (default: intent-adaptive)",
+    )
+    search_parser.add_argument(
         "--format",
         choices=("text", "json"),
         default="text",

@@ -84,6 +84,8 @@ def create_server(
         license: str | None = None,
         topics: list[str] | None = None,
         include_archived: bool = False,
+        dense_weight: float | None = None,
+        sparse_weight: float | None = None,
     ) -> dict[str, Any]:
         """Return ranked project candidates for a natural-language query."""
 
@@ -114,6 +116,8 @@ def create_server(
             top_k=top_k,
             ranking_strategy=ranking_strategy,
             filters=filters or None,
+            dense_weight=dense_weight,
+            sparse_weight=sparse_weight,
             cache=cache,
         )
         return _enrich_search_result(result, prepared)

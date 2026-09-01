@@ -119,7 +119,32 @@ def test_search_forwards_explicit_optional_ranking_arguments(monkeypatch):
         "query_variants": ["query", "canonical query"],
         "rerank_query": "canonical query",
         "filters": None,
+        "dense_weight": None,
+        "sparse_weight": None,
     }
+
+
+def test_search_forwards_channel_weights(monkeypatch):
+    captured = {}
+
+    def fake_rank(query, index, config, **kwargs):
+        captured.update(query=query, index=index, config=config, **kwargs)
+        return {"query": query, "abstained": True, "results": []}
+
+    monkeypatch.setattr("xists.api.rank", fake_rank)
+
+    result = search(
+        "query",
+        make_index(),
+        embedding_config=CONFIG,
+        ranking_strategy="hybrid",
+        dense_weight=0.3,
+        sparse_weight=0.7,
+    )
+
+    assert result["abstained"] is True
+    assert captured["dense_weight"] == 0.3
+    assert captured["sparse_weight"] == 0.7
 
 
 def test_search_accepts_hybrid_ranking_strategy(monkeypatch):

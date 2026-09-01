@@ -92,6 +92,114 @@ DOMAIN_QUERY_CUES = {
 }
 EXACT_NAME_QUERY_MAX_TOKENS = 3
 
+INTENT_DEFAULT_CHANNEL_WEIGHTS: dict[str, dict[str, float]] = {
+    "exact_name": {
+        "dense_weight": 0.20,
+        "sparse_weight": 0.80,
+        "dense_damping": 60.0,
+        "sparse_damping": 20.0,
+    },
+    "functional": {
+        "dense_weight": 0.80,
+        "sparse_weight": 0.20,
+        "dense_damping": 30.0,
+        "sparse_damping": 60.0,
+    },
+    "alternative": {
+        "dense_weight": 0.70,
+        "sparse_weight": 0.30,
+        "dense_damping": 40.0,
+        "sparse_damping": 40.0,
+    },
+    "domain": {
+        "dense_weight": 0.50,
+        "sparse_weight": 0.50,
+        "dense_damping": 60.0,
+        "sparse_damping": 60.0,
+    },
+    "empty": {
+        "dense_weight": 0.50,
+        "sparse_weight": 0.50,
+        "dense_damping": 60.0,
+        "sparse_damping": 60.0,
+    },
+}
+
+ALTERNATIVE_TARGET_PATTERNS = (
+    re.compile(
+        r"(?:alternative|alternatives|similar|replacement)\s+(?:to|for)\s+([a-z0-9_.-]+)",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?:replace|like)\s+([a-z0-9_.-]+)", re.IGNORECASE),
+    re.compile(
+        r"([a-z0-9_.-]+)\s+(?:alternative|alternatives|replacement|replacements)",
+        re.IGNORECASE,
+    ),
+)
+
+
+def _extract_alternative_target(query: str, query_ctx: dict[str, Any] | None = None) -> str | None:
+    raw = query.strip().lower()
+    for pattern in ALTERNATIVE_TARGET_PATTERNS:
+        match = pattern.search(raw)
+        if match:
+            target = match.group(1).strip().lower()
+            if (
+                target
+                and len(target) > 1
+                and target not in GENERIC_TERMS
+                and target not in QUERY_JOINERS
+                and target not in LANGUAGE_TERMS
+                and not target.isdigit()
+            ):
+                return target
+    return None
+
+
+def _resolve_channel_weights(
+    intent_type: str,
+    *,
+    dense_weight: float | None = None,
+    sparse_weight: float | None = None,
+) -> dict[str, float]:
+    defaults = INTENT_DEFAULT_CHANNEL_WEIGHTS.get(
+        intent_type,
+        {
+            "dense_weight": 0.50,
+            "sparse_weight": 0.50,
+            "dense_damping": 60.0,
+            "sparse_damping": 60.0,
+        },
+    )
+    if dense_weight is not None and sparse_weight is not None:
+        w_d = float(dense_weight)
+        w_s = float(sparse_weight)
+        k_d = 60.0
+        k_s = 60.0
+    elif dense_weight is not None:
+        w_d = float(dense_weight)
+        w_s = max(0.0, 1.0 - w_d)
+        k_d = 60.0
+        k_s = 60.0
+    elif sparse_weight is not None:
+        w_s = float(sparse_weight)
+        w_d = max(0.0, 1.0 - w_s)
+        k_d = 60.0
+        k_s = 60.0
+    else:
+        w_d = defaults["dense_weight"]
+        w_s = defaults["sparse_weight"]
+        k_d = defaults["dense_damping"]
+        k_s = defaults["sparse_damping"]
+
+    return {
+        "dense_weight": max(0.0, w_d),
+        "sparse_weight": max(0.0, w_s),
+        "dense_damping": k_d,
+        "sparse_damping": k_s,
+    }
+
+
 LANGUAGE_ALIAS_GROUPS = (
     ("python", ("python", "py")),
     ("javascript", ("javascript", "js")),
@@ -505,6 +613,9 @@ def _precompute_entry_cache(entry: dict[str, Any]) -> dict[str, Any]:
     topics_set = frozenset(
         str(t).strip().lower() for t in _string_list(metadata.get("topics")) if str(t).strip()
     )
+    replaces_set = frozenset(
+        str(r).strip().lower() for r in _string_list(metadata.get("replaces")) if str(r).strip()
+    )
     project_type_norm = (
         str(metadata.get("project_type") or "").strip().lower().replace("-", "_").replace(" ", "_")
     )
@@ -531,6 +642,7 @@ def _precompute_entry_cache(entry: dict[str, Any]) -> dict[str, Any]:
         "url": metadata.get("url"),
         "ecosystem_set": ecosystem_set,
         "topics_set": topics_set,
+        "replaces_set": replaces_set,
         "project_type_norm": project_type_norm,
         "license_lower": license_lower,
         "stars": stars,
@@ -1311,8 +1423,10 @@ def _rank_hybrid_entries_prepared(
     confidence_calibration: str = "off",
     query_variants: list[str] | None = None,
     filter_mask: np.ndarray | None = None,
+    dense_weight: float | None = None,
+    sparse_weight: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Rank index entries using Reciprocal Rank Fusion of dense embeddings and BM25 sparse index."""
+    """Rank index entries using adaptive Reciprocal Rank Fusion of dense embeddings and BM25 sparse index."""
     if query_ctx is None:
         query_ctx = _build_query_context(query)
 
@@ -1322,7 +1436,20 @@ def _rank_hybrid_entries_prepared(
     if len(valid_indices) == 0:
         return []
 
-    # 1. Compute BM25 sparse scores across documents
+    # 1. Resolve query intent & channel parameters
+    intent = _query_intent(query)
+    intent_type = intent["type"]
+    channel_params = _resolve_channel_weights(
+        intent_type,
+        dense_weight=dense_weight,
+        sparse_weight=sparse_weight,
+    )
+    w_d = channel_params["dense_weight"]
+    w_s = channel_params["sparse_weight"]
+    k_d = channel_params["dense_damping"]
+    k_s = channel_params["sparse_damping"]
+
+    # 2. Compute BM25 sparse scores across documents
     if query_variants:
         bm25_scores = np.maximum.reduce(
             [prepared.bm25_index.score_query(variant) for variant in query_variants]
@@ -1330,13 +1457,13 @@ def _rank_hybrid_entries_prepared(
     else:
         bm25_scores = prepared.bm25_index.score_query(query)
 
-    # 2. Dense ranking (1-based for valid candidates)
+    # 3. Dense ranking (1-based for valid candidates)
     valid_sem_scores = semantic_scores[valid_indices]
     dense_order = np.argsort(-valid_sem_scores, kind="stable")
     dense_ranks = np.empty(len(valid_indices), dtype=np.int32)
     dense_ranks[dense_order] = np.arange(1, len(valid_indices) + 1)
 
-    # 3. BM25 sparse ranking (1-based for valid candidates with score > 0)
+    # 4. BM25 sparse ranking (1-based for valid candidates with score > 0)
     valid_bm25_scores = bm25_scores[valid_indices]
     matching_sub_indices = np.where(valid_bm25_scores > 0)[0]
     bm25_ranks = np.zeros(len(valid_indices), dtype=np.int32)
@@ -1346,11 +1473,32 @@ def _rank_hybrid_entries_prepared(
         ]
         bm25_ranks[sorted_matching] = np.arange(1, len(sorted_matching) + 1)
 
-    # 4. Reciprocal Rank Fusion calculation with repository prior
-    rrf_k = HYBRID_FUSION_RANK_CONSTANT
-    rrf_scores = 1.0 / (rrf_k + dense_ranks) + np.where(
-        bm25_ranks > 0, 1.0 / (rrf_k + bm25_ranks), 0.0
+    # 5. Weighted Reciprocal Rank Fusion calculation
+    rrf_dense = (
+        np.divide(w_d, (k_d + dense_ranks), dtype=np.float32)
+        if w_d > 0
+        else np.zeros(len(valid_indices), dtype=np.float32)
     )
+    rrf_sparse = (
+        np.where(
+            bm25_ranks > 0,
+            np.divide(w_s, (k_s + bm25_ranks), dtype=np.float32),
+            0.0,
+        )
+        if w_s > 0
+        else np.zeros(len(valid_indices), dtype=np.float32)
+    )
+    rrf_scores = rrf_dense + rrf_sparse
+
+    # Continuous BM25 score boost
+    max_bm25 = float(np.max(valid_bm25_scores)) if len(valid_bm25_scores) > 0 else 0.0
+    if max_bm25 > 0.0 and w_s > 0:
+        bm25_boost = np.minimum(
+            0.12,
+            (valid_bm25_scores / (max_bm25 + 1.0)) * w_s * 0.15,
+        )
+    else:
+        bm25_boost = np.zeros(len(valid_indices), dtype=np.float32)
 
     if len(prepared.popularity_bonuses_array) == len(prepared.entries):
         pop_bonuses = prepared.popularity_bonuses_array[valid_indices]
@@ -1363,9 +1511,26 @@ def _rank_hybrid_entries_prepared(
             dtype=np.float32,
         )
 
-    fusion_scores_arr = rrf_scores + pop_bonuses * 0.7
+    fusion_scores_arr = rrf_scores + bm25_boost + pop_bonuses * 0.7
 
-    # 5. Two-stage candidate selection
+    # Alternative intent adjustments: down-ranking target and promoting declared replacements
+    alternative_target: str | None = None
+    if intent_type == "alternative":
+        alternative_target = _extract_alternative_target(query, query_ctx)
+        if alternative_target:
+            for sub_idx, doc_idx in enumerate(valid_indices):
+                cache = prepared.metadata_caches[doc_idx]
+                repo_id_lower = cache["repo_id_lower"]
+                if (
+                    repo_id_lower == alternative_target
+                    or repo_id_lower.endswith("/" + alternative_target)
+                    or alternative_target in cache["identity_values_lower"]
+                ):
+                    fusion_scores_arr[sub_idx] *= 0.5
+                elif alternative_target in cache.get("replaces_set", frozenset()):
+                    fusion_scores_arr[sub_idx] += 0.05
+
+    # 6. Two-stage candidate selection
     cand_limit = max(top_k * 4, 64)
     if len(valid_indices) > cand_limit:
         exact_doc_ids = _find_exact_identity_indices(prepared, query_ctx)
@@ -1395,7 +1560,7 @@ def _rank_hybrid_entries_prepared(
     if hasattr(prepared.entries, "prefetch") and candidate_doc_ids:
         prepared.entries.prefetch(candidate_doc_ids)
 
-    # 6. Build results with diagnostics, confidence, and explanations for candidate pool
+    # 7. Build results with diagnostics, confidence, and explanations for candidate pool
     results: list[dict[str, Any]] = []
     for sub_idx in candidate_sub_indices:
         i = valid_indices[sub_idx]
@@ -1426,8 +1591,27 @@ def _rank_hybrid_entries_prepared(
             confidence = "abstain"
 
         why: list[str] = []
+        target_penalized = False
+        replaces_promoted = False
+        if alternative_target:
+            repo_id_lower = cache["repo_id_lower"]
+            if (
+                repo_id_lower == alternative_target
+                or repo_id_lower.endswith("/" + alternative_target)
+                or alternative_target in cache["identity_values_lower"]
+            ):
+                target_penalized = True
+                why.append(f"down-ranked target of alternative query ({alternative_target})")
+            elif alternative_target in cache.get("replaces_set", frozenset()):
+                replaces_promoted = True
+                why.append(f"promoted declared replacement for {alternative_target}")
+
         if exact_identity:
             why.append("matched exact repository identity")
+        elif intent_type == "exact_name" and b_rank == 1:
+            why.append(f"ranked by exact name intent with sparse priority (BM25 rank #{b_rank})")
+        elif intent_type == "functional" and d_rank <= 5:
+            why.append(f"ranked by functional intent with dense priority (semantic rank #{d_rank})")
         elif b_rank is not None and d_rank <= 10:
             why.append(f"ranked by hybrid fusion (semantic rank #{d_rank}, BM25 rank #{b_rank})")
         elif b_rank is not None:
@@ -1444,6 +1628,16 @@ def _rank_hybrid_entries_prepared(
         identity_match = (
             "exact" if exact_identity else "contextual" if contextual_identity else None
         )
+
+        diagnostics: dict[str, Any] = {
+            "identity_match": identity_match,
+            "identity_evidence": {"kind": identity_kind},
+            "bm25_score": round(bm25_score, 6),
+        }
+        if target_penalized:
+            diagnostics["alternative_target_penalty"] = alternative_target
+        if replaces_promoted:
+            diagnostics["replaces_promotion"] = alternative_target
 
         item = {
             "repo_id": entry.get("repo_id"),
@@ -1462,14 +1656,13 @@ def _rank_hybrid_entries_prepared(
             "ranking_evidence": {
                 "semantic_rank": d_rank,
                 "bm25_rank": b_rank,
-                "fusion": "reciprocal_rank",
+                "fusion": "adaptive_weighted_rrf",
+                "intent_type": intent_type,
+                "dense_weight": round(w_d, 4),
+                "sparse_weight": round(w_s, 4),
             },
             "matched_terms": matched_terms,
-            "diagnostics": {
-                "identity_match": identity_match,
-                "identity_evidence": {"kind": identity_kind},
-                "bm25_score": round(bm25_score, 6),
-            },
+            "diagnostics": diagnostics,
             "why": why,
             "_identity_pin": bool(exact_identity),
         }
@@ -2157,6 +2350,8 @@ def rank_many(
     query_variants: list[list[str]] | None = None,
     rerank_queries: list[str] | None = None,
     filters: SearchFilter | dict[str, Any] | str | None = None,
+    dense_weight: float | None = None,
+    sparse_weight: float | None = None,
     cache: Any = None,
 ) -> list[dict[str, Any]]:
     """Rank multiple queries with batched embeddings and matrix similarity."""
@@ -2266,6 +2461,8 @@ def rank_many(
                 confidence_calibration=confidence_calibration,
                 query_variants=query_variants[row] if query_variants[row] != [query] else None,
                 filter_mask=filter_mask,
+                dense_weight=dense_weight,
+                sparse_weight=sparse_weight,
             )
         else:
             results = _rank_scored_entries_prepared(
@@ -2309,6 +2506,8 @@ def rank(
     query_variants: list[str] | None = None,
     rerank_query: str | None = None,
     filters: SearchFilter | dict[str, Any] | str | None = None,
+    dense_weight: float | None = None,
+    sparse_weight: float | None = None,
     cache: Any = None,
 ) -> dict[str, Any]:
     """Rank index entries against the query."""
@@ -2402,6 +2601,8 @@ def rank(
             confidence_calibration=confidence_calibration,
             query_variants=query_variants if query_variants != [query] else None,
             filter_mask=filter_mask,
+            dense_weight=dense_weight,
+            sparse_weight=sparse_weight,
         )
     else:
         results = _rank_scored_entries_prepared(

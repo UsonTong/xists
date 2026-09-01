@@ -9,4 +9,4 @@ def test_package_version_matches_project_metadata():
 
     assert pyproject["project"]["dynamic"] == ["version"]
     assert pyproject["tool"]["hatch"]["version"]["path"] == "src/xists/__init__.py"
-    assert xists.__version__ == "0.19.0"
+    assert xists.__version__ == "0.20.0"

@@ -463,6 +463,142 @@ def benchmark_batched_gemm_retrieval(
     }
 
 
+def benchmark_adaptive_intent_hybrid_fusion(
+    entries: list[dict[str, Any]], matrix: np.ndarray, temp_dir: Path
+) -> dict[str, Any]:
+    """Measure adaptive intent-guided hybrid fusion performance and accuracy across query intent classes."""
+    idx_path = temp_dir / "adaptive_fusion_index.json"
+    doc = {
+        "index_version": 4,
+        "embedding_input_version": 3,
+        "record_schema_version": 2,
+        "embedding_model": "bge-m3",
+        "dimension": matrix.shape[1],
+        "record_count": len(entries),
+        "vectors": entries,
+    }
+    save_index(idx_path, doc, matrix=matrix, version=4)
+    prepared = PreparedIndex.from_path(idx_path, CONFIG, mmap=True)
+
+    # Prepare representative query sets for each intent
+    intent_queries = {
+        "exact_name": [
+            "repo-00042",
+            "repo-00100",
+            "repo-00250",
+            "bench-org/repo-00500",
+            "bench-org/repo-00999",
+        ],
+        "functional": [
+            "high throughput distributed memory queue in rust",
+            "asynchronous event driven web networking library",
+            "optimizing compiler and abstract syntax tree parser",
+            "secure cryptographic authentication and identity protocol",
+            "distributed transactional key-value database engine",
+        ],
+        "alternative": [
+            "open source alternative to repo-00042",
+            "tools like repo-00100",
+            "replacement for repo-00250",
+            "alternatives to bench-org/repo-00500",
+            "replace repo-00999 with rust",
+        ],
+        "domain": [
+            "web api framework in python",
+            "cloud native microservice in go",
+            "cli tool for developer productivity",
+            "machine learning deep learning inference",
+            "embedded operating system in c++",
+        ],
+    }
+
+    rng = np.random.RandomState(123)
+    dim = matrix.shape[1]
+
+    # Pre-generate synthetic embeddings for test queries
+    query_embeddings: dict[str, list[float]] = {}
+    for q_list in intent_queries.values():
+        for q in q_list:
+            raw = rng.standard_normal(dim).astype(np.float32)
+            norm = float(np.linalg.norm(raw))
+            query_embeddings[q] = (raw / (norm if norm > 0 else 1.0)).tolist()
+
+    intent_results: dict[str, Any] = {}
+    all_latencies_ms: list[float] = []
+
+    iterations = 5
+    for intent_name, queries in intent_queries.items():
+        latencies_ms: list[float] = []
+        verified_intent_count = 0
+        special_intent_actions = 0
+
+        for _ in range(iterations):
+            for q in queries:
+                vec = query_embeddings[q]
+                t0 = time.perf_counter()
+                res = rank(
+                    q,
+                    prepared,
+                    CONFIG,
+                    ranking_strategy="hybrid",
+                    top_k=10,
+                    embed=lambda c, _q, v=vec: v,
+                )
+                lat_ms = (time.perf_counter() - t0) * 1000
+                latencies_ms.append(lat_ms)
+                all_latencies_ms.append(lat_ms)
+
+                if res.get("results"):
+                    top_evidence = res["results"][0].get("ranking_evidence", {})
+                    if top_evidence.get("intent_type") == intent_name or (
+                        intent_name == "domain"
+                        and top_evidence.get("intent_type") in {"domain", "functional"}
+                    ):
+                        verified_intent_count += 1
+                    if intent_name == "alternative":
+                        # Check if target downranking or replacement promotion was triggered
+                        for item in res["results"]:
+                            if "alternative_target_penalty" in item.get(
+                                "diagnostics", {}
+                            ) or "replaces_promotion" in item.get("diagnostics", {}):
+                                special_intent_actions += 1
+                                break
+                    elif intent_name == "exact_name":
+                        # Check if top hit matched target
+                        if res["results"][0].get("repo_id") in {
+                            f"bench-org/{q}",
+                            q,
+                        } or q in res["results"][0].get("repo_id", ""):
+                            special_intent_actions += 1
+
+        total_queries = len(queries) * iterations
+        avg_lat = float(np.mean(latencies_ms))
+        p95_lat = float(np.percentile(latencies_ms, 95))
+        intent_results[intent_name] = {
+            "query_count": total_queries,
+            "avg_latency_ms": round(avg_lat, 3),
+            "p95_latency_ms": round(p95_lat, 3),
+            "qps": round(1000.0 / max(avg_lat, 0.001), 1),
+            "intent_routing_accuracy_pct": round((verified_intent_count / total_queries) * 100, 1),
+        }
+
+    overall_avg_lat = float(np.mean(all_latencies_ms))
+    overall_p95_lat = float(np.percentile(all_latencies_ms, 95))
+    overall_qps = 1000.0 / max(overall_avg_lat, 0.001)
+
+    return {
+        "dataset_record_count": len(entries),
+        "embedding_dimension": dim,
+        "intents": intent_results,
+        "overall": {
+            "total_benchmark_runs": len(all_latencies_ms),
+            "avg_latency_ms": round(overall_avg_lat, 3),
+            "p95_latency_ms": round(overall_p95_lat, 3),
+            "throughput_qps": round(overall_qps, 1),
+        },
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--count", type=int, default=5000, help="Number of synthetic vectors")
@@ -554,6 +690,20 @@ def main() -> int:
             f"=> Throughput Speedup: {gemm_res['batch_speedup']}x\n"
         )
 
+        print("7. Benchmarking Adaptive Intent-Guided Hybrid Fusion & Intent Routing...")
+        adaptive_res = benchmark_adaptive_intent_hybrid_fusion(entries, matrix, temp_path)
+        for intent_k, intent_v in adaptive_res["intents"].items():
+            print(
+                f"   - Intent '{intent_k}' ({intent_v['query_count']} queries): "
+                f"avg {intent_v['avg_latency_ms']} ms, p95 {intent_v['p95_latency_ms']} ms "
+                f"({intent_v['qps']} qps) | Routing Accuracy: {intent_v['intent_routing_accuracy_pct']}%"
+            )
+        print(
+            f"   => Overall Mixed-Intent: {adaptive_res['overall']['avg_latency_ms']} ms/query "
+            f"(p95: {adaptive_res['overall']['p95_latency_ms']} ms, "
+            f"throughput: {adaptive_res['overall']['throughput_qps']} qps)\n"
+        )
+
     summary = {
         "status": "success",
         "mmap_loading": mmap_res,
@@ -562,6 +712,7 @@ def main() -> int:
         "sqlite_sidecar_and_lazy_retrieval": sidecar_res,
         "query_embedding_cache": cache_res,
         "batched_gemm_retrieval": gemm_res,
+        "adaptive_intent_hybrid_fusion": adaptive_res,
     }
     print("Benchmark summary:")
     print(json.dumps(summary, indent=2))

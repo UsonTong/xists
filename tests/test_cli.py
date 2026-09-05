@@ -12,6 +12,7 @@ from xists.cli import (
     _format_search_text,
     _load_canonical_queries,
     build_parser,
+    compare,
     doctor,
     eval_cases,
     eval_inspect,
@@ -29,6 +30,7 @@ from xists.cli import (
     records_stats,
     records_validate,
     search,
+    similar,
     version,
 )
 from xists.ingest.github import GitHubAPIError
@@ -4148,3 +4150,219 @@ def test_index_verify_dual_file_and_legacy(tmp_path):
         ["index", "verify", "--records", str(records_file), "--index", str(v3_file)]
     )
     assert index_verify(args_v3) == 0
+
+
+def test_similar_cli_json_and_text(tmp_path, capsys):
+    index = {
+        "index_version": INDEX_VERSION,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "test/embed",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "dimension": 2,
+        "record_count": 3,
+        "vectors": [
+            {
+                "repo_id": "fastapi/fastapi",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "fastapi",
+                    "summary": "FastAPI framework, high performance",
+                    "language": "Python",
+                    "stars": 80000,
+                    "license": "MIT",
+                    "project_type": "framework",
+                    "ecosystem": ["python", "web"],
+                    "topics": ["api", "web"],
+                },
+            },
+            {
+                "repo_id": "encode/starlette",
+                "vector": [0.95, 0.31],
+                "metadata": {
+                    "name": "starlette",
+                    "summary": "Starlette ASGI framework",
+                    "language": "Python",
+                    "stars": 12000,
+                    "license": "BSD-3-Clause",
+                    "project_type": "framework",
+                    "ecosystem": ["python", "web"],
+                    "topics": ["asgi", "web"],
+                    "related_projects": ["fastapi/fastapi"],
+                },
+            },
+            {
+                "repo_id": "expressjs/express",
+                "vector": [0.0, 1.0],
+                "metadata": {
+                    "name": "express",
+                    "summary": "Fast web framework for Node.js",
+                    "language": "JavaScript",
+                    "stars": 65000,
+                    "license": "MIT",
+                    "project_type": "framework",
+                    "ecosystem": ["javascript", "web"],
+                },
+            },
+        ],
+    }
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(index), encoding="utf-8")
+
+    # 1. JSON output
+    args_json = build_parser().parse_args(
+        [
+            "similar",
+            "fastapi/fastapi",
+            "--index",
+            str(index_file),
+            "--language",
+            "python",
+            "--format",
+            "json",
+        ]
+    )
+    assert similar(args_json) == 0
+    out_json = json.loads(capsys.readouterr().out)
+    assert out_json["target_repo_id"] == "fastapi/fastapi"
+    assert len(out_json["results"]) == 1
+    assert out_json["results"][0]["repo_id"] == "encode/starlette"
+    assert out_json["results"][0]["score"] > 0.9
+
+    # 2. Text output
+    args_text = build_parser().parse_args(
+        [
+            "similar",
+            "fastapi/fastapi",
+            "--index",
+            str(index_file),
+            "--format",
+            "text",
+        ]
+    )
+    assert similar(args_text) == 0
+    out_text = capsys.readouterr().out
+    assert "Similar Projects for fastapi/fastapi" in out_text
+    assert "1. encode/starlette" in out_text
+    assert "Details: Python • ★ 12.0k • BSD-3-Clause • Framework" in out_text
+    assert "Similarity" in out_text
+
+    # 3. Missing index
+    args_missing = build_parser().parse_args(
+        ["similar", "fastapi/fastapi", "--index", str(tmp_path / "missing.json")]
+    )
+    assert similar(args_missing) == 2
+    assert "Index file not found" in capsys.readouterr().err
+
+    # 4. Unknown repo
+    args_unknown = build_parser().parse_args(
+        ["similar", "unknown/repo", "--index", str(index_file)]
+    )
+    assert similar(args_unknown) == 1
+    assert "not found" in capsys.readouterr().err
+
+
+def test_compare_cli_json_and_text(tmp_path, capsys):
+    index = {
+        "index_version": INDEX_VERSION,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "test/embed",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "dimension": 2,
+        "record_count": 2,
+        "vectors": [
+            {
+                "repo_id": "fastapi/fastapi",
+                "vector": [1.0, 0.0],
+                "metadata": {
+                    "name": "fastapi",
+                    "summary": "FastAPI framework",
+                    "language": "Python",
+                    "stars": 80000,
+                    "license": "MIT",
+                    "project_type": "framework",
+                    "ecosystem": ["python", "web"],
+                    "capabilities": ["Auto OpenAPI", "Async routing"],
+                    "use_cases": ["Web APIs"],
+                    "not_for": ["Monolithic MVC"],
+                },
+            },
+            {
+                "repo_id": "encode/starlette",
+                "vector": [0.8, 0.6],
+                "metadata": {
+                    "name": "starlette",
+                    "summary": "Starlette toolkit",
+                    "language": "Python",
+                    "stars": 12000,
+                    "license": "BSD-3-Clause",
+                    "project_type": "framework",
+                    "ecosystem": ["python", "web"],
+                    "capabilities": ["ASGI toolkit", "Async routing"],
+                    "use_cases": ["Microservices"],
+                    "not_for": ["Templated sites"],
+                    "replaces": ["fastapi/fastapi"],
+                },
+            },
+        ],
+    }
+    index_file = tmp_path / "index.json"
+    index_file.write_text(json.dumps(index), encoding="utf-8")
+
+    # 1. JSON output
+    args_json = build_parser().parse_args(
+        [
+            "compare",
+            "fastapi/fastapi",
+            "encode/starlette",
+            "--index",
+            str(index_file),
+            "--format",
+            "json",
+        ]
+    )
+    assert compare(args_json) == 0
+    out_json = json.loads(capsys.readouterr().out)
+    assert out_json["repo_ids"] == ["fastapi/fastapi", "encode/starlette"]
+    assert out_json["matrix"]["fastapi/fastapi"]["encode/starlette"] == 0.8
+    assert "shared_ecosystems" in out_json["analysis"]
+
+    # 2. Text output
+    args_text = build_parser().parse_args(
+        [
+            "compare",
+            "fastapi/fastapi",
+            "encode/starlette",
+            "--index",
+            str(index_file),
+            "--format",
+            "text",
+        ]
+    )
+    assert compare(args_text) == 0
+    out_text = capsys.readouterr().out
+    assert "Project Comparison: fastapi/fastapi vs encode/starlette" in out_text
+    assert "1. Project Overviews" in out_text
+    assert "2. Pairwise Embedding Similarity Matrix" in out_text
+    assert "3. Shared Ground" in out_text
+    assert "4. Distinctive Strengths & Boundaries" in out_text
+    assert "5. Direct Knowledge Links" in out_text
+
+    # 3. Missing index
+    args_missing = build_parser().parse_args(
+        [
+            "compare",
+            "fastapi/fastapi",
+            "encode/starlette",
+            "--index",
+            str(tmp_path / "missing.json"),
+        ]
+    )
+    assert compare(args_missing) == 2
+    assert "Index file not found" in capsys.readouterr().err
+
+    # 4. Error: less than 2 repos
+    args_single = build_parser().parse_args(
+        ["compare", "fastapi/fastapi", "--index", str(index_file)]
+    )
+    assert compare(args_single) == 1
+    assert "between 2 and 5" in capsys.readouterr().err

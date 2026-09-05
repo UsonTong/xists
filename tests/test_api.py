@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from xists.api import load_index, search
+from xists.api import compare_projects, find_similar, load_index, search
 from xists.records import RECORD_SCHEMA_VERSION
 from xists.search.embed import EMBEDDING_INPUT_VERSION, EmbeddingConfig, EmbeddingError
 from xists.search.query import IndexMismatchError
@@ -163,3 +163,37 @@ def test_search_forwards_filters_to_rank(monkeypatch):
     )
     assert captured.get("filters") == filters
     assert result["filters"] == filters
+
+
+def test_api_find_similar_accepts_dict_and_prepared_index():
+    index_dict = make_index()
+    # 1. Dict input
+    res_dict = find_similar("winner/repo", index_dict, top_k=5)
+    assert res_dict["target_repo_id"] == "winner/repo"
+    assert len(res_dict["results"]) == 1
+    assert res_dict["results"][0]["repo_id"] == "other/repo"
+
+    # 2. PreparedIndex input
+    from xists.search.query import prepare_index
+
+    prepared = prepare_index(index_dict)
+    res_prep = find_similar("winner/repo", prepared, top_k=5)
+    assert res_prep["target_repo_id"] == "winner/repo"
+    assert len(res_prep["results"]) == 1
+    assert res_prep["results"][0]["repo_id"] == "other/repo"
+
+
+def test_api_compare_projects_accepts_dict_and_prepared_index():
+    index_dict = make_index()
+    # 1. Dict input
+    res_dict = compare_projects(["winner/repo", "other/repo"], index_dict)
+    assert res_dict["repo_ids"] == ["winner/repo", "other/repo"]
+    assert res_dict["matrix"]["winner/repo"]["other/repo"] == 0.0
+
+    # 2. PreparedIndex input
+    from xists.search.query import prepare_index
+
+    prepared = prepare_index(index_dict)
+    res_prep = compare_projects(["winner/repo", "other/repo"], prepared)
+    assert res_prep["repo_ids"] == ["winner/repo", "other/repo"]
+    assert res_prep["matrix"]["winner/repo"]["other/repo"] == 0.0

@@ -108,9 +108,9 @@ xists mcp
 
 `xists mcp` uses stdio and reads the same active workspace as the CLI. It
 loads the index when the server starts; rebuild the index and restart the MCP
-server when data changes. It exposes `search_projects`, `inspect_project`, and
-`index_stats`. Search results include the same ranking and abstention behavior
-as the CLI, so diagnose an agent request with:
+server when data changes. It exposes `search_projects`, `find_similar_projects`,
+`compare_projects`, `inspect_project`, and `index_stats`. Search results include
+the same ranking and abstention behavior as the CLI, so diagnose an agent request with:
 
 ```bash
 xists search "browser automation for agents" --format json
@@ -193,16 +193,30 @@ The commands above generate local files and may call the endpoints configured
 in `.env`; use `records.json` / `index.json` instead if you do not want files
 named as demo artifacts.
 
+### Find Similar Projects & Side-by-Side Comparison
+
+`xists` provides zero-remote-call relational exploration and multi-project horizontal comparison:
+
+```bash
+# Find similar alternatives to a repository (offline vector retrieval)
+xists similar supabase/supabase --top-k 5
+xists similar astral-sh/ruff --language python --min-stars 1000
+
+# Compare 2 to 5 repositories side-by-side with similarity matrix and differentiators
+xists compare langchain-ai/langchain run-llama/llama_index crewAIInc/crewAI
+xists compare qdrant/qdrant chroma-core/chroma milvus-io/milvus --format json
+```
+
 ---
 
 ## Python API
 
-Use the stable API when another Python program needs the same search behavior
+Use the stable API when another Python program needs the same search, similarity, or comparison behavior
 as the CLI. Configuration is always explicit; importing `xists.api` does not
 read `.env` or send network requests.
 
 ```python
-from xists.api import load_index, search
+from xists.api import compare_projects, find_similar, load_index, search
 from xists.search.embed import EmbeddingConfig
 
 index = load_index("index.json")
@@ -211,7 +225,15 @@ config = EmbeddingConfig(
     base_url="https://your-embedding-endpoint/v1",
     model="your-embedding-model",
 )
+
+# 1. Semantic search with query embedding
 result = search("open source firebase alternative", index, embedding_config=config, top_k=5)
+
+# 2. Find similar alternatives (instant, 0 remote API calls, uses stored unit vectors)
+similar = find_similar("supabase/supabase", index, top_k=5)
+
+# 3. Horizontal side-by-side comparison & pairwise cosine similarity matrix
+comparison = compare_projects(["astral-sh/ruff", "psf/black", "PyCQA/isort"], index)
 ```
 
 `search()` may call the endpoint in `config` to embed the query. It raises

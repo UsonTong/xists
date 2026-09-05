@@ -106,7 +106,7 @@ xists mcp
 
 `xists mcp` 使用 stdio，并读取与 CLI 相同的当前 workspace。server 启动时加载
 index；数据更新或重建 index 后，需要重启 MCP server。它提供
-`search_projects`、`inspect_project` 和 `index_stats` 三个工具。搜索排序和
+`search_projects`、`find_similar_projects`、`compare_projects`、`inspect_project` 和 `index_stats` 等工具。搜索排序和
 未命中语义与 CLI 相同，排查 agent 请求时可运行：
 
 ```bash
@@ -183,14 +183,28 @@ xists search "open source firebase alternative" --index demo-index.json --format
 
 上面的命令会生成本地文件，并可能调用 `.env` 里配置的接口；若不希望使用 demo 命名，请改用 `records.json` 和 `index.json`。
 
+### 相似项目探索与横向对比
+
+`xists` 支持 0 远端调用、纯离线的关系探索与多项目横向对比：
+
+```bash
+# 寻找同类替代品（基于已有归一化向量即时计算）
+xists similar supabase/supabase --top-k 5
+xists similar astral-sh/ruff --language python --min-stars 1000
+
+# 2 至 5 个项目横向比对（输出相似度矩阵、功能交集与专属优势差异）
+xists compare langchain-ai/langchain run-llama/llama_index crewAIInc/crewAI
+xists compare qdrant/qdrant chroma-core/chroma milvus-io/milvus --format json
+```
+
 ---
 
 ## Python API
 
-其他 Python 程序需要使用和 CLI 相同的搜索逻辑时，可以使用稳定 API。配置必须显式传入；导入 `xists.api` 不会读取 `.env`，也不会发起网络请求。
+其他 Python 程序需要使用和 CLI 相同的搜索、相似探索或横向对比逻辑时，可以使用稳定 API。配置必须显式传入；导入 `xists.api` 不会读取 `.env`，也不会发起网络请求。
 
 ```python
-from xists.api import load_index, search
+from xists.api import compare_projects, find_similar, load_index, search
 from xists.search.embed import EmbeddingConfig
 
 index = load_index("index.json")
@@ -199,7 +213,15 @@ config = EmbeddingConfig(
     base_url="https://your-embedding-endpoint/v1",
     model="your-embedding-model",
 )
+
+# 1. 语义搜索（通过 embedding 接口计算 query 向量）
 result = search("open source firebase alternative", index, embedding_config=config, top_k=5)
+
+# 2. 相似项目查找（0 远端 API 调用，纯本地 BLAS 点积）
+similar = find_similar("supabase/supabase", index, top_k=5)
+
+# 3. 多项目横向对比与两两余弦相似度矩阵
+comparison = compare_projects(["astral-sh/ruff", "psf/black", "PyCQA/isort"], index)
 ```
 
 `search()` 会按需调用 `config` 指定的接口来计算查询向量。无效 index、embedding 模型不兼容或接口失败会以可捕获的 Python 异常返回，不会打印信息或结束进程。

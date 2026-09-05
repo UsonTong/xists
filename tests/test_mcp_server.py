@@ -107,6 +107,8 @@ def test_server_registers_search_inspect_and_index_tools(monkeypatch):
 
     assert {tool.name for tool in asyncio.run(server.list_tools())} == {
         "search_projects",
+        "find_similar_projects",
+        "compare_projects",
         "inspect_project",
         "index_stats",
     }
@@ -214,6 +216,120 @@ def test_search_projects_forwards_filters(monkeypatch):
     }
 
 
+def test_find_similar_projects_tool_execution_and_filters(monkeypatch):
+    import xists.mcp_server as server_module
+
+    captured_kwargs = {}
+
+    def fake_similar(repo_id, index, **kwargs):
+        captured_kwargs.update(repo_id=repo_id, **kwargs)
+        return {
+            "target_repo_id": repo_id,
+            "target": {"repo_id": repo_id, "name": "project"},
+            "total_candidates": 1,
+            "considered": 1,
+            "results": [
+                {
+                    "repo_id": "other/similar",
+                    "score": 0.88,
+                    "confidence": "high_confidence",
+                    "why": ["Shared ecosystem: python"],
+                }
+            ],
+            "filters": kwargs.get("filters"),
+        }
+
+    monkeypatch.setattr(server_module, "public_find_similar", fake_similar)
+    server = server_module.create_server(_index(), object())
+
+    payload = _tool_payload(
+        server,
+        "find_similar_projects",
+        {
+            "repo_id": "owner/project",
+            "top_k": 5,
+            "language": "python",
+            "min_stars": 100,
+            "license": "mit",
+        },
+    )
+
+    assert payload["target_repo_id"] == "owner/project"
+    assert payload["results"][0]["repo_id"] == "other/similar"
+    assert captured_kwargs["repo_id"] == "owner/project"
+    assert captured_kwargs["top_k"] == 5
+    assert captured_kwargs["filters"] == {
+        "language": "python",
+        "min_stars": 100,
+        "license": "mit",
+    }
+
+
+def test_find_similar_projects_tool_validation():
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    import xists.mcp_server as server_module
+
+    server = server_module.create_server(_index(), object())
+
+    with pytest.raises(ToolError, match="repo_id must be a non-empty string"):
+        asyncio.run(server.call_tool("find_similar_projects", {"repo_id": "  "}))
+
+    with pytest.raises(ToolError, match="top_k must be an integer between 1 and 20"):
+        asyncio.run(server.call_tool("find_similar_projects", {"repo_id": "a/b", "top_k": 0}))
+
+
+def test_compare_projects_tool_execution(monkeypatch):
+    import xists.mcp_server as server_module
+
+    captured_kwargs = {}
+
+    def fake_compare(repo_ids, index):
+        captured_kwargs.update(repo_ids=repo_ids)
+        return {
+            "repo_ids": repo_ids,
+            "projects": [{"repo_id": r} for r in repo_ids],
+            "matrix": {r1: {r2: 1.0 if r1 == r2 else 0.5 for r2 in repo_ids} for r1 in repo_ids},
+            "pairwise": [],
+            "analysis": {
+                "shared_capabilities": [],
+                "shared_ecosystems": [],
+                "shared_topics": [],
+                "shared_languages": [],
+                "differentiators": {},
+                "direct_links": [],
+            },
+        }
+
+    monkeypatch.setattr(server_module, "public_compare_projects", fake_compare)
+    server = server_module.create_server(_index(), object())
+
+    payload = _tool_payload(
+        server,
+        "compare_projects",
+        {"repo_ids": ["owner/project", "other/project"]},
+    )
+
+    assert payload["repo_ids"] == ["owner/project", "other/project"]
+    assert captured_kwargs["repo_ids"] == ["owner/project", "other/project"]
+
+
+def test_compare_projects_tool_validation():
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    import xists.mcp_server as server_module
+
+    server = server_module.create_server(_index(), object())
+
+    with pytest.raises(ToolError, match="repo_ids must be a list of 2 to 5"):
+        asyncio.run(server.call_tool("compare_projects", {"repo_ids": ["only-one"]}))
+
+    with pytest.raises(ToolError, match="repo_ids must be a list of 2 to 5"):
+        asyncio.run(
+            server.call_tool("compare_projects", {"repo_ids": ["1", "2", "3", "4", "5", "6"]})
+        )
+
+
 def test_stdio_server_runs_tools_without_corrupting_protocol(tmp_path):
     from mcp import ClientSession
     from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -248,6 +364,8 @@ def test_stdio_server_runs_tools_without_corrupting_protocol(tmp_path):
 
     assert {tool.name for tool in tools.tools} == {
         "search_projects",
+        "find_similar_projects",
+        "compare_projects",
         "inspect_project",
         "index_stats",
     }

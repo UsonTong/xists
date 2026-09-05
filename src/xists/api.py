@@ -11,10 +11,12 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from xists.search.compare import compare_projects_prepared
 from xists.search.embed import EmbeddingConfig
 from xists.search.index import load_index as _load_index
-from xists.search.query import EXPLORATORY_THRESHOLD, rank
-from xists.types import SearchFilter
+from xists.search.query import EXPLORATORY_THRESHOLD, PreparedIndex, prepare_index, rank
+from xists.search.similar import find_similar_prepared
+from xists.types import CompareResponse, SearchFilter, SimilarResponse
 
 
 def load_index(path: str | Path) -> dict[str, Any]:
@@ -30,7 +32,7 @@ def load_index(path: str | Path) -> dict[str, Any]:
 
 def search(
     query: str,
-    index: dict[str, Any],
+    index: dict[str, Any] | PreparedIndex,
     *,
     embedding_config: EmbeddingConfig,
     top_k: int = 10,
@@ -73,4 +75,31 @@ def search(
     )
 
 
-__all__ = ["load_index", "search"]
+def find_similar(
+    repo_id: str,
+    index: dict[str, Any] | PreparedIndex,
+    *,
+    top_k: int = 10,
+    filters: SearchFilter | dict[str, Any] | None = None,
+) -> SimilarResponse:
+    """Find top-k similar repositories using precomputed embeddings in the index.
+
+    This function does not require an EmbeddingConfig or remote embedding API
+    because it operates on the stored unit L2-normalized vector matrix in the index.
+    """
+
+    prepared = prepare_index(index)
+    return find_similar_prepared(repo_id, prepared, top_k=top_k, filters=filters)
+
+
+def compare_projects(
+    repo_ids: list[str],
+    index: dict[str, Any] | PreparedIndex,
+) -> CompareResponse:
+    """Compare 2 to 5 repositories side by side using indexed metadata and pairwise similarity."""
+
+    prepared = prepare_index(index)
+    return compare_projects_prepared(repo_ids, prepared)
+
+
+__all__ = ["compare_projects", "find_similar", "load_index", "search"]

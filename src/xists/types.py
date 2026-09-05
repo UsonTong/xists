@@ -142,6 +142,111 @@ class SearchResponse(TypedDict, total=False):
     elapsed_ms: float
 
 
+class SimilarResultItem(TypedDict, total=False):
+    """Result item returned by repository similarity lookup."""
+
+    repo_id: str
+    name: str
+    url: str
+    score: float
+    similarity: float
+    confidence: Literal["high_confidence", "medium_confidence", "exploratory", "abstain"] | str
+    summary: str | None
+    language: str | None
+    stars: int | None
+    license: str | None
+    project_type: str | None
+    ecosystem: list[str]
+    why: list[str]
+    relationship: str | None
+    metadata: dict[str, Any]
+
+
+class SimilarResponse(TypedDict, total=False):
+    """Full response format for repository similarity search."""
+
+    target_repo_id: str
+    target: dict[str, Any]
+    total_candidates: int
+    considered: int
+    results: list[SimilarResultItem]
+    filters: SearchFilter | dict[str, Any] | None
+    latency_ms: float
+    elapsed_ms: float
+
+
+class CompareItem(TypedDict, total=False):
+    """Structured project snapshot for side-by-side comparison."""
+
+    repo_id: str
+    name: str
+    url: str
+    summary: str | None
+    description: str | None
+    language: str | None
+    stars: int
+    forks: int
+    license: str | None
+    project_type: str | None
+    ecosystem: list[str]
+    capabilities: list[str]
+    use_cases: list[str]
+    not_for: list[str]
+    replaces: list[str]
+    related_projects: list[str]
+    topics: list[str]
+    archived: bool
+
+
+class PairwiseSimilarity(TypedDict, total=False):
+    """Pairwise similarity score between two compared repositories."""
+
+    repo_a: str
+    repo_b: str
+    similarity: float
+
+
+class ProjectDifferentiator(TypedDict, total=False):
+    """Distinctive strengths and traits of a single project in comparison."""
+
+    unique_capabilities: list[str]
+    unique_use_cases: list[str]
+    not_for: list[str]
+    license: str | None
+    stars: int
+
+
+class DirectRelationship(TypedDict, total=False):
+    """Direct link between compared repositories (replaces / related_projects)."""
+
+    source: str
+    target: str
+    relation: str
+
+
+class CompareAnalysis(TypedDict, total=False):
+    """Synthesized commonalities and differentiators across compared projects."""
+
+    shared_capabilities: list[str]
+    shared_ecosystems: list[str]
+    shared_topics: list[str]
+    shared_languages: list[str]
+    differentiators: dict[str, ProjectDifferentiator | dict[str, Any]]
+    direct_links: list[DirectRelationship | dict[str, str]]
+
+
+class CompareResponse(TypedDict, total=False):
+    """Full response format for multi-project comparison."""
+
+    repo_ids: list[str]
+    projects: list[CompareItem]
+    matrix: dict[str, dict[str, float]]
+    pairwise: list[PairwiseSimilarity]
+    analysis: CompareAnalysis
+    latency_ms: float
+    elapsed_ms: float
+
+
 class IndexVectorEntry(TypedDict, total=False):
     """Vector metadata entry within an index document."""
 
@@ -230,6 +335,10 @@ class EvalReport(TypedDict, total=False):
 
 
 __all__ = [
+    "CompareAnalysis",
+    "CompareItem",
+    "CompareResponse",
+    "DirectRelationship",
     "EvalCase",
     "EvalReport",
     "EvalResult",
@@ -238,10 +347,14 @@ __all__ = [
     "IndexManifest",
     "IndexVectorEntry",
     "LLMProfile",
+    "PairwiseSimilarity",
+    "ProjectDifferentiator",
     "QueryIntent",
     "Record",
     "SearchFilter",
     "SearchResponse",
     "SearchResultItem",
+    "SimilarResponse",
+    "SimilarResultItem",
     "StructureSignals",
 ]

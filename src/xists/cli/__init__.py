@@ -8,7 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from xists import __version__
-from xists.api import search as public_search
+from xists.api import (
+    compare_projects as public_compare_projects,
+)
+from xists.api import (
+    find_similar as public_find_similar,
+)
+from xists.api import (
+    search as public_search,
+)
 from xists.cli.common import (
     _check_payload,
     _counter_items,
@@ -28,6 +36,10 @@ from xists.cli.common import (
     load_workspace_environment,
     write_json,
     write_json_atomic,
+)
+from xists.cli.compare import (
+    _format_compare_text,
+    compare,
 )
 from xists.cli.doctor import (
     _format_doctor_text,
@@ -93,6 +105,11 @@ from xists.cli.search import (
     _search_confidence_text,
     search,
 )
+from xists.cli.similar import (
+    _format_project_badge,
+    _format_similar_text,
+    similar,
+)
 from xists.cli.workspace import (
     mcp,
     version,
@@ -131,6 +148,8 @@ def _prioritize_root_command_help(parser: argparse.ArgumentParser, subparsers: A
     preferred_order = (
         "init",
         "search",
+        "similar",
+        "compare",
         "index",
         "ingest",
         "profile",
@@ -769,6 +788,93 @@ def build_parser() -> argparse.ArgumentParser:
     )
     search_parser.set_defaults(func=search)
 
+    similar_parser = subparsers.add_parser(
+        "similar", help="Find similar repositories to an indexed project"
+    )
+    similar_parser.add_argument("repo_id", help="Repository identifier (e.g. owner/repo)")
+    similar_parser.add_argument(
+        "--index", type=Path, default=workspace.index, help="Embedding index to search"
+    )
+    similar_parser.add_argument(
+        "--demo", action="store_true", help="Search the bundled starter demo dataset"
+    )
+    similar_parser.add_argument(
+        "--top-k", type=int, default=10, help="Maximum number of similar results to return"
+    )
+    similar_parser.add_argument(
+        "--language",
+        "-l",
+        type=str,
+        default=None,
+        help="Filter by primary language (e.g. python, rust, go)",
+    )
+    similar_parser.add_argument(
+        "--ecosystem",
+        type=str,
+        default=None,
+        help="Filter by package ecosystem (e.g. pypi, npm, cargo)",
+    )
+    similar_parser.add_argument(
+        "--project-type",
+        type=str,
+        default=None,
+        help="Filter by project type (e.g. framework, library, cli_tool)",
+    )
+    similar_parser.add_argument(
+        "--min-stars", type=int, default=None, help="Minimum GitHub star count"
+    )
+    similar_parser.add_argument(
+        "--max-stars", type=int, default=None, help="Maximum GitHub star count"
+    )
+    similar_parser.add_argument(
+        "--license",
+        type=str,
+        default=None,
+        help="Filter by license SPDX ID or name (e.g. mit, apache-2.0)",
+    )
+    similar_parser.add_argument(
+        "--topic",
+        action="append",
+        default=None,
+        dest="topics",
+        help="Filter by topic tag (can be repeated)",
+    )
+    similar_parser.add_argument(
+        "--include-archived",
+        action="store_true",
+        default=False,
+        help="Include archived or disabled repositories",
+    )
+    similar_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
+    similar_parser.set_defaults(func=similar)
+
+    compare_parser = subparsers.add_parser(
+        "compare", help="Compare 2 to 5 repositories side-by-side"
+    )
+    compare_parser.add_argument(
+        "repo_ids",
+        nargs="+",
+        help="2 to 5 repository identifiers to compare (e.g. repo_a repo_b)",
+    )
+    compare_parser.add_argument(
+        "--index", type=Path, default=workspace.index, help="Embedding index to inspect"
+    )
+    compare_parser.add_argument(
+        "--demo", action="store_true", help="Compare projects in bundled starter demo dataset"
+    )
+    compare_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json for scripts and agents",
+    )
+    compare_parser.set_defaults(func=compare)
+
     eval_p = subparsers.add_parser("eval", help="Evaluate retrieval quality")
     eval_subparsers = eval_p.add_subparsers(dest="eval_command", required=True)
     eval_run_parser = eval_subparsers.add_parser(
@@ -927,14 +1033,17 @@ __all__ = [
     "_failed_repo_ids_from_report",
     "_failure_entry",
     "_format_command_summary",
+    "_format_compare_text",
     "_format_doctor_text",
     "_format_dry_run_text",
     "_format_index_stats_text",
     "_format_index_verify_text",
+    "_format_project_badge",
     "_format_records_stats_text",
     "_format_records_validation_text",
     "_format_search_number",
     "_format_search_text",
+    "_format_similar_text",
     "_format_top_items",
     "_index_checkpoint_path",
     "_index_metadata_by_repo_id",
@@ -969,6 +1078,7 @@ __all__ = [
     "collect_record",
     "collect_record_graphql",
     "collect_records_graphql",
+    "compare",
     "doctor",
     "embedding_config_from_env",
     "eval_cases",
@@ -999,12 +1109,15 @@ __all__ = [
     "mcp",
     "probe_embedding_endpoint",
     "profile_refresh",
+    "public_compare_projects",
+    "public_find_similar",
     "public_search",
     "records_inspect",
     "records_stats",
     "records_validate",
     "resolve_workspace",
     "search",
+    "similar",
     "version",
     "workspace_init",
     "write_json",

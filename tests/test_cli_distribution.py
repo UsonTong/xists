@@ -78,7 +78,6 @@ def test_cli_index_pull_fails_when_exists_without_force(tmp_path, capsys):
 def test_cli_search_demo_without_api_keys(monkeypatch, capsys):
     # Ensure no embedding keys in environment
     monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
-    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     args_json = build_parser().parse_args(
@@ -122,7 +121,6 @@ def test_cli_search_demo_without_api_keys(monkeypatch, capsys):
 
 def test_cli_search_offline_mode(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
-    monkeypatch.delenv("NVIDIA_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
     args = build_parser().parse_args(

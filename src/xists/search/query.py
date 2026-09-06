@@ -44,6 +44,8 @@ EXPLICIT_LOOKUP_PATTERNS = (
         r"^\s*(?:find|search for|look up)\s+(.+?)\s+(?:open[ -]source\s+)?project\s*$",
         re.IGNORECASE,
     ),
+    re.compile(r"^\s*(?:github|git)\s+([a-z0-9_.-]+)\s*$", re.IGNORECASE),
+    re.compile(r"^\s*([a-z0-9_.-]+)\s+(?:github|git)\s*$", re.IGNORECASE),
 )
 
 GENERIC_TERMS = {
@@ -60,6 +62,8 @@ GENERIC_TERMS = {
     "built",
     "for",
     "from",
+    "git",
+    "github",
     "in",
     "library",
     "of",
@@ -216,11 +220,13 @@ LANGUAGE_ALIAS_GROUPS = (
     ("swift", ("swift",)),
     ("kotlin", ("kotlin",)),
     ("dart", ("dart",)),
-    ("vue", ("vue",)),
     ("shell", ("shell", "bash", "sh", "zsh")),
     ("jupyter notebook", ("jupyter notebook", "jupyter-notebook", "jupyter", "ipynb")),
 )
 LANGUAGE_ALIASES = {canonical: set(aliases) for canonical, aliases in LANGUAGE_ALIAS_GROUPS}
+LANGUAGE_ALIAS_MAP = {
+    alias: canonical for canonical, aliases in LANGUAGE_ALIAS_GROUPS for alias in aliases
+}
 LANGUAGE_TERMS = {
     token
     for aliases in LANGUAGE_ALIASES.values()
@@ -338,13 +344,29 @@ def _language_aliases_from_tokens(tokens: tuple[str, ...] | list[str]) -> set[st
 @lru_cache(maxsize=8192)
 def _query_primary_language_alias(query: str) -> str | None:
     tokens = _tokenize(query)
-    prefix_length = _language_prefix_length(tokens)
-    if not prefix_length:
+    if not tokens:
         return None
-    aliases = _language_aliases_from_tokens(tokens[:prefix_length])
-    for canonical, _ in LANGUAGE_ALIAS_GROUPS:
-        if canonical in aliases:
-            return canonical
+    prefix_length = _language_prefix_length(tokens)
+    if prefix_length:
+        aliases = _language_aliases_from_tokens(tokens[:prefix_length])
+        for canonical, _ in LANGUAGE_ALIAS_GROUPS:
+            if canonical in aliases:
+                return canonical
+
+    # Check prepositional language qualifiers: "in python", "with rust", "using go", "written in c++"
+    for i, token in enumerate(tokens):
+        if token in {"in", "with", "using", "into", "for"} and i + 1 < len(tokens):
+            candidate = tokens[i + 1]
+            if candidate in LANGUAGE_ALIAS_MAP:
+                return LANGUAGE_ALIAS_MAP[candidate]
+
+    # Full token scan for strong language identifiers
+    for token in tokens:
+        if token in LANGUAGE_ALIAS_MAP:
+            # 1-character names (like 'c') require explicit preposition qualifier to avoid false positives
+            if len(token) > 1:
+                return LANGUAGE_ALIAS_MAP[token]
+
     return None
 
 
@@ -434,7 +456,7 @@ def _identity_values(entry: dict[str, Any]) -> list[str]:
     repo_id = str(entry.get("repo_id") or "")
     values = [repo_id, str(metadata.get("name") or "")]
     if "/" in repo_id:
-        values.extend(part for part in repo_id.split("/") if part)
+        values.append(repo_id.split("/")[-1])
     values.extend(_string_list(metadata.get("aliases")))
     return [value for value in values if value.strip()]
 
@@ -1129,6 +1151,7 @@ def _present_ranked_results(results: list[dict[str, Any]], top_k: int) -> list[d
     presented = [item for item in results if item["confidence"] != "abstain"][: max(top_k, 0)]
     for item in presented:
         item.pop("_identity_pin", None)
+        item.pop("_identity_stars", None)
         if item.get("url") is None:
             item.pop("url", None)
     return presented
@@ -1510,6 +1533,18 @@ def _rank_hybrid_entries_prepared(
 
     fusion_scores_arr = rrf_scores + bm25_boost + pop_bonuses * 0.7
 
+    # Primary language modulation: reward matched language, penalize conflicting languages
+    primary_language = query_ctx.get("primary_language")
+    if primary_language:
+        for sub_idx, doc_id in enumerate(valid_indices):
+            cache = prepared.metadata_caches[doc_id]
+            cand_lang_alias = cache.get("language_alias")
+            if cand_lang_alias:
+                if cand_lang_alias == primary_language:
+                    fusion_scores_arr[sub_idx] *= 1.08
+                else:
+                    fusion_scores_arr[sub_idx] *= 0.50
+
     # Alternative intent adjustments: down-ranking target and promoting declared replacements
     alternative_target: str | None = None
     target_doc_indices: set[int] = set()
@@ -1518,12 +1553,18 @@ def _rank_hybrid_entries_prepared(
         if alternative_target:
             target_ctx = _build_query_context(alternative_target)
             target_doc_indices = _find_exact_identity_indices(prepared, target_ctx)
-            if target_doc_indices:
-                valid_doc_to_sub = {int(doc_id): sub for sub, doc_id in enumerate(valid_indices)}
-                for doc_id in target_doc_indices:
-                    sub_idx = valid_doc_to_sub.get(doc_id)
-                    if sub_idx is not None:
-                        fusion_scores_arr[sub_idx] *= 0.5
+            for sub_idx, doc_id in enumerate(valid_indices):
+                cache = prepared.metadata_caches[doc_id]
+                rid_l = cache["repo_id_lower"]
+                if (
+                    doc_id in target_doc_indices
+                    or rid_l == alternative_target
+                    or rid_l.endswith("/" + alternative_target)
+                    or alternative_target in cache["identity_values_lower"]
+                ):
+                    fusion_scores_arr[sub_idx] *= 0.35
+                elif alternative_target in cache.get("replaces_set", frozenset()):
+                    fusion_scores_arr[sub_idx] += 0.08
 
     # 6. Two-stage candidate selection
     cand_limit = max(top_k * 4, 64)
@@ -1574,13 +1615,37 @@ def _rank_hybrid_entries_prepared(
         d_rank = int(dense_ranks[sub_idx])
         b_rank = int(bm25_ranks[sub_idx]) if bm25_ranks[sub_idx] > 0 else None
 
+        total_kw = len(query_ctx["keyword_tokens"])
+        matched_terms = sorted(
+            token
+            for token in query_ctx["keyword_tokens"]
+            if query_ctx["expanded_keyword_map"][token] & cache["text_tokens"]
+        )
+        keyword_coverage = len(matched_terms) / total_kw if total_kw else 0.0
+
         if exact_identity:
-            confidence = "high_confidence"
-        elif d_rank == 1 and b_rank == 1 and sem_score >= exploratory_threshold:
             confidence = "high_confidence"
         elif sem_score >= HIGH_CONFIDENCE_THRESHOLD:
             confidence = "high_confidence"
-        elif sem_score >= exploratory_threshold or bm25_score > 0:
+        elif (
+            d_rank == 1
+            and b_rank == 1
+            and sem_score >= exploratory_threshold
+            and (keyword_coverage >= 0.50 or sem_score >= 0.60)
+        ):
+            confidence = "high_confidence"
+        elif sem_score >= 0.55:
+            confidence = "exploratory"
+        elif intent_type == "exact_name" and b_rank == 1 and bm25_score >= 8.0:
+            confidence = "exploratory"
+        elif sem_score >= exploratory_threshold:
+            if total_kw <= 2 and (bm25_score >= 5.0 or keyword_coverage >= 0.50):
+                confidence = "exploratory"
+            elif total_kw > 2 and keyword_coverage >= 0.50 and bm25_score >= 8.0:
+                confidence = "exploratory"
+            else:
+                confidence = "abstain"
+        elif bm25_score >= 20.0 and keyword_coverage >= 0.75:
             confidence = "exploratory"
         else:
             confidence = "abstain"
@@ -1603,6 +1668,14 @@ def _rank_hybrid_entries_prepared(
                 fusion_score += 0.05
                 why.append(f"promoted declared replacement for {alternative_target}")
 
+        if primary_language:
+            cand_lang = cache.get("language")
+            cand_alias = cache.get("language_alias")
+            if cand_alias == primary_language:
+                why.append(f"matched primary language: {cand_lang}")
+            elif cand_alias and cand_alias != primary_language:
+                why.append(f"penalized cross-language conflict ({cand_lang} vs {primary_language})")
+
         if exact_identity:
             why.append("matched exact repository identity")
         elif intent_type == "exact_name" and b_rank == 1:
@@ -1615,12 +1688,6 @@ def _rank_hybrid_entries_prepared(
             why.append(f"ranked by BM25 sparse keyword match (BM25 rank #{b_rank})")
         else:
             why.append("ranked by semantic similarity")
-
-        matched_terms = sorted(
-            token
-            for token in query_ctx["keyword_tokens"]
-            if query_ctx["expanded_keyword_map"][token] & cache["text_tokens"]
-        )
 
         identity_match = (
             "exact" if exact_identity else "contextual" if contextual_identity else None
@@ -1635,6 +1702,12 @@ def _rank_hybrid_entries_prepared(
             diagnostics["alternative_target_penalty"] = alternative_target
         if replaces_promoted:
             diagnostics["replaces_promotion"] = alternative_target
+        if (
+            primary_language
+            and cache.get("language_alias")
+            and cache.get("language_alias") != primary_language
+        ):
+            diagnostics["cross_language_penalty"] = f"{cache.get('language')} vs {primary_language}"
 
         item = {
             "repo_id": entry.get("repo_id"),
@@ -1662,6 +1735,7 @@ def _rank_hybrid_entries_prepared(
             "diagnostics": diagnostics,
             "why": why,
             "_identity_pin": bool(exact_identity),
+            "_identity_stars": int(cache.get("stars") or 0) if exact_identity else 0,
         }
         results.append(item)
 
@@ -1669,6 +1743,7 @@ def _rank_hybrid_entries_prepared(
     results.sort(
         key=lambda item: (
             1 if item.get("_identity_pin") else 0,
+            item.get("_identity_stars", 0),
             item["score"],
             item["semantic_score"],
             str(item.get("repo_id") or ""),

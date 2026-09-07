@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from collections.abc import Callable
@@ -1783,7 +1784,33 @@ class PreparedIndex:
         repo_ids = tuple(str(entry.get("repo_id") or "") for entry in entries)
         repo_id_to_index = {repo_id: idx for idx, repo_id in enumerate(repo_ids) if repo_id}
         metadata_caches = [_precompute_entry_cache(entry) for entry in entries]
-        bm25_index = BM25Index.build_from_entries(entries)
+
+        bm25_index: BM25Index | None = None
+        if isinstance(index.get("_bm25_index"), BM25Index):
+            bm25_index = index["_bm25_index"]
+        elif isinstance(index.get("_bm25"), dict):
+            try:
+                loaded_bm25 = BM25Index.from_dict(index["_bm25"])
+                if loaded_bm25.doc_count == len(entries):
+                    bm25_index = loaded_bm25
+            except Exception:
+                bm25_index = None
+        elif index.get("_bm25_path"):
+            try:
+                from pathlib import Path
+
+                bm25_path = Path(index["_bm25_path"])
+                if bm25_path.is_file():
+                    bm25_raw = json.loads(bm25_path.read_text(encoding="utf-8"))
+                    if isinstance(bm25_raw, dict):
+                        loaded_bm25 = BM25Index.from_dict(bm25_raw)
+                        if loaded_bm25.doc_count == len(entries):
+                            bm25_index = loaded_bm25
+            except Exception:
+                bm25_index = None
+
+        if bm25_index is None:
+            bm25_index = BM25Index.build_from_entries(entries)
 
         return cls(
             raw_index=index,
@@ -1868,7 +1895,14 @@ def prepare_index(
             ensure_index_matches_model(index, config)
         return index
     if isinstance(index, dict):
-        return PreparedIndex.from_dict(index, config, mmap=mmap)
+        cached_prep = index.get("_prepared_index")
+        if isinstance(cached_prep, PreparedIndex):
+            if config is not None:
+                ensure_index_matches_model(cached_prep, config)
+            return cached_prep
+        prepared = PreparedIndex.from_dict(index, config, mmap=mmap)
+        index["_prepared_index"] = prepared
+        return prepared
     raise IndexMismatchError(
         f"Index must be a dictionary or PreparedIndex, got {type(index).__name__}"
     )

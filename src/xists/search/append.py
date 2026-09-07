@@ -17,6 +17,7 @@ from xists.profile.llm import (
     llm_config_from_env,
 )
 from xists.records import RECORD_SCHEMA_VERSION, normalize_llm_profile
+from xists.search.bm25 import BM25Index
 from xists.search.embed import (
     EmbeddingConfig,
     call_embeddings,
@@ -211,7 +212,7 @@ def append_records_to_index(
                         existing_records.append(r)
                         existing_rec_map[rid_low] = len(existing_records) - 1
 
-    # 6. Save updated index and records atomically
+    # 6. Save updated index, BM25 index, and records atomically
     index_doc["dimension"] = dimension
     index_doc["record_count"] = len(existing_vectors_entries)
     index_doc["vectors"] = existing_vectors_entries
@@ -219,7 +220,21 @@ def append_records_to_index(
     if "_matrix" in index_doc:
         index_doc["_matrix"] = matrix
 
-    save_index(idx_path, index_doc, matrix=matrix, version=index_version)
+    bm25_index: BM25Index | None = None
+    if index_doc.get("_bm25_path"):
+        try:
+            bm25_raw = json.loads(Path(index_doc["_bm25_path"]).read_text(encoding="utf-8"))
+            bm25_index = BM25Index.from_dict(bm25_raw)
+        except Exception:
+            bm25_index = None
+
+    if bm25_index is not None and updated_count == 0 and added_count > 0:
+        added_entries = existing_vectors_entries[-added_count:]
+        bm25_index.append_entries(added_entries)
+    elif added_count > 0 or updated_count > 0:
+        bm25_index = BM25Index.build_from_entries(existing_vectors_entries)
+
+    save_index(idx_path, index_doc, matrix=matrix, bm25_index=bm25_index, version=index_version)
 
     if rec_path:
         temp_rec_path = rec_path.with_name(f".{rec_path.name}.tmp.{datetime.now().timestamp()}")

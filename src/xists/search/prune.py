@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+from xists.search.bm25 import BM25Index
 from xists.search.index import (
     INDEX_VERSION,
     decode_vector,
@@ -141,7 +142,26 @@ def prune_index(
         if "_matrix" in index_doc:
             index_doc["_matrix"] = retained_matrix
 
-        save_index(idx_path, index_doc, matrix=retained_matrix, version=index_version)
+        bm25_index: BM25Index | None = None
+        if index_doc.get("_bm25_path"):
+            try:
+                bm25_raw = json.loads(Path(index_doc["_bm25_path"]).read_text(encoding="utf-8"))
+                bm25_index = BM25Index.from_dict(bm25_raw)
+            except Exception:
+                bm25_index = None
+
+        if bm25_index is not None:
+            pruned_bm25 = bm25_index.prune_indices(keep_indices)
+        else:
+            pruned_bm25 = BM25Index.build_from_entries(retained_entries)
+
+        save_index(
+            idx_path,
+            index_doc,
+            matrix=retained_matrix,
+            bm25_index=pruned_bm25,
+            version=index_version,
+        )
 
         if rec_path and existing_records:
             retained_records = [

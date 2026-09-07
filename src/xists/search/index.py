@@ -184,13 +184,14 @@ def save_index(
     index: dict[str, Any],
     *,
     matrix: np.ndarray | None = None,
+    bm25_index: Any = None,
     version: int = INDEX_VERSION,
 ) -> None:
     """Save an index document to disk.
 
     For INDEX_VERSION = 4 (default), metadata is saved to JSON and the
     vector matrix is saved as a sidecar binary file (<stem>.vectors.npy) for
-    fast mmap loading.
+    fast mmap loading. A BM25 sparse index is saved as <stem>.bm25.json.
     For INDEX_VERSION = 3, a single JSON document with Base64-encoded vectors
     is written.
     """
@@ -242,6 +243,29 @@ def save_index(
             }
             clean_vectors.append(clean_entry)
 
+        # BM25 sidecar serialization
+        bm25_data: dict[str, Any] | None = None
+        if bm25_index is not None:
+            bm25_data = bm25_index.to_dict() if hasattr(bm25_index, "to_dict") else bm25_index
+        elif "_bm25_index" in index and hasattr(index["_bm25_index"], "to_dict"):
+            bm25_data = index["_bm25_index"].to_dict()
+        elif "_bm25" in index and isinstance(index["_bm25"], dict):
+            bm25_data = index["_bm25"]
+        elif clean_vectors:
+            from xists.search.bm25 import BM25Index
+
+            bm25_data = BM25Index.build_from_entries(clean_vectors).to_dict()
+
+        bm25_filename: str | None = None
+        if bm25_data is not None:
+            bm25_filename = f"{file_path.stem}.bm25.json"
+            bm25_path = file_path.with_name(bm25_filename)
+            temp_bm25_path = bm25_path.with_name(
+                f".{bm25_path.name}.tmp.{datetime.now().timestamp()}"
+            )
+            temp_bm25_path.write_text(json.dumps(bm25_data, ensure_ascii=False), encoding="utf-8")
+            temp_bm25_path.replace(bm25_path)
+
         clean_document = {
             "index_version": 4,
             "record_schema_version": index.get("record_schema_version", RECORD_SCHEMA_VERSION),
@@ -258,6 +282,7 @@ def save_index(
             "skipped": index.get("skipped", []),
             "vectors_normalized": True,
             "vectors_file": vectors_filename,
+            "bm25_file": bm25_filename,
             "vectors": clean_vectors,
         }
         temp_json_path = file_path.with_name(f".{file_path.name}.tmp.{datetime.now().timestamp()}")
@@ -312,14 +337,19 @@ def load_index(path: Path | str, *, mmap: bool = True) -> dict[str, Any]:
         return doc
 
     index_version = doc.get("index_version")
-    if index_version == 4 and "vectors_file" in doc:
-        vectors_path = file_path.parent / doc["vectors_file"]
-        if vectors_path.is_file():
-            try:
-                matrix = np.load(vectors_path, mmap_mode="r" if mmap else None)
-                doc["_matrix"] = matrix
-                doc["_vectors_path"] = str(vectors_path)
-                doc["_mmap"] = bool(mmap)
-            except Exception:
-                pass
+    if index_version == 4:
+        if "vectors_file" in doc:
+            vectors_path = file_path.parent / doc["vectors_file"]
+            if vectors_path.is_file():
+                try:
+                    matrix = np.load(vectors_path, mmap_mode="r" if mmap else None)
+                    doc["_matrix"] = matrix
+                    doc["_vectors_path"] = str(vectors_path)
+                    doc["_mmap"] = bool(mmap)
+                except Exception:
+                    pass
+        if "bm25_file" in doc and doc["bm25_file"]:
+            bm25_path = file_path.parent / doc["bm25_file"]
+            if bm25_path.is_file():
+                doc["_bm25_path"] = str(bm25_path)
     return doc

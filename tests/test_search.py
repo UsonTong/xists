@@ -2087,6 +2087,9 @@ def test_prepared_index_mmap_mode_and_zero_copy(tmp_path):
     # 3. Ranking produces exact same results
     res_mmap = rank("fastapi", prep_mmap, CONFIG, embed=lambda c, q: [0.6, 0.8])
     res_no_mmap = rank("fastapi", prep_no_mmap, CONFIG, embed=lambda c, q: [0.6, 0.8])
-    assert res_mmap["results"][0]["repo_id"] == res_no_mmap["results"][0]["repo_id"] == "fastapi/fastapi"
+    assert (
+        res_mmap["results"][0]["repo_id"]
+        == res_no_mmap["results"][0]["repo_id"]
+        == "fastapi/fastapi"
+    )
     assert res_mmap["results"][0]["score"] == pytest.approx(res_no_mmap["results"][0]["score"])
-

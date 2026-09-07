@@ -169,6 +169,7 @@ class BM25Index:
         old_count = self.doc_count
         new_count = old_count + len(new_entries)
         new_doc_lengths: list[float] = []
+        added_postings: dict[str, tuple[list[int], list[float]]] = {}
 
         for sub_idx, entry in enumerate(new_entries):
             doc_idx = old_count + sub_idx
@@ -179,21 +180,31 @@ class BM25Index:
 
             term_counts = Counter(tokens)
             for term, count in term_counts.items():
-                if term in self.postings:
-                    posting = self.postings[term]
-                    new_doc_indices = np.append(posting.doc_indices, np.int32(doc_idx))
-                    new_term_freqs = np.append(posting.term_freqs, np.float32(count))
-                    self.postings[term] = BM25Posting(
-                        doc_indices=new_doc_indices,
-                        term_freqs=new_term_freqs,
-                        idf=posting.idf,
-                    )
-                else:
-                    self.postings[term] = BM25Posting(
-                        doc_indices=np.array([doc_idx], dtype=np.int32),
-                        term_freqs=np.array([float(count)], dtype=np.float32),
-                        idf=0.0,
-                    )
+                if term not in added_postings:
+                    added_postings[term] = ([], [])
+                added_postings[term][0].append(doc_idx)
+                added_postings[term][1].append(float(count))
+
+        for term, (added_docs, added_freqs) in added_postings.items():
+            if term in self.postings:
+                posting = self.postings[term]
+                new_doc_indices = np.concatenate(
+                    [posting.doc_indices, np.asarray(added_docs, dtype=np.int32)]
+                )
+                new_term_freqs = np.concatenate(
+                    [posting.term_freqs, np.asarray(added_freqs, dtype=np.float32)]
+                )
+                self.postings[term] = BM25Posting(
+                    doc_indices=new_doc_indices,
+                    term_freqs=new_term_freqs,
+                    idf=posting.idf,
+                )
+            else:
+                self.postings[term] = BM25Posting(
+                    doc_indices=np.asarray(added_docs, dtype=np.int32),
+                    term_freqs=np.asarray(added_freqs, dtype=np.float32),
+                    idf=0.0,
+                )
 
         if len(self.doc_lengths) > 0:
             self.doc_lengths = np.concatenate(
@@ -218,30 +229,58 @@ class BM25Index:
                 b=self.b,
             )
 
-        remap: dict[int, int] = {old_idx: new_idx for new_idx, old_idx in enumerate(keep_indices)}
+        new_doc_count = len(keep_indices)
+        remap_lut = np.full(self.doc_count, -1, dtype=np.int32)
+        remap_lut[keep_indices] = np.arange(new_doc_count, dtype=np.int32)
+        remap_list = remap_lut.tolist()
+
         new_doc_lengths = (
             self.doc_lengths[keep_indices]
             if len(self.doc_lengths) > 0
             else np.zeros(0, dtype=np.float32)
         )
-        new_doc_count = len(keep_indices)
         new_avgdl = float(np.mean(new_doc_lengths)) if len(new_doc_lengths) > 0 else 0.0
 
         new_postings: dict[str, BM25Posting] = {}
+        idf_cache: dict[int, float] = {}
+
         for term, posting in self.postings.items():
-            mask = np.isin(posting.doc_indices, keep_indices)
-            if not np.any(mask):
+            doc_ids = posting.doc_indices
+            freqs = posting.term_freqs
+
+            # Fast path for single-document postings (vast majority in sparse vocabularies)
+            if len(doc_ids) == 1:
+                old_id = int(doc_ids[0])
+                new_id = remap_list[old_id]
+                if new_id >= 0:
+                    idf = idf_cache.get(1)
+                    if idf is None:
+                        idf = float(math.log(1.0 + (new_doc_count - 0.5) / 1.5))
+                        idf_cache[1] = idf
+                    new_postings[term] = BM25Posting(
+                        doc_indices=np.array([new_id], dtype=np.int32),
+                        term_freqs=freqs,
+                        idf=idf,
+                    )
                 continue
-            filtered_doc_ids = posting.doc_indices[mask]
-            filtered_freqs = posting.term_freqs[mask]
-            remapped_doc_ids = np.array(
-                [remap[int(doc_id)] for doc_id in filtered_doc_ids], dtype=np.int32
-            )
-            n_q = len(remapped_doc_ids)
-            idf = float(math.log(1.0 + (new_doc_count - n_q + 0.5) / (n_q + 0.5)))
+
+            # Multi-document postings
+            remapped_ids = [remap_list[int(doc_id)] for doc_id in doc_ids]
+            valid_pairs = [
+                (new_id, freqs[i]) for i, new_id in enumerate(remapped_ids) if new_id >= 0
+            ]
+            if not valid_pairs:
+                continue
+
+            n_q = len(valid_pairs)
+            idf = idf_cache.get(n_q)
+            if idf is None:
+                idf = float(math.log(1.0 + (new_doc_count - n_q + 0.5) / (n_q + 0.5)))
+                idf_cache[n_q] = idf
+
             new_postings[term] = BM25Posting(
-                doc_indices=remapped_doc_ids,
-                term_freqs=filtered_freqs,
+                doc_indices=np.array([p[0] for p in valid_pairs], dtype=np.int32),
+                term_freqs=np.array([p[1] for p in valid_pairs], dtype=np.float32),
                 idf=idf,
             )
 

@@ -144,29 +144,30 @@ def benchmark_mmap_loading(
 
 def benchmark_bm25_incremental(entries: list[dict[str, Any]]) -> dict[str, Any]:
     """Measure performance of incremental BM25 append and prune vs full rebuild."""
-    initial_entries = entries[:4500]
-    appended_entries = entries[4500:]
+    split_idx = int(len(entries) * 0.9)
+    initial_entries = entries[:split_idx]
+    appended_entries = entries[split_idx:]
 
     # 1. Build initial index
     bm25 = BM25Index.build_from_entries(initial_entries)
 
-    # 2. Incremental append (500 docs)
+    # 2. Incremental append (10% batch)
     t0 = time.perf_counter()
     bm25.append_entries(appended_entries)
     incr_append_ms = (time.perf_counter() - t0) * 1000
 
-    # 3. Full rebuild of 5000 items
+    # 3. Full rebuild of all items
     t0 = time.perf_counter()
     BM25Index.build_from_entries(entries)
     full_rebuild_ms = (time.perf_counter() - t0) * 1000
 
-    # 4. Incremental lifecycle prune (prune 5% archived / stale repos, retaining 4750 items)
+    # 4. Incremental lifecycle prune (prune 5% archived / stale repos)
     lifecycle_keep_indices = [i for i in range(len(entries)) if (i % 20) != 0]
     t0 = time.perf_counter()
     bm25.prune_indices(lifecycle_keep_indices)
     lifecycle_prune_ms = (time.perf_counter() - t0) * 1000
 
-    # 5. Full rebuild of 4750 items
+    # 5. Full rebuild of pruned items
     lifecycle_pruned_entries = [entries[i] for i in lifecycle_keep_indices]
     t0 = time.perf_counter()
     BM25Index.build_from_entries(lifecycle_pruned_entries)
@@ -300,12 +301,12 @@ def main() -> int:
         print("2. Benchmarking BM25 incremental lifecycle sync...")
         bm25_res = benchmark_bm25_incremental(entries)
         print(
-            f"   - Append (500 docs): Incremental {bm25_res['append_comparison']['incremental_append_ms']} ms "
+            f"   - Append ({bm25_res['append_batch_size']} docs): Incremental {bm25_res['append_comparison']['incremental_append_ms']} ms "
             f"vs Full Rebuild {bm25_res['append_comparison']['full_rebuild_ms']} ms "
             f"=> Speedup: {bm25_res['append_comparison']['speedup']}x"
         )
         print(
-            f"   - Prune (5% archived): Incremental {bm25_res['lifecycle_prune_comparison']['incremental_prune_ms']} ms "
+            f"   - Prune ({bm25_res['lifecycle_prune_comparison']['pruned_docs']} docs): Incremental {bm25_res['lifecycle_prune_comparison']['incremental_prune_ms']} ms "
             f"vs Full Rebuild {bm25_res['lifecycle_prune_comparison']['full_rebuild_ms']} ms "
             f"=> Speedup: {bm25_res['lifecycle_prune_comparison']['speedup']}x\n"
         )

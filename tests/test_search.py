@@ -2053,3 +2053,40 @@ def test_filters_across_all_ranking_strategies():
     )
     assert len(batch_res[0]["results"]) == 1
     assert batch_res[0]["results"][0]["repo_id"] == "fastapi/fastapi"
+
+
+def test_prepared_index_mmap_mode_and_zero_copy(tmp_path):
+    index_file = tmp_path / "mmap_index.json"
+    doc = make_index(
+        [
+            {"repo_id": "fastapi/fastapi", "vector": [3.0, 4.0], "metadata": {"name": "fastapi"}},
+            {"repo_id": "expressjs/express", "vector": [0.0, 5.0], "metadata": {"name": "express"}},
+        ]
+    )
+
+    save_index(index_file, doc, version=4)
+
+    # 1. Load with mmap=True (default)
+    loaded_mmap = load_index(index_file, mmap=True)
+    assert loaded_mmap.get("_mmap") is True
+    prep_mmap = prepare_index(loaded_mmap, CONFIG)
+    assert isinstance(prep_mmap, PreparedIndex)
+    assert prep_mmap.is_mmap is True
+    # Verify zero-copy: normalized_matrix points to the same underlying mmap array
+    assert prep_mmap.normalized_matrix is prep_mmap.matrix
+    assert np.allclose(prep_mmap.normalized_matrix[0], [0.6, 0.8])
+    assert np.allclose(prep_mmap.normalized_matrix[1], [0.0, 1.0])
+
+    # 2. Load with mmap=False
+    loaded_no_mmap = load_index(index_file, mmap=False)
+    assert loaded_no_mmap.get("_mmap") is False
+    prep_no_mmap = prepare_index(loaded_no_mmap, CONFIG)
+    assert prep_no_mmap.is_mmap is False
+    assert np.allclose(prep_no_mmap.normalized_matrix[0], [0.6, 0.8])
+
+    # 3. Ranking produces exact same results
+    res_mmap = rank("fastapi", prep_mmap, CONFIG, embed=lambda c, q: [0.6, 0.8])
+    res_no_mmap = rank("fastapi", prep_no_mmap, CONFIG, embed=lambda c, q: [0.6, 0.8])
+    assert res_mmap["results"][0]["repo_id"] == res_no_mmap["results"][0]["repo_id"] == "fastapi/fastapi"
+    assert res_mmap["results"][0]["score"] == pytest.approx(res_no_mmap["results"][0]["score"])
+

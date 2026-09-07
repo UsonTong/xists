@@ -19,15 +19,17 @@ from xists.search.similar import find_similar_prepared
 from xists.types import CompareResponse, SearchFilter, SimilarResponse
 
 
-def load_index(path: str | Path) -> dict[str, Any]:
+def load_index(path: str | Path, *, mmap: bool = True) -> dict[str, Any]:
     """Load an index document from *path*.
 
     The returned value is the JSON-compatible index document, unchanged from
-    its on-disk representation.  Invalid JSON and filesystem errors are
-    intentionally allowed to reach the caller with their original context.
+    its on-disk representation. If mmap is True (default) and a version 4
+    binary vector sidecar exists, vectors are memory-mapped for zero-copy loading.
+    Invalid JSON and filesystem errors are intentionally allowed to reach the
+    caller with their original context.
     """
 
-    return _load_index(Path(path))
+    return _load_index(Path(path), mmap=mmap)
 
 
 def search(

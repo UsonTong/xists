@@ -1708,11 +1708,18 @@ class PreparedIndex:
 
         return mask
 
+    @property
+    def is_mmap(self) -> bool:
+        """Return True if the underlying vector matrix is memory-mapped."""
+        return isinstance(self.matrix, np.memmap)
+
     @classmethod
     def from_dict(
         cls,
         index: dict[str, Any],
         config: EmbeddingConfig | None = None,
+        *,
+        mmap: bool = True,
     ) -> PreparedIndex:
         if config is not None:
             ensure_index_matches_model(index, config)
@@ -1723,13 +1730,15 @@ class PreparedIndex:
         entries = [entry for entry in index.get("vectors", []) if isinstance(entry, dict)]
 
         if index.get("_matrix") is not None:
-            matrix = np.asarray(index["_matrix"], dtype=np.float32)
+            matrix = index["_matrix"]
+            if not isinstance(matrix, np.ndarray):
+                matrix = np.asarray(matrix, dtype=np.float32)
             if matrix.shape != (len(entries), dimension or 0):
                 raise IndexMismatchError(
                     f"Index vector matrix shape {matrix.shape} does not match entries count {len(entries)} and dimension {dimension}"
                 )
         elif index.get("index_version") == 4 and index.get("_vectors_path"):
-            matrix = np.load(index["_vectors_path"], mmap_mode="r")
+            matrix = np.load(index["_vectors_path"], mmap_mode="r" if mmap else None)
             if matrix.shape != (len(entries), dimension or 0):
                 raise IndexMismatchError(
                     f"Index vector matrix shape {matrix.shape} does not match entries count {len(entries)} and dimension {dimension}"
@@ -1753,10 +1762,21 @@ class PreparedIndex:
         if len(matrix) > 0:
             if matrix.ndim != 2:
                 raise IndexMismatchError("Index vectors must be a two-dimensional matrix")
-            norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-            normalized_matrix = np.divide(
-                matrix, norms, out=np.zeros_like(matrix), where=norms != 0
-            )
+            if index.get("vectors_normalized") is True:
+                normalized_matrix = matrix
+            else:
+                sample_size = min(len(matrix), 16)
+                sample_norms = np.linalg.norm(matrix[:sample_size], axis=1)
+                if np.allclose(sample_norms, 1.0, atol=1e-3) and (
+                    len(matrix) <= sample_size
+                    or np.allclose(np.linalg.norm(matrix, axis=1), 1.0, atol=1e-3)
+                ):
+                    normalized_matrix = matrix
+                else:
+                    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+                    normalized_matrix = np.divide(
+                        matrix, norms, out=np.zeros_like(matrix), where=norms != 0
+                    )
         else:
             normalized_matrix = np.empty((0, dimension or 0), dtype=np.float32)
 
@@ -1838,6 +1858,8 @@ class PreparedIndex:
 def prepare_index(
     index: dict[str, Any] | PreparedIndex,
     config: EmbeddingConfig | None = None,
+    *,
+    mmap: bool = True,
 ) -> PreparedIndex:
     """Ensure an index is in the accelerated in-memory PreparedIndex format."""
 
@@ -1846,7 +1868,7 @@ def prepare_index(
             ensure_index_matches_model(index, config)
         return index
     if isinstance(index, dict):
-        return PreparedIndex.from_dict(index, config)
+        return PreparedIndex.from_dict(index, config, mmap=mmap)
     raise IndexMismatchError(
         f"Index must be a dictionary or PreparedIndex, got {type(index).__name__}"
     )

@@ -156,11 +156,12 @@ def build_index(
                 }
             )
 
-    matrix = (
-        np.asarray(raw_vectors, dtype=np.float32)
-        if raw_vectors
-        else np.empty((0, dimension or 0), dtype=np.float32)
-    )
+    if raw_vectors:
+        matrix = np.asarray(raw_vectors, dtype=np.float32)
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        matrix = np.divide(matrix, norms, out=np.zeros_like(matrix), where=norms != 0)
+    else:
+        matrix = np.empty((0, dimension or 0), dtype=np.float32)
 
     return {
         "index_version": INDEX_VERSION,
@@ -172,6 +173,7 @@ def build_index(
         "built_at": datetime.now(UTC).isoformat(),
         "record_count": len(vectors),
         "skipped": skipped,
+        "vectors_normalized": True,
         "vectors": vectors,
         "_matrix": matrix,
     }
@@ -216,6 +218,13 @@ def save_index(
             else:
                 vec_matrix = np.empty((0, dimension or 0), dtype=np.float32)
 
+        if len(vec_matrix) > 0 and vec_matrix.ndim == 2:
+            norms = np.linalg.norm(vec_matrix, axis=1, keepdims=True)
+            if not np.allclose(norms, 1.0, atol=1e-3):
+                vec_matrix = np.divide(
+                    vec_matrix, norms, out=np.zeros_like(vec_matrix), where=norms != 0
+                )
+
         # Atomic write of sidecar .npy
         temp_vec_path = vectors_path.with_name(
             f".{vectors_path.name}.tmp.{datetime.now().timestamp()}"
@@ -247,6 +256,7 @@ def save_index(
             "built_at": index.get("built_at") or datetime.now(UTC).isoformat(),
             "record_count": len(clean_vectors),
             "skipped": index.get("skipped", []),
+            "vectors_normalized": True,
             "vectors_file": vectors_filename,
             "vectors": clean_vectors,
         }
@@ -309,6 +319,7 @@ def load_index(path: Path | str, *, mmap: bool = True) -> dict[str, Any]:
                 matrix = np.load(vectors_path, mmap_mode="r" if mmap else None)
                 doc["_matrix"] = matrix
                 doc["_vectors_path"] = str(vectors_path)
+                doc["_mmap"] = bool(mmap)
             except Exception:
                 pass
     return doc

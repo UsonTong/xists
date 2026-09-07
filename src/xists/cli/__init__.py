@@ -737,6 +737,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional English canonical query mode: off, canonical, or merge (default: off)",
     )
     search_parser.add_argument(
+        "--filter",
+        "-f",
+        type=str,
+        default=None,
+        dest="filter_expr",
+        help="Composite boolean filter expression (e.g. '(lang:python OR lang:rust) AND stars:>1000')",
+    )
+    search_parser.add_argument(
         "--language",
         "-l",
         type=str,
@@ -800,6 +808,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     similar_parser.add_argument(
         "--top-k", type=int, default=10, help="Maximum number of similar results to return"
+    )
+    similar_parser.add_argument(
+        "--filter",
+        "-f",
+        type=str,
+        default=None,
+        dest="filter_expr",
+        help="Composite boolean filter expression (e.g. '(lang:python OR lang:rust) AND stars:>1000')",
     )
     similar_parser.add_argument(
         "--language",

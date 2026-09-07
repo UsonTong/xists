@@ -147,7 +147,7 @@ def find_similar_prepared(
     prepared: PreparedIndex,
     *,
     top_k: int = 10,
-    filters: SearchFilter | dict[str, Any] | None = None,
+    filters: SearchFilter | dict[str, Any] | str | None = None,
 ) -> SimilarResponse:
     """Find top-k similar repositories using precomputed embeddings in PreparedIndex."""
     start_time = time.perf_counter()

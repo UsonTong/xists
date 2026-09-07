@@ -46,7 +46,7 @@ def search(
     confidence_calibration: str = "off",
     query_variants: list[str] | None = None,
     rerank_query: str | None = None,
-    filters: SearchFilter | dict[str, Any] | None = None,
+    filters: SearchFilter | dict[str, Any] | str | None = None,
 ) -> dict[str, Any]:
     """Search an in-memory index using an explicitly configured embedder.
 
@@ -82,7 +82,7 @@ def find_similar(
     index: dict[str, Any] | PreparedIndex,
     *,
     top_k: int = 10,
-    filters: SearchFilter | dict[str, Any] | None = None,
+    filters: SearchFilter | dict[str, Any] | str | None = None,
 ) -> SimilarResponse:
     """Find top-k similar repositories using precomputed embeddings in the index.
 

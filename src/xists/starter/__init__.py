@@ -62,12 +62,16 @@ def starter_metadata_search(
     records: list[dict[str, Any]] | None = None,
     *,
     top_k: int = 5,
-    filters: SearchFilter | dict[str, Any] | None = None,
+    filters: SearchFilter | dict[str, Any] | str | None = None,
 ) -> dict[str, Any]:
     """Offline lexical and metadata search across starter records without API keys."""
     started = perf_counter()
     if records is None:
         records = load_starter_records()
+
+    from xists.search.facets import evaluate_ast_record, parse_filter_criteria
+
+    filter_ast = parse_filter_criteria(filters)
 
     raw_query = query.strip()
     norm_query = raw_query.lower()
@@ -146,81 +150,8 @@ def starter_metadata_search(
         replaces = [str(r).lower() for r in (profile.get("replaces") or []) if isinstance(r, str)]
 
         # Apply constraint filters if provided
-        if filters:
-            min_stars = filters.get("min_stars")
-            if min_stars is not None and stars < int(min_stars):
-                continue
-            max_stars = filters.get("max_stars")
-            if max_stars is not None and stars > int(max_stars):
-                continue
-
-            include_archived = bool(filters.get("include_archived", False))
-            if not include_archived and (
-                github.get("archived") is True or github.get("disabled") is True
-            ):
-                continue
-
-            lang_filter = filters.get("language")
-            if lang_filter is not None and isinstance(lang_filter, str) and lang_filter.strip():
-                target_lang = lang_filter.strip().lower()
-                if target_lang in ("py", "python"):
-                    if language not in ("python", "py"):
-                        continue
-                elif target_lang in ("js", "javascript"):
-                    if language not in ("javascript", "js"):
-                        continue
-                elif target_lang in ("ts", "typescript"):
-                    if language not in ("typescript", "ts"):
-                        continue
-                elif target_lang in ("c++", "cpp"):
-                    if language not in ("c++", "cpp"):
-                        continue
-                elif target_lang in ("c#", "csharp"):
-                    if language not in ("c#", "csharp"):
-                        continue
-                elif target_lang in ("golang", "go"):
-                    if language not in ("go", "golang"):
-                        continue
-                elif target_lang != language and target_lang not in language:
-                    continue
-
-            lic_filter = filters.get("license")
-            if lic_filter is not None and isinstance(lic_filter, str) and lic_filter.strip():
-                target_lic = lic_filter.strip().lower()
-                record_lic = str(github.get("license") or "").strip().lower()
-                if not record_lic or (target_lic != record_lic and target_lic not in record_lic):
-                    continue
-
-            eco_filter = filters.get("ecosystem")
-            if eco_filter is not None:
-                if isinstance(eco_filter, str):
-                    target_ecos = {eco_filter.strip().lower()} if eco_filter.strip() else set()
-                elif isinstance(eco_filter, (list, tuple, set)):
-                    target_ecos = {str(e).strip().lower() for e in eco_filter if str(e).strip()}
-                else:
-                    target_ecos = set()
-                record_ecos = {str(e).strip().lower() for e in ecosystem if str(e).strip()}
-                if target_ecos and not (target_ecos & record_ecos):
-                    continue
-
-            pt_filter = filters.get("project_type")
-            if pt_filter is not None and isinstance(pt_filter, str) and pt_filter.strip():
-                target_pt = pt_filter.strip().lower().replace("-", "_").replace(" ", "_")
-                record_pt = project_type.replace("-", "_").replace(" ", "_")
-                if not record_pt or (target_pt != record_pt and target_pt not in record_pt):
-                    continue
-
-            topics_filter = filters.get("topics")
-            if topics_filter is not None:
-                if isinstance(topics_filter, str):
-                    req_topics = {topics_filter.strip().lower()} if topics_filter.strip() else set()
-                elif isinstance(topics_filter, (list, tuple, set)):
-                    req_topics = {str(t).strip().lower() for t in topics_filter if str(t).strip()}
-                else:
-                    req_topics = set()
-                record_topics = {str(t).strip().lower() for t in topics if str(t).strip()}
-                if req_topics and not req_topics.issubset(record_topics):
-                    continue
+        if filter_ast is not None and not evaluate_ast_record(filter_ast, record):
+            continue
 
         score = 0.0
         matched_terms: set[str] = set()

@@ -100,7 +100,9 @@ def _format_search_text(
         lines, "Query", str(result.get("query") or ""), width=width, stream=stream
     )
     active_filters = result.get("filters")
-    if isinstance(active_filters, dict) and active_filters:
+    if isinstance(active_filters, str) and active_filters.strip():
+        _append_search_detail(lines, "Filters", active_filters.strip(), width=width, stream=stream)
+    elif isinstance(active_filters, dict) and active_filters:
         filter_parts: list[str] = []
         for key, val in active_filters.items():
             if val is not None and val is not False:
@@ -177,6 +179,8 @@ def search(args: argparse.Namespace) -> int:
     offline_mode = getattr(args, "offline", False)
 
     filters: dict[str, Any] = {}
+    if getattr(args, "filter_expr", None) is not None:
+        filters["expr"] = args.filter_expr
     if getattr(args, "language", None) is not None:
         filters["language"] = args.language
     if getattr(args, "ecosystem", None) is not None:

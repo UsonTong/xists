@@ -110,6 +110,7 @@ class SearchFilter(TypedDict, total=False):
     license: str | None
     topics: list[str] | str | None
     include_archived: bool
+    expr: str | None
 
 
 class SearchResultItem(TypedDict, total=False):
@@ -133,7 +134,7 @@ class SearchResponse(TypedDict, total=False):
 
     query: str
     query_intent: QueryIntent | dict[str, Any]
-    filters: SearchFilter | dict[str, Any] | None
+    filters: SearchFilter | dict[str, Any] | str | None
     abstained: bool
     total_candidates: int
     considered: int
@@ -170,7 +171,7 @@ class SimilarResponse(TypedDict, total=False):
     total_candidates: int
     considered: int
     results: list[SimilarResultItem]
-    filters: SearchFilter | dict[str, Any] | None
+    filters: SearchFilter | dict[str, Any] | str | None
     latency_ms: float
     elapsed_ms: float
 

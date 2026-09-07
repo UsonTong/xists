@@ -509,6 +509,7 @@ def _precompute_entry_cache(entry: dict[str, Any]) -> dict[str, Any]:
     )
     license_lower = str(metadata.get("license") or "").strip().lower()
     stars = int(_numeric_metadata_value(metadata.get("stars")) or 0)
+    forks = int(_numeric_metadata_value(metadata.get("forks")) or 0)
     archived = bool(metadata.get("archived") is True)
     disabled = bool(metadata.get("disabled") is True)
 
@@ -532,6 +533,7 @@ def _precompute_entry_cache(entry: dict[str, Any]) -> dict[str, Any]:
         "project_type_norm": project_type_norm,
         "license_lower": license_lower,
         "stars": stars,
+        "forks": forks,
         "archived": archived,
         "disabled": disabled,
     }
@@ -1577,6 +1579,11 @@ class PreparedIndex:
             if metadata_caches
             else np.empty(0, dtype=np.int64)
         )
+        self.forks_array = (
+            np.array([c.get("forks", 0) for c in metadata_caches], dtype=np.int64)
+            if metadata_caches
+            else np.empty(0, dtype=np.int64)
+        )
         self.archived_array = (
             np.array([c["archived"] or c["disabled"] for c in metadata_caches], dtype=bool)
             if metadata_caches
@@ -1584,130 +1591,19 @@ class PreparedIndex:
         )
 
     def compute_filter_mask(
-        self, filters: SearchFilter | dict[str, Any] | None
+        self, filters: SearchFilter | dict[str, Any] | str | None
     ) -> np.ndarray | None:
-        """Compute 1D boolean mask of valid candidate indices under structured filters."""
+        """Compute 1D boolean mask of valid candidate indices under structured filters or boolean expressions."""
         if not filters or not self.entries:
             return None
 
-        # Check if any filter condition is actually active
-        has_active_filter = False
-        for k, v in filters.items():
-            if v is not None and v is not False:
-                has_active_filter = True
-                break
-            if k == "include_archived" and v is False:
-                has_active_filter = True
-                break
-        if not has_active_filter:
+        from xists.search.facets import evaluate_ast_mask, parse_filter_criteria
+
+        ast = parse_filter_criteria(filters)
+        if ast is None:
             return None
 
-        mask = np.ones(len(self.entries), dtype=bool)
-
-        # 1. Star bounds
-        min_stars = filters.get("min_stars")
-        if min_stars is not None:
-            mask &= self.stars_array >= int(min_stars)
-
-        max_stars = filters.get("max_stars")
-        if max_stars is not None:
-            mask &= self.stars_array <= int(max_stars)
-
-        # 2. Archive/disabled exclusion
-        include_archived = bool(filters.get("include_archived", False))
-        if not include_archived:
-            mask &= ~self.archived_array
-
-        # 3. Language filter
-        lang_filter = filters.get("language")
-        if lang_filter is not None and isinstance(lang_filter, str) and lang_filter.strip():
-            target_lang = lang_filter.strip().lower()
-            target_canonical = _metadata_language_alias(target_lang)
-            target_aliases = (
-                LANGUAGE_ALIASES.get(target_canonical, set()) if target_canonical else set()
-            )
-            lang_mask = np.array(
-                [
-                    bool(
-                        (target_canonical and c["language_alias"] == target_canonical)
-                        or (c["language_lower"] in target_aliases)
-                        or (target_lang == c["language_lower"])
-                        or (not target_canonical and target_lang in c["language_lower"])
-                    )
-                    for c in self.metadata_caches
-                ],
-                dtype=bool,
-            )
-            mask &= lang_mask
-
-        # 4. License filter
-        lic_filter = filters.get("license")
-        if lic_filter is not None and isinstance(lic_filter, str) and lic_filter.strip():
-            target_lic = lic_filter.strip().lower()
-            lic_mask = np.array(
-                [
-                    bool(
-                        c["license_lower"]
-                        and (c["license_lower"] == target_lic or target_lic in c["license_lower"])
-                    )
-                    for c in self.metadata_caches
-                ],
-                dtype=bool,
-            )
-            mask &= lic_mask
-
-        # 5. Ecosystem filter
-        eco_filter = filters.get("ecosystem")
-        if eco_filter is not None:
-            if isinstance(eco_filter, str):
-                target_ecos = {eco_filter.strip().lower()} if eco_filter.strip() else set()
-            elif isinstance(eco_filter, (list, tuple, set)):
-                target_ecos = {str(e).strip().lower() for e in eco_filter if str(e).strip()}
-            else:
-                target_ecos = set()
-            if target_ecos:
-                eco_mask = np.array(
-                    [bool(c["ecosystem_set"] & target_ecos) for c in self.metadata_caches],
-                    dtype=bool,
-                )
-                mask &= eco_mask
-
-        # 6. Project type filter
-        pt_filter = filters.get("project_type")
-        if pt_filter is not None and isinstance(pt_filter, str) and pt_filter.strip():
-            target_pt = pt_filter.strip().lower().replace("-", "_").replace(" ", "_")
-            pt_mask = np.array(
-                [
-                    bool(
-                        c["project_type_norm"]
-                        and (
-                            c["project_type_norm"] == target_pt
-                            or target_pt in c["project_type_norm"]
-                        )
-                    )
-                    for c in self.metadata_caches
-                ],
-                dtype=bool,
-            )
-            mask &= pt_mask
-
-        # 7. Topics filter
-        topics_filter = filters.get("topics")
-        if topics_filter is not None:
-            if isinstance(topics_filter, str):
-                req_topics = {topics_filter.strip().lower()} if topics_filter.strip() else set()
-            elif isinstance(topics_filter, (list, tuple, set)):
-                req_topics = {str(t).strip().lower() for t in topics_filter if str(t).strip()}
-            else:
-                req_topics = set()
-            if req_topics:
-                topics_mask = np.array(
-                    [req_topics.issubset(c["topics_set"]) for c in self.metadata_caches],
-                    dtype=bool,
-                )
-                mask &= topics_mask
-
-        return mask
+        return evaluate_ast_mask(ast, self)
 
     @property
     def is_mmap(self) -> bool:
@@ -1932,7 +1828,7 @@ def rank_many(
     confidence_calibration: str = "off",
     query_variants: list[list[str]] | None = None,
     rerank_queries: list[str] | None = None,
-    filters: SearchFilter | dict[str, Any] | None = None,
+    filters: SearchFilter | dict[str, Any] | str | None = None,
 ) -> list[dict[str, Any]]:
     """Rank multiple queries with batched embeddings and matrix similarity."""
 
@@ -2086,7 +1982,7 @@ def rank(
     confidence_calibration: str = "off",
     query_variants: list[str] | None = None,
     rerank_query: str | None = None,
-    filters: SearchFilter | dict[str, Any] | None = None,
+    filters: SearchFilter | dict[str, Any] | str | None = None,
 ) -> dict[str, Any]:
     """Rank index entries against the query."""
 

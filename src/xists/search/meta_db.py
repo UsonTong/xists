@@ -38,13 +38,20 @@ def cache_to_serializable(cache: dict[str, Any]) -> dict[str, Any]:
 def serializable_to_cache(data: dict[str, Any]) -> dict[str, Any]:
     """Reconstitute a precomputed entry cache from a deserialized dictionary with set types."""
     cache = dict(data)
-    cache["identity_values_lower"] = set(data.get("identity_values_lower") or [])
-    cache["text_tokens"] = set(data.get("text_tokens") or [])
-    cache["topic_tokens"] = set(data.get("topic_tokens") or [])
-    cache["profile_tokens"] = set(data.get("profile_tokens") or [])
-    cache["ecosystem_set"] = frozenset(data.get("ecosystem_set") or [])
-    cache["topics_set"] = frozenset(data.get("topics_set") or [])
-    cache["id_value_tokens"] = tuple(data.get("id_value_tokens") or [])
+    id_lower = data.get("identity_values_lower")
+    cache["identity_values_lower"] = set(id_lower) if id_lower else set()
+    text_tok = data.get("text_tokens")
+    cache["text_tokens"] = set(text_tok) if text_tok else set()
+    topic_tok = data.get("topic_tokens")
+    cache["topic_tokens"] = set(topic_tok) if topic_tok else set()
+    prof_tok = data.get("profile_tokens")
+    cache["profile_tokens"] = set(prof_tok) if prof_tok else set()
+    eco_set = data.get("ecosystem_set")
+    cache["ecosystem_set"] = frozenset(eco_set) if eco_set else frozenset()
+    top_set = data.get("topics_set")
+    cache["topics_set"] = frozenset(top_set) if top_set else frozenset()
+    id_tok = data.get("id_value_tokens")
+    cache["id_value_tokens"] = tuple(id_tok) if id_tok else ()
     return cache
 
 
@@ -187,11 +194,11 @@ class MetaDatabase:
         except Exception:
             return None
 
-    def fetch_entries_batch(self, doc_ids: Sequence[int]) -> dict[int, dict[str, Any]]:
+    def fetch_entries_batch(self, doc_ids: Sequence[int | np.integer]) -> dict[int, dict[str, Any]]:
         """Fetch full entry JSON for multiple doc_ids in a single query."""
         if not doc_ids:
             return {}
-        unique_ids = list(set(doc_ids))
+        unique_ids = list({int(i) for i in doc_ids})
         placeholders = ",".join("?" for _ in unique_ids)
         cursor = self.conn.cursor()
         cursor.execute(
@@ -297,3 +304,41 @@ class MetaDatabase:
 
         temp_path.replace(final_path)
         return cls(final_path, read_only=True)
+
+
+class LazyEntriesList(Sequence[dict[str, Any]]):
+    """A memory-efficient lazy sequence that fetches full entry JSON on demand from MetaDatabase."""
+
+    def __init__(self, meta_db: MetaDatabase, repo_ids: Sequence[str]) -> None:
+        self.meta_db = meta_db
+        self.repo_ids = tuple(repo_ids)
+        self._cache: dict[int, dict[str, Any]] = {}
+
+    def __len__(self) -> int:
+        return len(self.repo_ids)
+
+    def __getitem__(self, idx: Any) -> Any:
+        if isinstance(idx, slice):
+            return [self[i] for i in range(*idx.indices(len(self)))]
+        if not isinstance(idx, (int, np.integer)):
+            raise TypeError(f"Index must be integer, not {type(idx).__name__}")
+        int_idx = int(idx)
+        if int_idx < 0:
+            int_idx += len(self.repo_ids)
+        if int_idx < 0 or int_idx >= len(self.repo_ids):
+            raise IndexError(f"Index {int_idx} out of range (length {len(self.repo_ids)})")
+        if int_idx not in self._cache:
+            entry = self.meta_db.fetch_entry(int_idx)
+            if entry is None:
+                entry = {"repo_id": self.repo_ids[int_idx], "metadata": {}}
+            self._cache[int_idx] = entry
+        return self._cache[int_idx]
+
+    def prefetch(self, indices: Sequence[int | np.integer]) -> None:
+        """Batch prefetch multiple entries in a single query."""
+        int_indices = [int(i) for i in indices]
+        missing = [i for i in int_indices if i not in self._cache and 0 <= i < len(self.repo_ids)]
+        if missing:
+            fetched = self.meta_db.fetch_entries_batch(missing)
+            for i in missing:
+                self._cache[i] = fetched.get(i) or {"repo_id": self.repo_ids[i], "metadata": {}}

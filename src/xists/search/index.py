@@ -266,6 +266,40 @@ def save_index(
             temp_bm25_path.write_text(json.dumps(bm25_data, ensure_ascii=False), encoding="utf-8")
             temp_bm25_path.replace(bm25_path)
 
+        # MetaDatabase SQLite sidecar serialization
+        from xists.search.meta_db import MetaDatabase
+        from xists.search.query import _precompute_entry_cache
+
+        caches = index.get("_metadata_caches")
+        if caches is None:
+            caches = [_precompute_entry_cache(entry) for entry in clean_vectors]
+
+        meta_db_filename = f"{file_path.stem}.meta.db"
+        meta_db_path = file_path.with_name(meta_db_filename)
+        meta_manifest = {
+            "index_version": 4,
+            "record_schema_version": index.get("record_schema_version", RECORD_SCHEMA_VERSION),
+            "embedding_model": index.get("embedding_model", ""),
+            "embedding_base_url": index.get("embedding_base_url"),
+            "embedding_input_version": index.get(
+                "embedding_input_version", EMBEDDING_INPUT_VERSION
+            ),
+            "dimension": int(vec_matrix.shape[1])
+            if vec_matrix.ndim == 2 and vec_matrix.shape[1] > 0
+            else index.get("dimension"),
+            "built_at": index.get("built_at") or datetime.now(UTC).isoformat(),
+            "record_count": len(clean_vectors),
+            "vectors_file": vectors_filename,
+            "bm25_file": bm25_filename,
+            "meta_db_file": meta_db_filename,
+        }
+        MetaDatabase.create_from_entries(
+            meta_db_path,
+            manifest=meta_manifest,
+            entries=clean_vectors,
+            caches=caches,
+        )
+
         clean_document = {
             "index_version": 4,
             "record_schema_version": index.get("record_schema_version", RECORD_SCHEMA_VERSION),
@@ -283,6 +317,7 @@ def save_index(
             "vectors_normalized": True,
             "vectors_file": vectors_filename,
             "bm25_file": bm25_filename,
+            "meta_db_file": meta_db_filename,
             "vectors": clean_vectors,
         }
         temp_json_path = file_path.with_name(f".{file_path.name}.tmp.{datetime.now().timestamp()}")
@@ -352,4 +387,12 @@ def load_index(path: Path | str, *, mmap: bool = True) -> dict[str, Any]:
             bm25_path = file_path.parent / doc["bm25_file"]
             if bm25_path.is_file():
                 doc["_bm25_path"] = str(bm25_path)
+        if "meta_db_file" in doc and doc["meta_db_file"]:
+            meta_db_path = file_path.parent / doc["meta_db_file"]
+            if meta_db_path.is_file():
+                doc["_meta_db_path"] = str(meta_db_path)
+        else:
+            default_meta_db = file_path.with_name(f"{file_path.stem}.meta.db")
+            if default_meta_db.is_file():
+                doc["_meta_db_path"] = str(default_meta_db)
     return doc

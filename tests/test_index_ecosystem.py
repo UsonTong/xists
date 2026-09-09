@@ -10,6 +10,7 @@ from xists.search.append import append_records_to_index
 from xists.search.embed import EmbeddingConfig
 from xists.search.index import load_index, save_index
 from xists.search.merge import merge_indices
+from xists.search.meta_db import MetaDatabase
 from xists.search.prune import prune_index
 
 
@@ -154,6 +155,16 @@ def test_append_records_to_index_adds_new_repo(sample_workspace, mock_embedding_
     assert len(saved_records) == 3
     assert saved_records[2]["repo_id"] == "owner/repo3"
 
+    # Verify SQLite metadata sidecar is updated
+    meta_db_file = index_file.with_name(f"{index_file.stem}.meta.db")
+    assert meta_db_file.is_file()
+    with MetaDatabase(meta_db_file, read_only=True) as meta_db:
+        assert meta_db.get_doc_count() == 3
+        e3 = meta_db.fetch_entry_by_repo_id("owner/repo3")
+        assert e3 is not None
+        assert e3["repo_id"] == "owner/repo3"
+        assert e3["metadata"]["name"] == "repo3"
+
 
 def test_append_records_idempotent_skip_when_fingerprint_matches(
     sample_workspace, mock_embedding_config
@@ -264,6 +275,15 @@ def test_merge_indices_combines_matrices_and_deduplicates(tmp_path):
     repos = [v["repo_id"] for v in loaded_merged["vectors"]]
     assert repos == ["org/repoA", "org/repoB", "org/repoC"]
 
+    # Verify SQLite sidecar for merged index
+    meta_db_file = out_idx.with_name(f"{out_idx.stem}.meta.db")
+    assert meta_db_file.is_file()
+    with MetaDatabase(meta_db_file, read_only=True) as meta_db:
+        assert meta_db.get_doc_count() == 3
+        b_entry = meta_db.fetch_entry_by_repo_id("org/repoB")
+        assert b_entry is not None
+        assert b_entry["metadata"]["summary"] == "Better summary"
+
 
 def test_merge_indices_rejects_model_mismatch(tmp_path):
     idx1 = tmp_path / "i1.json"
@@ -312,6 +332,14 @@ def test_prune_index_removes_archived_and_disabled(sample_workspace):
     recs = json.loads(records_file.read_text(encoding="utf-8"))
     assert len(recs) == 1
     assert recs[0]["repo_id"] == "owner/repo1"
+
+    # Verify SQLite sidecar pruned
+    meta_db_file = index_file.with_name(f"{index_file.stem}.meta.db")
+    assert meta_db_file.is_file()
+    with MetaDatabase(meta_db_file, read_only=True) as meta_db:
+        assert meta_db.get_doc_count() == 1
+        assert meta_db.fetch_entry_by_repo_id("owner/repo1") is not None
+        assert meta_db.fetch_entry_by_repo_id("owner/repo2") is None
 
 
 def test_prune_index_dry_run_does_not_modify_files(sample_workspace):

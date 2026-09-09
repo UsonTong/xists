@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import lru_cache
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 
@@ -824,6 +825,35 @@ def _result_from_score_cached(
     }
 
 
+def _find_exact_identity_indices(prepared: PreparedIndex, query_ctx: dict[str, Any]) -> set[int]:
+    """Fast lookup of repository indices matching exact query identity."""
+    raw_query = query_ctx["raw_query"]
+    explicit_value = query_ctx["explicit_value"]
+    exact_indices: set[int] = set()
+
+    if hasattr(prepared, "identity_to_indices") and prepared.identity_to_indices:
+        if raw_query:
+            for idx in prepared.identity_to_indices.get(raw_query, ()):
+                exact_indices.add(idx)
+            if raw_query in prepared.repo_id_to_index:
+                exact_indices.add(prepared.repo_id_to_index[raw_query])
+        if explicit_value:
+            for idx in prepared.identity_to_indices.get(explicit_value, ()):
+                exact_indices.add(idx)
+    else:
+        for idx, cache in enumerate(prepared.metadata_caches):
+            kind = _identity_match_kind_cached(raw_query, explicit_value, cache)
+            if kind in {"repo_id", "exact_value"}:
+                exact_indices.add(idx)
+
+    if "/" in raw_query:
+        for part in raw_query.split():
+            if part in prepared.repo_id_to_index:
+                exact_indices.add(prepared.repo_id_to_index[part])
+
+    return exact_indices
+
+
 def _rank_scored_entries(
     query: str,
     scored_entries: list[tuple[dict[str, Any], float]],
@@ -858,8 +888,34 @@ def _rank_scored_entries_prepared(
     filter_mask: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
     valid_indices = (
-        np.where(filter_mask)[0] if filter_mask is not None else range(len(prepared.entries))
+        np.where(filter_mask)[0] if filter_mask is not None else np.arange(len(prepared.entries))
     )
+    if len(valid_indices) == 0:
+        return []
+
+    # Two-stage candidate truncation if candidate pool is large
+    cand_limit = max(top_k * 8, 128)
+    if len(valid_indices) > cand_limit:
+        exact_doc_ids = _find_exact_identity_indices(prepared, query_ctx)
+        valid_set = set(valid_indices)
+        valid_exact = exact_doc_ids & valid_set
+
+        if len(prepared.popularity_bonuses_array) == len(prepared.entries):
+            est_scores = (
+                semantic_scores[valid_indices] + prepared.popularity_bonuses_array[valid_indices]
+            )
+        else:
+            est_scores = semantic_scores[valid_indices]
+
+        top_sub = np.argpartition(-est_scores, cand_limit)[:cand_limit]
+        candidate_indices = set(valid_indices[top_sub]) | valid_exact
+        eval_indices = list(candidate_indices)
+    else:
+        eval_indices = [int(i) for i in valid_indices]
+
+    if hasattr(prepared.entries, "prefetch") and eval_indices:
+        prepared.entries.prefetch(eval_indices)
+
     results = [
         _result_from_score_cached(
             query_ctx,
@@ -868,7 +924,7 @@ def _rank_scored_entries_prepared(
             float(semantic_scores[i]),
             exploratory_threshold=exploratory_threshold,
         )
-        for i in valid_indices
+        for i in eval_indices
     ]
     _downgrade_ambiguous_exact_values(results)
     results.sort(
@@ -1004,8 +1060,27 @@ def _rank_semantic_entries_prepared(
     filter_mask: np.ndarray | None = None,
 ) -> list[dict[str, Any]]:
     valid_indices = (
-        np.where(filter_mask)[0] if filter_mask is not None else range(len(prepared.entries))
+        np.where(filter_mask)[0] if filter_mask is not None else np.arange(len(prepared.entries))
     )
+    if len(valid_indices) == 0:
+        return []
+
+    target_count = max(top_k, 0)
+    if len(valid_indices) > target_count:
+        valid_sem = semantic_scores[valid_indices]
+        if target_count > 0:
+            top_sub = np.argpartition(-valid_sem, target_count)[:target_count]
+            top_sorted = top_sub[np.argsort(-valid_sem[top_sub])]
+            eval_indices = [int(valid_indices[sub]) for sub in top_sorted]
+        else:
+            eval_indices = []
+    else:
+        sorted_sub = np.argsort(-semantic_scores[valid_indices])
+        eval_indices = [int(valid_indices[sub]) for sub in sorted_sub]
+
+    if hasattr(prepared.entries, "prefetch") and eval_indices:
+        prepared.entries.prefetch(eval_indices)
+
     results = [
         _semantic_result_cached(
             prepared.entries[i],
@@ -1014,7 +1089,7 @@ def _rank_semantic_entries_prepared(
             exploratory_threshold=exploratory_threshold,
             query_ctx=query_ctx,
         )
-        for i in valid_indices
+        for i in eval_indices
     ]
     results.sort(key=lambda item: (item["score"], str(item.get("repo_id") or "")), reverse=True)
     return _present_ranked_results(results, top_k)
@@ -1131,21 +1206,18 @@ def _rank_reranked_entries_prepared(
     if not valid_indices:
         return []
 
-    identity_indices: list[int] = []
-    for i in valid_indices:
-        cache = prepared.metadata_caches[i]
-        kind = _identity_match_kind_cached(
-            query_ctx["raw_query"],
-            query_ctx["explicit_value"],
-            cache,
-        )
-        if kind in {"repo_id", "exact_value"}:
-            identity_indices.append(i)
+    exact_doc_ids = _find_exact_identity_indices(prepared, query_ctx)
+    valid_set = set(valid_indices)
+    identity_indices = sorted(exact_doc_ids & valid_set)
 
     identity_ids = {prepared.repo_ids[i] for i in identity_indices if prepared.repo_ids[i]}
     candidate_indices = [i for i in valid_indices if prepared.repo_ids[i] not in identity_ids]
     candidate_indices.sort(key=lambda i: float(semantic_scores[i]), reverse=True)
     candidate_indices = candidate_indices[:candidate_limit]
+
+    all_prefetch = identity_indices + candidate_indices
+    if hasattr(prepared.entries, "prefetch") and all_prefetch:
+        prepared.entries.prefetch(all_prefetch)
 
     candidates = [prepared.entries[i] for i in candidate_indices]
     rerank_scores = rerank(rerank_query, [rerank_text_from_entry(entry) for entry in candidates])
@@ -1280,9 +1352,53 @@ def _rank_hybrid_entries_prepared(
         bm25_ranks > 0, 1.0 / (rrf_k + bm25_ranks), 0.0
     )
 
-    # 5. Build results with diagnostics, confidence, and explanations for valid candidates
+    if len(prepared.popularity_bonuses_array) == len(prepared.entries):
+        pop_bonuses = prepared.popularity_bonuses_array[valid_indices]
+    else:
+        pop_bonuses = np.array(
+            [
+                float(prepared.metadata_caches[i].get("popularity_bonus") or 0.0)
+                for i in valid_indices
+            ],
+            dtype=np.float32,
+        )
+
+    fusion_scores_arr = rrf_scores + pop_bonuses * 0.7
+
+    # 5. Two-stage candidate selection
+    cand_limit = max(top_k * 4, 64)
+    if len(valid_indices) > cand_limit:
+        exact_doc_ids = _find_exact_identity_indices(prepared, query_ctx)
+        valid_set = set(valid_indices)
+        valid_exact = exact_doc_ids & valid_set
+
+        top_sub = np.argpartition(-fusion_scores_arr, cand_limit)[:cand_limit]
+        candidate_sub_set = set(top_sub)
+
+        # Include dense #1 and BM25 #1
+        candidate_sub_set.add(dense_order[0])
+        if len(matching_sub_indices) > 0:
+            candidate_sub_set.add(sorted_matching[0])
+
+        # Include any exact identity matches
+        if valid_exact:
+            valid_doc_to_sub = {int(doc_id): sub for sub, doc_id in enumerate(valid_indices)}
+            for doc_id in valid_exact:
+                if doc_id in valid_doc_to_sub:
+                    candidate_sub_set.add(valid_doc_to_sub[doc_id])
+
+        candidate_sub_indices = list(candidate_sub_set)
+    else:
+        candidate_sub_indices = list(range(len(valid_indices)))
+
+    candidate_doc_ids = [int(valid_indices[sub_idx]) for sub_idx in candidate_sub_indices]
+    if hasattr(prepared.entries, "prefetch") and candidate_doc_ids:
+        prepared.entries.prefetch(candidate_doc_ids)
+
+    # 6. Build results with diagnostics, confidence, and explanations for candidate pool
     results: list[dict[str, Any]] = []
-    for sub_idx, i in enumerate(valid_indices):
+    for sub_idx in candidate_sub_indices:
+        i = valid_indices[sub_idx]
         entry = prepared.entries[i]
         cache = prepared.metadata_caches[i]
         identity_kind = _identity_match_kind_cached(
@@ -1293,8 +1409,7 @@ def _rank_hybrid_entries_prepared(
         exact_identity = identity_kind in {"repo_id", "exact_value"}
         contextual_identity = identity_kind == "contextual_name_mention"
         sem_score = float(semantic_scores[i])
-        pop_bonus = float(cache.get("popularity_bonus") or 0.0)
-        fusion_score = float(rrf_scores[sub_idx]) + pop_bonus * 0.7
+        fusion_score = float(fusion_scores_arr[sub_idx])
         bm25_score = float(bm25_scores[i])
         d_rank = int(dense_ranks[sub_idx])
         b_rank = int(bm25_ranks[sub_idx]) if bm25_ranks[sub_idx] > 0 else None
@@ -1544,7 +1659,7 @@ class PreparedIndex:
         raw_index: dict[str, Any],
         matrix: np.ndarray,
         normalized_matrix: np.ndarray,
-        entries: list[dict[str, Any]],
+        entries: Sequence[dict[str, Any]],
         repo_ids: tuple[str, ...],
         repo_id_to_index: dict[str, int],
         metadata_caches: list[dict[str, Any]],
@@ -1556,6 +1671,10 @@ class PreparedIndex:
         dimension: int | None,
         record_count: int,
         bm25_index: BM25Index | None = None,
+        meta_db: Any = None,
+        stars_array: np.ndarray | None = None,
+        forks_array: np.ndarray | None = None,
+        archived_array: np.ndarray | None = None,
     ) -> None:
         self.raw_index = raw_index
         self.matrix = matrix
@@ -1574,21 +1693,66 @@ class PreparedIndex:
         self.bm25_index = (
             bm25_index if bm25_index is not None else BM25Index.build_from_entries(entries)
         )
+        self.meta_db = meta_db
         self.stars_array = (
-            np.array([c["stars"] for c in metadata_caches], dtype=np.int64)
+            stars_array
+            if stars_array is not None
+            else np.array([c["stars"] for c in metadata_caches], dtype=np.int64)
             if metadata_caches
             else np.empty(0, dtype=np.int64)
         )
         self.forks_array = (
-            np.array([c.get("forks", 0) for c in metadata_caches], dtype=np.int64)
+            forks_array
+            if forks_array is not None
+            else np.array([c.get("forks", 0) for c in metadata_caches], dtype=np.int64)
             if metadata_caches
             else np.empty(0, dtype=np.int64)
         )
         self.archived_array = (
-            np.array([c["archived"] or c["disabled"] for c in metadata_caches], dtype=bool)
+            archived_array
+            if archived_array is not None
+            else np.array([c["archived"] or c["disabled"] for c in metadata_caches], dtype=bool)
             if metadata_caches
             else np.empty(0, dtype=bool)
         )
+        self.popularity_bonuses_array = (
+            np.array(
+                [float(c.get("popularity_bonus") or 0.0) for c in metadata_caches],
+                dtype=np.float32,
+            )
+            if metadata_caches
+            else np.empty(0, dtype=np.float32)
+        )
+        self.identity_to_indices: dict[str, list[int]] = {}
+        for idx, c in enumerate(metadata_caches):
+            for id_val in c.get("identity_values_lower") or ():
+                self.identity_to_indices.setdefault(id_val, []).append(idx)
+
+    def get_entry(self, doc_id: int) -> dict[str, Any]:
+        """Retrieve full entry dictionary for doc_id, using SQLite on-demand if available."""
+        if 0 <= doc_id < len(self.entries):
+            return self.entries[doc_id]
+        if self.meta_db is not None:
+            entry = self.meta_db.fetch_entry(doc_id)
+            if entry is not None:
+                return entry
+        raise IndexError(f"Doc ID {doc_id} out of range (count {len(self.entries)})")
+
+    def get_entries_batch(self, doc_ids: Sequence[int]) -> dict[int, dict[str, Any]]:
+        """Retrieve full entry dictionaries for multiple doc_ids in batch."""
+        results: dict[int, dict[str, Any]] = {}
+        if hasattr(self.entries, "prefetch"):
+            self.entries.prefetch(doc_ids)
+            for doc_id in doc_ids:
+                if 0 <= doc_id < len(self.entries):
+                    results[doc_id] = self.entries[doc_id]
+        elif self.meta_db is not None:
+            results = self.meta_db.fetch_entries_batch(doc_ids)
+        else:
+            for doc_id in doc_ids:
+                if 0 <= doc_id < len(self.entries):
+                    results[doc_id] = self.entries[doc_id]
+        return results
 
     def compute_filter_mask(
         self, filters: SearchFilter | dict[str, Any] | str | None
@@ -1677,9 +1841,44 @@ class PreparedIndex:
         else:
             normalized_matrix = np.empty((0, dimension or 0), dtype=np.float32)
 
-        repo_ids = tuple(str(entry.get("repo_id") or "") for entry in entries)
-        repo_id_to_index = {repo_id: idx for idx, repo_id in enumerate(repo_ids) if repo_id}
-        metadata_caches = [_precompute_entry_cache(entry) for entry in entries]
+        meta_db: Any = None
+        stars_arr: np.ndarray | None = None
+        forks_arr: np.ndarray | None = None
+        archived_arr: np.ndarray | None = None
+        metadata_caches: list[dict[str, Any]] | None = None
+        repo_ids: tuple[str, ...] | None = None
+        repo_id_to_index: dict[str, int] | None = None
+
+        if index.get("_meta_db_path"):
+            try:
+                from xists.search.meta_db import MetaDatabase
+
+                meta_db_path = Path(index["_meta_db_path"])
+                if meta_db_path.is_file():
+                    meta_db = MetaDatabase(meta_db_path, read_only=True)
+                    (
+                        repo_ids,
+                        metadata_caches,
+                        stars_arr,
+                        forks_arr,
+                        archived_arr,
+                    ) = meta_db.load_search_state()
+                    if len(repo_ids) == len(entries):
+                        repo_id_to_index = {
+                            repo_id: idx for idx, repo_id in enumerate(repo_ids) if repo_id
+                        }
+                    else:
+                        metadata_caches = None
+                        repo_ids = None
+            except Exception:
+                meta_db = None
+                metadata_caches = None
+                repo_ids = None
+
+        if metadata_caches is None or repo_ids is None:
+            repo_ids = tuple(str(entry.get("repo_id") or "") for entry in entries)
+            repo_id_to_index = {repo_id: idx for idx, repo_id in enumerate(repo_ids) if repo_id}
+            metadata_caches = [_precompute_entry_cache(entry) for entry in entries]
 
         bm25_index: BM25Index | None = None
         if isinstance(index.get("_bm25_index"), BM25Index):
@@ -1693,8 +1892,6 @@ class PreparedIndex:
                 bm25_index = None
         elif index.get("_bm25_path"):
             try:
-                from pathlib import Path
-
                 bm25_path = Path(index["_bm25_path"])
                 if bm25_path.is_file():
                     bm25_raw = json.loads(bm25_path.read_text(encoding="utf-8"))
@@ -1714,7 +1911,7 @@ class PreparedIndex:
             normalized_matrix=normalized_matrix,
             entries=entries,
             repo_ids=repo_ids,
-            repo_id_to_index=repo_id_to_index,
+            repo_id_to_index=repo_id_to_index or {},
             metadata_caches=metadata_caches,
             index_version=index.get("index_version", INDEX_VERSION),
             record_schema_version=index.get("record_schema_version", RECORD_SCHEMA_VERSION),
@@ -1724,7 +1921,113 @@ class PreparedIndex:
             dimension=dimension,
             record_count=index.get("record_count", len(entries)),
             bm25_index=bm25_index,
+            meta_db=meta_db,
+            stars_array=stars_arr,
+            forks_array=forks_arr,
+            archived_array=archived_arr,
         )
+
+    @classmethod
+    def from_path(
+        cls,
+        path: Path | str,
+        config: EmbeddingConfig | None = None,
+        *,
+        mmap: bool = True,
+    ) -> PreparedIndex:
+        """Load and prepare an index directly from file path with maximum cold-start speed."""
+        file_path = Path(path)
+        meta_db_path = file_path.with_name(f"{file_path.stem}.meta.db")
+        vectors_path = file_path.with_name(f"{file_path.stem}.vectors.npy")
+        bm25_path = file_path.with_name(f"{file_path.stem}.bm25.json")
+
+        if meta_db_path.is_file() and vectors_path.is_file():
+            from xists.search.meta_db import LazyEntriesList, MetaDatabase
+
+            meta_db = MetaDatabase(meta_db_path, read_only=True)
+            manifest = meta_db.get_manifest()
+            index_version = int(manifest.get("index_version", INDEX_VERSION))
+            dimension = manifest.get("dimension")
+            if dimension is not None:
+                dimension = int(dimension)
+            record_schema_version = int(
+                manifest.get("record_schema_version", RECORD_SCHEMA_VERSION)
+            )
+            embedding_model = str(manifest.get("embedding_model") or "")
+            embedding_base_url = manifest.get("embedding_base_url")
+            embedding_input_version = int(
+                manifest.get("embedding_input_version", EMBEDDING_INPUT_VERSION)
+            )
+
+            repo_ids, metadata_caches, stars_arr, forks_arr, archived_arr = (
+                meta_db.load_search_state()
+            )
+            repo_id_to_index = {repo_id: idx for idx, repo_id in enumerate(repo_ids) if repo_id}
+            entries = LazyEntriesList(meta_db, repo_ids)
+
+            matrix = np.load(vectors_path, mmap_mode="r" if mmap else None)
+            if matrix.ndim == 2:
+                normalized_matrix = matrix
+            else:
+                normalized_matrix = np.empty((0, dimension or 0), dtype=np.float32)
+
+            bm25_index: BM25Index | None = None
+            if bm25_path.is_file():
+                try:
+                    bm25_raw = json.loads(bm25_path.read_text(encoding="utf-8"))
+                    if isinstance(bm25_raw, dict):
+                        loaded_bm25 = BM25Index.from_dict(bm25_raw)
+                        if loaded_bm25.doc_count == len(repo_ids):
+                            bm25_index = loaded_bm25
+                except Exception:
+                    bm25_index = None
+
+            if bm25_index is None:
+                bm25_index = BM25Index.build_from_entries(entries)
+
+            raw_doc = {
+                "index_version": index_version,
+                "record_schema_version": record_schema_version,
+                "embedding_model": embedding_model,
+                "embedding_base_url": embedding_base_url,
+                "embedding_input_version": embedding_input_version,
+                "dimension": dimension,
+                "record_count": len(repo_ids),
+                "_meta_db_path": str(meta_db_path),
+                "_vectors_path": str(vectors_path),
+                "_bm25_path": str(bm25_path) if bm25_path.is_file() else None,
+            }
+
+            prepared = cls(
+                raw_index=raw_doc,
+                matrix=matrix,
+                normalized_matrix=normalized_matrix,
+                entries=entries,
+                repo_ids=repo_ids,
+                repo_id_to_index=repo_id_to_index,
+                metadata_caches=metadata_caches,
+                index_version=index_version,
+                record_schema_version=record_schema_version,
+                embedding_model=embedding_model,
+                embedding_base_url=embedding_base_url,
+                embedding_input_version=embedding_input_version,
+                dimension=dimension,
+                record_count=len(repo_ids),
+                bm25_index=bm25_index,
+                meta_db=meta_db,
+                stars_array=stars_arr,
+                forks_array=forks_arr,
+                archived_array=archived_arr,
+            )
+            if config is not None:
+                ensure_index_matches_model(prepared, config)
+            return prepared
+
+        # Fallback to load_index
+        from xists.search.index import load_index
+
+        doc = load_index(file_path, mmap=mmap)
+        return cls.from_dict(doc, config=config, mmap=mmap)
 
     def __getitem__(self, key: str) -> Any:
         if key == "vectors":
@@ -1779,7 +2082,7 @@ class PreparedIndex:
 
 
 def prepare_index(
-    index: dict[str, Any] | PreparedIndex,
+    index: dict[str, Any] | PreparedIndex | Path | str,
     config: EmbeddingConfig | None = None,
     *,
     mmap: bool = True,
@@ -1790,6 +2093,8 @@ def prepare_index(
         if config is not None:
             ensure_index_matches_model(index, config)
         return index
+    if isinstance(index, (str, Path)) and Path(index).is_file():
+        return PreparedIndex.from_path(index, config, mmap=mmap)
     if isinstance(index, dict):
         cached_prep = index.get("_prepared_index")
         if isinstance(cached_prep, PreparedIndex):

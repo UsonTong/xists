@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
@@ -162,7 +163,7 @@ class BM25Index:
             b=b,
         )
 
-    def append_entries(self, new_entries: list[dict[str, Any]]) -> None:
+    def append_entries(self, new_entries: Sequence[dict[str, Any]]) -> None:
         """Incrementally append new repository entries to the BM25 inverted index."""
         if not new_entries:
             return
@@ -296,7 +297,7 @@ class BM25Index:
     @classmethod
     def build_from_entries(
         cls,
-        entries: list[dict[str, Any]],
+        entries: Sequence[dict[str, Any]],
         *,
         k1: float = BM25_K1,
         b: float = BM25_B,

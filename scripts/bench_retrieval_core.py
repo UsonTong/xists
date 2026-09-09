@@ -105,20 +105,26 @@ def benchmark_mmap_loading(
     save_index(idx_path, doc, matrix=matrix, version=4)
 
     # 1. Full memory load (mmap=False)
-    tracemalloc.start()
     t0 = time.perf_counter()
     full_doc = load_index(idx_path, mmap=False)
     full_prep = PreparedIndex.from_dict(full_doc, CONFIG, mmap=False)
     full_time_ms = (time.perf_counter() - t0) * 1000
+
+    tracemalloc.start()
+    _fd = load_index(idx_path, mmap=False)
+    _fp = PreparedIndex.from_dict(_fd, CONFIG, mmap=False)
     _, full_peak_ram = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
     # 2. Zero-copy memory mapped load (mmap=True)
-    tracemalloc.start()
     t0 = time.perf_counter()
     mmap_doc = load_index(idx_path, mmap=True)
     mmap_prep = PreparedIndex.from_dict(mmap_doc, CONFIG, mmap=True)
     mmap_time_ms = (time.perf_counter() - t0) * 1000
+
+    tracemalloc.start()
+    _md = load_index(idx_path, mmap=True)
+    _mp = PreparedIndex.from_dict(_md, CONFIG, mmap=True)
     _, mmap_peak_ram = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
@@ -269,6 +275,79 @@ def benchmark_facet_filtering(entries: list[dict[str, Any]], matrix: np.ndarray)
     }
 
 
+def benchmark_cold_start_and_lazy_retrieval(
+    entries: list[dict[str, Any]], matrix: np.ndarray, temp_dir: Path
+) -> dict[str, Any]:
+    """Measure cold-start loading time and retrieval latency for SQLite sidecar vs legacy monolithic JSON."""
+    idx_path = temp_dir / "cold_start_index.json"
+    doc = {
+        "index_version": 4,
+        "embedding_input_version": 3,
+        "record_schema_version": 2,
+        "embedding_model": "bge-m3",
+        "dimension": matrix.shape[1],
+        "record_count": len(entries),
+        "vectors": entries,
+    }
+    save_index(idx_path, doc, matrix=matrix, version=4)
+
+    # 1. Legacy cold start: load monolithic JSON + precompute caches in Python from scratch
+    # Measure timing without tracemalloc overhead
+    t0 = time.perf_counter()
+    legacy_doc = load_index(idx_path, mmap=True)
+    legacy_doc.pop("_meta_db_path", None)
+    legacy_prep = PreparedIndex.from_dict(legacy_doc, CONFIG, mmap=True)
+    legacy_cold_ms = (time.perf_counter() - t0) * 1000
+
+    # Measure peak RAM in a separate pass
+    tracemalloc.start()
+    leg_doc = load_index(idx_path, mmap=True)
+    leg_doc.pop("_meta_db_path", None)
+    _ = PreparedIndex.from_dict(leg_doc, CONFIG, mmap=True)
+    _, legacy_peak_ram = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    # 2. Optimized cold start: fast SQLite sidecar loading via PreparedIndex.from_path
+    # Measure timing without tracemalloc overhead
+    t0 = time.perf_counter()
+    sidecar_prep = PreparedIndex.from_path(idx_path, CONFIG, mmap=True)
+    sidecar_cold_ms = (time.perf_counter() - t0) * 1000
+
+    # Measure peak RAM in a separate pass
+    tracemalloc.start()
+    _ = PreparedIndex.from_path(idx_path, CONFIG, mmap=True)
+    _, sidecar_peak_ram = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    # 3. Two-Stage Top-K Hybrid Retrieval latency benchmark
+    query_vec = matrix[0].tolist()
+    query_text = "web async library in python"
+
+    runs = 50
+    t0 = time.perf_counter()
+    for _ in range(runs):
+        res = rank(query_text, sidecar_prep, CONFIG, top_k=10, embed=lambda c, q: query_vec)
+        assert len(res) <= 10
+    sidecar_search_ms = (time.perf_counter() - t0) * 1000 / runs
+
+    return {
+        "record_count": len(entries),
+        "dimension": matrix.shape[1],
+        "cold_start": {
+            "legacy_json_ms": round(legacy_cold_ms, 3),
+            "legacy_peak_kb": round(legacy_peak_ram / 1024, 2),
+            "sqlite_sidecar_ms": round(sidecar_cold_ms, 3),
+            "sqlite_peak_kb": round(sidecar_peak_ram / 1024, 2),
+            "cold_start_speedup": round(legacy_cold_ms / max(sidecar_cold_ms, 0.001), 2),
+            "ram_reduction_ratio": round(legacy_peak_ram / max(sidecar_peak_ram, 1), 2),
+        },
+        "retrieval": {
+            "hybrid_search_ms": round(sidecar_search_ms, 3),
+            "queries_per_sec": round(1000.0 / max(sidecar_search_ms, 0.001), 1),
+        },
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--count", type=int, default=5000, help="Number of synthetic vectors")
@@ -324,11 +403,25 @@ def main() -> int:
             f"=> Speedup: {facet_res['search_acceleration']['search_speedup']}x\n"
         )
 
+        print("4. Benchmarking Zero-Latency SQLite metadata sidecar and Top-K retrieval...")
+        sidecar_res = benchmark_cold_start_and_lazy_retrieval(entries, matrix, temp_path)
+        print(
+            f"   - Cold-Start: Legacy JSON {sidecar_res['cold_start']['legacy_json_ms']} ms "
+            f"vs SQLite Sidecar {sidecar_res['cold_start']['sqlite_sidecar_ms']} ms "
+            f"=> Speedup: {sidecar_res['cold_start']['cold_start_speedup']}x | "
+            f"RAM Reduction: {sidecar_res['cold_start']['ram_reduction_ratio']}x"
+        )
+        print(
+            f"   - Two-Stage Top-K Hybrid Search: {sidecar_res['retrieval']['hybrid_search_ms']} ms/query "
+            f"({sidecar_res['retrieval']['queries_per_sec']} qps)\n"
+        )
+
     summary = {
         "status": "success",
         "mmap_loading": mmap_res,
         "bm25_incremental": bm25_res,
         "facet_filtering": facet_res,
+        "sqlite_sidecar_and_lazy_retrieval": sidecar_res,
     }
     print("Benchmark summary:")
     print(json.dumps(summary, indent=2))

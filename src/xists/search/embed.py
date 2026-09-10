@@ -327,12 +327,19 @@ def _call_embeddings_with_details(
     )
 
 
+def _resolve_cache(cache: Any) -> Any:
+    if cache is False or cache is None:
+        return None
+    return cache
+
+
 def call_embeddings(
     config: EmbeddingConfig,
     inputs: list[str],
     *,
     timeout: int = 30,
     input_type: str | None = None,
+    cache: Any = None,
 ) -> list[list[float]]:
     """Call an OpenAI-compatible embeddings endpoint, return vectors in order.
 
@@ -348,9 +355,30 @@ def call_embeddings(
     # whether the role is sent to the embedding service.
     if input_type is None:
         input_type = "query"
+
+    resolved_cache = _resolve_cache(cache)
+    if resolved_cache is not None and getattr(resolved_cache, "enabled", False) and inputs:
+        cached_vectors = resolved_cache.get_batch(config.model, inputs, input_type=input_type)
+        miss_indices = [i for i, v in enumerate(cached_vectors) if v is None]
+        if not miss_indices:
+            return [v for v in cached_vectors if v is not None]
+
+        miss_inputs = [inputs[i] for i in miss_indices]
+        fetched_vectors, _ = _call_embeddings_with_details(
+            config, miss_inputs, timeout=timeout, input_type=input_type
+        )
+        resolved_cache.set_batch(config.model, miss_inputs, fetched_vectors, input_type=input_type)
+
+        final_vectors: list[list[float]] = [v if v is not None else [] for v in cached_vectors]
+        for miss_idx, fetched in zip(miss_indices, fetched_vectors):
+            final_vectors[miss_idx] = fetched
+        return final_vectors
+
     vectors, _ = _call_embeddings_with_details(
         config, inputs, timeout=timeout, input_type=input_type
     )
+    if resolved_cache is not None and getattr(resolved_cache, "enabled", False) and inputs:
+        resolved_cache.set_batch(config.model, inputs, vectors, input_type=input_type)
     return vectors
 
 
@@ -373,8 +401,21 @@ def probe_embedding_endpoint(config: EmbeddingConfig, *, timeout: int = 10) -> d
     }
 
 
-def embed_query(config: EmbeddingConfig, query: str) -> list[float]:
-    vectors = call_embeddings(config, [query], input_type="query")
+def embed_query(config: EmbeddingConfig, query: str, *, cache: Any = None) -> list[float]:
+    resolved_cache = _resolve_cache(cache)
+    if resolved_cache is not None and getattr(resolved_cache, "enabled", False):
+        cached = resolved_cache.get(config.model, query, input_type="query")
+        if cached is not None:
+            return cached
+
+    try:
+        vectors = call_embeddings(config, [query], input_type="query", cache=resolved_cache)
+    except TypeError:
+        # Compatibility with monkeypatched call_embeddings in test fixtures that do not accept cache
+        vectors = call_embeddings(config, [query], input_type="query")
+        if resolved_cache is not None and getattr(resolved_cache, "enabled", False) and vectors:
+            resolved_cache.set(config.model, query, vectors[0], input_type="query")
+
     if not vectors:
         raise EmbeddingError("Embedding endpoint returned no vector for the query")
     return vectors[0]

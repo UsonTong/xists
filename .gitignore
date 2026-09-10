@@ -24,6 +24,10 @@ repos-top10k.txt
 
 # Entire data directory (local experiments, scale benchmarks, corpora)
 data/
+cache/
+*.db
+*.db-wal
+*.db-shm
 
 # Scratch and evaluation output files
 *.key

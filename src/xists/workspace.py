@@ -68,6 +68,14 @@ class WorkspacePaths:
     def eval_report(self) -> Path:
         return self.root / "eval-report.json"
 
+    @property
+    def cache_dir(self) -> Path:
+        return self.root / "cache"
+
+    @property
+    def embedding_cache_db(self) -> Path:
+        return self.cache_dir / "embeddings.db"
+
 
 def workspace_root(environ: Mapping[str, str] | None = None) -> Path:
     """Return the configured workspace root without creating it."""
@@ -117,3 +125,21 @@ def populate_demo_workspace(root: Path, *, force: bool = False) -> dict[str, Any
 
     root = root.expanduser().resolve()
     return pull_index("demo", root, force=force)
+
+
+def get_default_embedding_cache(
+    environ: Mapping[str, str] | None = None,
+) -> Any:
+    """Resolve and instantiate the default QueryEmbeddingCache for the environment."""
+    from xists.search.cache import QueryEmbeddingCache
+
+    env = os.environ if environ is None else environ
+    if env.get("XISTS_DISABLE_EMBED_CACHE", "").lower() in {"1", "true", "yes"}:
+        return QueryEmbeddingCache(None, enabled=False)
+
+    custom_db = env.get("XISTS_EMBEDDING_CACHE_DB", "").strip()
+    if custom_db:
+        return QueryEmbeddingCache(Path(custom_db))
+
+    paths = resolve_workspace(environ=env)
+    return QueryEmbeddingCache(paths.embedding_cache_db)

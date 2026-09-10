@@ -22,10 +22,11 @@ from typing import Any
 import numpy as np
 
 from xists.search.bm25 import BM25Index
+from xists.search.cache import QueryEmbeddingCache
 from xists.search.embed import EmbeddingConfig
 from xists.search.facets import evaluate_ast_mask, parse_facet_query
 from xists.search.index import load_index, save_index
-from xists.search.query import PreparedIndex, rank
+from xists.search.query import PreparedIndex, rank, rank_many
 
 CONFIG = EmbeddingConfig(api_key="bench", base_url="http://bench.invalid/v1", model="bge-m3")
 
@@ -296,7 +297,7 @@ def benchmark_cold_start_and_lazy_retrieval(
     t0 = time.perf_counter()
     legacy_doc = load_index(idx_path, mmap=True)
     legacy_doc.pop("_meta_db_path", None)
-    legacy_prep = PreparedIndex.from_dict(legacy_doc, CONFIG, mmap=True)
+    _ = PreparedIndex.from_dict(legacy_doc, CONFIG, mmap=True)
     legacy_cold_ms = (time.perf_counter() - t0) * 1000
 
     # Measure peak RAM in a separate pass
@@ -345,6 +346,120 @@ def benchmark_cold_start_and_lazy_retrieval(
             "hybrid_search_ms": round(sidecar_search_ms, 3),
             "queries_per_sec": round(1000.0 / max(sidecar_search_ms, 0.001), 1),
         },
+    }
+
+
+def benchmark_query_embedding_cache(temp_dir: Path, dimension: int = 1024) -> dict[str, Any]:
+    """Measure persistent SQLite query embedding cache performance vs simulated remote API calls."""
+    db_path = temp_dir / "bench_embed_cache.db"
+    cache = QueryEmbeddingCache(db_path)
+
+    queries = [f"benchmark search query {i} for high throughput testing" for i in range(100)]
+    rng = np.random.RandomState(42)
+    raw_vectors = rng.standard_normal((len(queries), dimension)).astype(np.float32)
+    norms = np.linalg.norm(raw_vectors, axis=1, keepdims=True)
+    vectors = np.divide(
+        raw_vectors, norms, out=np.zeros_like(raw_vectors), where=norms != 0
+    ).tolist()
+
+    # 1. Warm-up writes (set_batch)
+    t0 = time.perf_counter()
+    cache.set_batch("bge-m3", queries, vectors)
+    batch_write_time_ms = (time.perf_counter() - t0) * 1000
+
+    # 2. Benchmark cache hit reads (get_batch)
+    iterations = 50
+    t0 = time.perf_counter()
+    for _ in range(iterations):
+        hits = cache.get_batch("bge-m3", queries)
+        assert len(hits) == len(queries)
+    batch_read_time = time.perf_counter() - t0
+    batch_read_ms = (batch_read_time * 1000) / (iterations * len(queries))
+    cache_read_qps = (iterations * len(queries)) / batch_read_time
+
+    # 3. Single query cache get/set micro-benchmark
+    t0 = time.perf_counter()
+    for _ in range(200):
+        v = cache.get("bge-m3", queries[0])
+        assert v is not None
+    single_get_us = ((time.perf_counter() - t0) / 200) * 1_000_000
+
+    # 4. End-to-end simulated comparison: 200ms remote embedding call vs cache hit
+    simulated_remote_ms = 200.0  # typical remote API round trip + inference
+    cache_hit_ms = single_get_us / 1000.0
+    speedup = simulated_remote_ms / max(cache_hit_ms, 0.001)
+
+    return {
+        "cache_entries": len(queries),
+        "vector_dimension": dimension,
+        "batch_write_ms": round(batch_write_time_ms, 3),
+        "single_get_microseconds": round(single_get_us, 2),
+        "batch_get_ms_per_query": round(batch_read_ms, 4),
+        "throughput_queries_per_sec": round(cache_read_qps, 1),
+        "simulated_network_ms": simulated_remote_ms,
+        "cache_hit_speedup": round(speedup, 1),
+    }
+
+
+def benchmark_batched_gemm_retrieval(
+    entries: list[dict[str, Any]], matrix: np.ndarray, temp_dir: Path, batch_size: int = 32
+) -> dict[str, Any]:
+    """Measure multi-query evaluation throughput: Sequential single-query vs Batched GEMM + Prefetching."""
+    idx_path = temp_dir / "batched_gemm_index.json"
+    doc = {
+        "index_version": 4,
+        "embedding_input_version": 3,
+        "record_schema_version": 2,
+        "embedding_model": "bge-m3",
+        "dimension": matrix.shape[1],
+        "record_count": len(entries),
+        "vectors": entries,
+    }
+    save_index(idx_path, doc, matrix=matrix, version=4)
+    prepared = PreparedIndex.from_path(idx_path, CONFIG, mmap=True)
+
+    rng = np.random.RandomState(99)
+    raw_query_vectors = rng.standard_normal((batch_size, matrix.shape[1])).astype(np.float32)
+    norms = np.linalg.norm(raw_query_vectors, axis=1, keepdims=True)
+    query_vectors = np.divide(
+        raw_query_vectors, norms, out=np.zeros_like(raw_query_vectors), where=norms != 0
+    ).tolist()
+    queries = [f"benchmark multi query {i} async web framework" for i in range(batch_size)]
+
+    # 1. Sequential single-query rank()
+    runs = 3
+    t0 = time.perf_counter()
+    for _ in range(runs):
+        for q, vec in zip(queries, query_vectors):
+            _res = rank(q, prepared, CONFIG, top_k=10, embed=lambda c, _q, v=vec: v)
+    seq_time = (time.perf_counter() - t0) / runs
+    seq_latency_ms = (seq_time * 1000) / batch_size
+    seq_qps = batch_size / seq_time
+
+    # 2. Batched rank_many() with BLAS GEMM matrix multiplication & global prefetch
+    t0 = time.perf_counter()
+    for _ in range(runs):
+        _batch_res = rank_many(
+            queries, prepared, CONFIG, top_k=10, embed_many=lambda c, _qs: query_vectors
+        )
+    batch_time = (time.perf_counter() - t0) / runs
+    batch_latency_ms = (batch_time * 1000) / batch_size
+    batch_qps = batch_size / batch_time
+
+    return {
+        "corpus_size": len(entries),
+        "batch_size": batch_size,
+        "sequential_single_query": {
+            "total_time_ms": round(seq_time * 1000, 2),
+            "latency_ms_per_query": round(seq_latency_ms, 3),
+            "throughput_qps": round(seq_qps, 1),
+        },
+        "batched_gemm_prefetch": {
+            "total_time_ms": round(batch_time * 1000, 2),
+            "latency_ms_per_query": round(batch_latency_ms, 3),
+            "throughput_qps": round(batch_qps, 1),
+        },
+        "batch_speedup": round(batch_qps / max(seq_qps, 0.001), 2),
     }
 
 
@@ -416,12 +531,37 @@ def main() -> int:
             f"({sidecar_res['retrieval']['queries_per_sec']} qps)\n"
         )
 
+        print("5. Benchmarking SQLite Query Embedding Cache (Hit vs Miss)...")
+        cache_res = benchmark_query_embedding_cache(temp_path, dimension=args.dim)
+        print(
+            f"   - Single Cache Read: {cache_res['single_get_microseconds']} µs "
+            f"({cache_res['throughput_queries_per_sec']} qps)"
+        )
+        print(
+            f"   - Simulated API (200ms) vs Cache Hit ({cache_res['single_get_microseconds'] / 1000:.3f}ms) "
+            f"=> End-to-End Speedup: {cache_res['cache_hit_speedup']}x\n"
+        )
+
+        print("6. Benchmarking Batched GEMM Matrix Retrieval & Global Prefetching...")
+        gemm_res = benchmark_batched_gemm_retrieval(entries, matrix, temp_path, batch_size=32)
+        print(
+            f"   - Sequential Single Queries: {gemm_res['sequential_single_query']['latency_ms_per_query']} ms/query "
+            f"({gemm_res['sequential_single_query']['throughput_qps']} qps)"
+        )
+        print(
+            f"   - Batched GEMM + Prefetch: {gemm_res['batched_gemm_prefetch']['latency_ms_per_query']} ms/query "
+            f"({gemm_res['batched_gemm_prefetch']['throughput_qps']} qps) "
+            f"=> Throughput Speedup: {gemm_res['batch_speedup']}x\n"
+        )
+
     summary = {
         "status": "success",
         "mmap_loading": mmap_res,
         "bm25_incremental": bm25_res,
         "facet_filtering": facet_res,
         "sqlite_sidecar_and_lazy_retrieval": sidecar_res,
+        "query_embedding_cache": cache_res,
+        "batched_gemm_retrieval": gemm_res,
     }
     print("Benchmark summary:")
     print(json.dumps(summary, indent=2))

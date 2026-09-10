@@ -374,3 +374,44 @@ def test_stdio_server_runs_tools_without_corrupting_protocol(tmp_path):
     assert inspected.isError is False
     assert inspected.structuredContent["repo_id"] == "owner/project"
     assert "\x1b" not in stderr_path.read_text(encoding="utf-8")
+
+
+def test_server_with_prepared_index_and_cache(monkeypatch):
+    import xists.mcp_server as server_module
+    from xists.search.query import prepare_index
+
+    prepared = prepare_index(_index())
+    captured_kwargs = {}
+
+    def fake_search(query, index, **kwargs):
+        captured_kwargs.update(kwargs)
+        return {
+            "query": query,
+            "query_intent": {"type": "functional"},
+            "abstained": False,
+            "results": [{"repo_id": "owner/project", "score": 0.9, "confidence": "high"}],
+        }
+
+    monkeypatch.setattr(server_module, "public_search", fake_search)
+    mock_cache = object()
+    server = server_module.create_server(prepared, object(), cache=mock_cache)
+
+    payload = _tool_payload(server, "search_projects", {"query": "project"})
+    assert payload["results"][0]["repo_id"] == "owner/project"
+    assert payload["results"][0]["summary"] == "A project summary."
+    assert captured_kwargs["cache"] is mock_cache
+
+    inspect = _tool_payload(server, "inspect_project", {"repo_id": "owner/project"})
+    assert inspect["repo_id"] == "owner/project"
+    assert inspect["summary"] == "A project summary."
+
+
+def test_inspect_project_not_found():
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    import xists.mcp_server as server_module
+
+    server = server_module.create_server(_index(), object())
+
+    with pytest.raises(ToolError, match="Repository not found in the current index: non-existent"):
+        asyncio.run(server.call_tool("inspect_project", {"repo_id": "non-existent"}))

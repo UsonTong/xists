@@ -15,6 +15,8 @@ from xists.api import find_similar as public_find_similar
 from xists.api import load_index
 from xists.api import search as public_search
 from xists.search.embed import EmbeddingConfig, embedding_config_from_env
+from xists.search.query import PreparedIndex, prepare_index
+from xists.search.similar import _resolve_repo_index
 
 
 class MCPNotInstalledError(RuntimeError):
@@ -57,12 +59,17 @@ def _fastmcp_class() -> Any:
     return FastMCP
 
 
-def create_server(index: dict[str, Any], embedding_config: EmbeddingConfig) -> Any:
+def create_server(
+    index: dict[str, Any] | PreparedIndex,
+    embedding_config: EmbeddingConfig,
+    *,
+    cache: Any = None,
+) -> Any:
     """Create the MCP server with state loaded once at process startup."""
 
     FastMCP = _fastmcp_class()
     server = FastMCP("xists")
-    metadata_by_repo = _metadata_by_repo_id(index)
+    prepared = prepare_index(index)
 
     @server.tool(description="Search the local xists project index.")
     def search_projects(
@@ -102,13 +109,14 @@ def create_server(index: dict[str, Any], embedding_config: EmbeddingConfig) -> A
 
         result = public_search(
             query,
-            index,
+            prepared,
             embedding_config=embedding_config,
             top_k=top_k,
             ranking_strategy=ranking_strategy,
             filters=filters or None,
+            cache=cache,
         )
-        return _enrich_search_result(result, metadata_by_repo)
+        return _enrich_search_result(result, prepared)
 
     @server.tool(
         description="Find projects similar to an existing repository in the local xists index."
@@ -149,7 +157,7 @@ def create_server(index: dict[str, Any], embedding_config: EmbeddingConfig) -> A
 
         result = public_find_similar(
             repo_id,
-            index,
+            prepared,
             top_k=top_k,
             filters=filters or None,
         )
@@ -171,7 +179,7 @@ def create_server(index: dict[str, Any], embedding_config: EmbeddingConfig) -> A
 
         result = public_compare_projects(
             list(repo_ids),
-            index,
+            prepared,
         )
         return dict(result)
 
@@ -182,31 +190,36 @@ def create_server(index: dict[str, Any], embedding_config: EmbeddingConfig) -> A
         normalized = repo_id.strip()
         if not normalized:
             raise ValueError("repo_id must be a non-empty repository id")
-        metadata = metadata_by_repo.get(normalized)
-        if metadata is None:
+        idx = _resolve_repo_index(normalized, prepared)
+        if idx is None:
             raise ValueError(f"Repository not found in the current index: {normalized}")
-        return {"repo_id": normalized, **_public_profile(metadata)}
+        entry = prepared.entries[idx]
+        metadata = entry.get("metadata") if isinstance(entry, dict) else None
+        if not isinstance(metadata, dict):
+            metadata = {}
+        return {"repo_id": str(entry.get("repo_id") or normalized), **_public_profile(metadata)}
 
     @server.tool(description="Show compatibility and size information for the local xists index.")
     def index_stats() -> dict[str, Any]:
         """Return public index metadata without embedding vectors."""
 
         return {
-            "index_version": index.get("index_version"),
-            "record_schema_version": index.get("record_schema_version"),
-            "embedding_input_version": index.get("embedding_input_version"),
-            "embedding_model": index.get("embedding_model"),
-            "dimension": index.get("dimension"),
-            "record_count": index.get("record_count"),
-            "indexed_project_count": len(metadata_by_repo),
+            "index_version": prepared.index_version,
+            "record_schema_version": prepared.record_schema_version,
+            "embedding_input_version": prepared.embedding_input_version,
+            "embedding_model": prepared.embedding_model,
+            "dimension": prepared.dimension,
+            "record_count": prepared.record_count,
+            "indexed_project_count": len(prepared.entries),
         }
 
     return server
 
 
-def _metadata_by_repo_id(index: dict[str, Any]) -> dict[str, dict[str, Any]]:
+def _metadata_by_repo_id(index: dict[str, Any] | PreparedIndex) -> dict[str, dict[str, Any]]:
     metadata_by_repo: dict[str, dict[str, Any]] = {}
-    for entry in index.get("vectors") or []:
+    vectors = index.get("vectors") if isinstance(index, dict) else getattr(index, "entries", None)
+    for entry in vectors or []:
         if not isinstance(entry, dict):
             continue
         repo_id = entry.get("repo_id")
@@ -236,24 +249,42 @@ def _validate_repo_id(repo_id: str) -> None:
 
 
 def _enrich_search_result(
-    result: dict[str, Any], metadata_by_repo: dict[str, dict[str, Any]]
+    result: dict[str, Any], prepared: PreparedIndex | dict[str, Any]
 ) -> dict[str, Any]:
-    enriched_results: list[dict[str, Any]] = []
-    for item in result.get("results") or []:
+    if not isinstance(prepared, PreparedIndex):
+        prepared = prepare_index(prepared)
+
+    raw_results = result.get("results") or []
+    top_indices: list[int] = []
+    items_to_enrich: list[tuple[dict[str, Any], int | None]] = []
+
+    for item in raw_results:
         if not isinstance(item, dict):
             continue
-        enriched = dict(item)
         repo_id = item.get("repo_id")
-        metadata = metadata_by_repo.get(repo_id) if isinstance(repo_id, str) else None
-        if metadata:
-            for field, value in _public_profile(metadata).items():
-                if field not in enriched:
-                    enriched[field] = value
+        idx = prepared.repo_id_to_index.get(repo_id) if isinstance(repo_id, str) else None
+        if idx is not None:
+            top_indices.append(idx)
+        items_to_enrich.append((item, idx))
+
+    if hasattr(prepared.entries, "prefetch") and top_indices:
+        prepared.entries.prefetch(top_indices)
+
+    enriched_results: list[dict[str, Any]] = []
+    for item, idx in items_to_enrich:
+        enriched = dict(item)
+        if idx is not None:
+            entry = prepared.entries[idx]
+            metadata = entry.get("metadata") if isinstance(entry, dict) else None
+            if isinstance(metadata, dict):
+                for field, value in _public_profile(metadata).items():
+                    if field not in enriched:
+                        enriched[field] = value
         enriched_results.append(enriched)
     return {**result, "results": enriched_results}
 
 
-def run_server(index_path: Path) -> None:
+def run_server(index_path: Path, *, cache: Any = None) -> None:
     """Load local search state and run the MCP stdio transport."""
 
     # Check the optional integration before local configuration so a core-only
@@ -265,11 +296,28 @@ def run_server(index_path: Path) -> None:
         raise MCPStartupError(str(error)) from error
     if not index_path.exists():
         raise MCPStartupError(f"Index file not found: {index_path}. Run 'xists index build' first.")
-    try:
-        index = load_index(index_path)
-    except (OSError, json.JSONDecodeError, ValueError) as error:
-        raise MCPStartupError(f"Could not load index {index_path}: {error}") from error
-    if not isinstance(index, dict):
-        raise MCPStartupError(f"Could not load index {index_path}: index JSON must be an object")
 
-    create_server(index, config).run(transport="stdio")
+    try:
+        prepared = PreparedIndex.from_path(index_path, config=config)
+    except Exception:
+        try:
+            index = load_index(index_path)
+            if not isinstance(index, dict):
+                raise MCPStartupError(
+                    f"Could not load index {index_path}: index JSON must be an object"
+                )
+            prepared = prepare_index(index, config=config)
+        except (OSError, json.JSONDecodeError, ValueError) as error:
+            raise MCPStartupError(f"Could not load index {index_path}: {error}") from error
+        except Exception as error:
+            raise MCPStartupError(f"Could not load index {index_path}: {error}") from error
+
+    if cache is None:
+        try:
+            from xists.workspace import get_default_embedding_cache
+
+            cache = get_default_embedding_cache()
+        except Exception:
+            cache = None
+
+    create_server(prepared, config, cache=cache).run(transport="stdio")

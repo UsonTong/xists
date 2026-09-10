@@ -227,10 +227,40 @@ def _generate_star_queue(start_star: int, min_stars: int) -> deque[tuple[int, in
     return deque(brackets)
 
 
+MAJOR_LANGUAGES = [
+    "Python",
+    "JavaScript",
+    "TypeScript",
+    "Java",
+    "Go",
+    "Rust",
+    "C++",
+    "C",
+    "C#",
+    "PHP",
+    "Ruby",
+    "Kotlin",
+    "Swift",
+    "Dart",
+    "Shell",
+    "HTML",
+    "CSS",
+    "Vue",
+    "Lua",
+    "Jupyter Notebook",
+    "Scala",
+    "R",
+    "Julia",
+    "Zig",
+    "Elixir",
+]
+
+
 def fetch_top_repos_by_star_slicing(
     target_count: int,
     token_pool: SearchTokenPool,
     min_stars: int = 50,
+    start_stars: int | None = None,
     seed_path: Path | None = None,
     checkpoint_path: Path | None = None,
     sync_txt_path: Path | None = None,
@@ -311,11 +341,23 @@ def fetch_top_repos_by_star_slicing(
         print(f"[*] Initialized plain text list at: {sync_txt_path} ({len(collected):,} repos)")
 
     # 3. Determine starting star boundary and initialize queue
-    if lowest_collected_stars is not None and lowest_collected_stars > min_stars:
+    if start_stars is not None:
+        effective_start = start_stars
+        print(f"[*] Queue starting from explicit start star: {effective_start:,} down to {min_stars:,}")
+        queue = _generate_star_queue(effective_start, min_stars)
+    elif lowest_collected_stars is not None and lowest_collected_stars > min_stars:
         # Start slightly above the lowest collected stars to avoid missing any boundary repos
         start_star = min(lowest_collected_stars + 5, 500000)
         print(f"[*] Queue starting from star count: {start_star:,} down to {min_stars:,}")
         queue = _generate_star_queue(start_star, min_stars)
+    elif lowest_collected_stars is not None and lowest_collected_stars <= min_stars:
+        # If we already reached min_stars but still need more items, initiate secondary slicing
+        effective_start = min(min_stars + 15, 500000)
+        print(
+            f"[*] Lowest collected stars ({lowest_collected_stars}) <= min_stars ({min_stars}), "
+            f"initiating secondary slicing from star {effective_start:,} down to {min_stars:,}..."
+        )
+        queue = _generate_star_queue(effective_start, min_stars)
     else:
         print(f"[*] Queue starting fresh from 500,000 down to {min_stars:,}")
         queue = _generate_star_queue(500000, min_stars)
@@ -324,6 +366,41 @@ def fetch_top_repos_by_star_slicing(
     if checkpoint_path:
         checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
         checkpoint_file = checkpoint_path.open("a", encoding="utf-8")
+
+    def _ingest_items(items: list[dict[str, Any]], star_bound: int) -> int:
+        nonlocal last_synced
+        added = 0
+        for item in items:
+            name = item.get("full_name", "")
+            if not name:
+                continue
+            key = name.lower()
+            if key not in collected:
+                record = {
+                    "repo_id": name,
+                    "full_name": name,
+                    "stargazers_count": item.get("stargazers_count", 0),
+                    "forks_count": item.get("forks_count", 0),
+                    "language": item.get("language"),
+                    "description": item.get("description"),
+                    "topics": item.get("topics", []),
+                    "html_url": item.get("html_url"),
+                    "created_at": item.get("created_at"),
+                    "updated_at": item.get("updated_at"),
+                }
+                collected[key] = record
+                added += 1
+                if checkpoint_file:
+                    checkpoint_file.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    checkpoint_file.flush()
+
+        if on_progress:
+            on_progress(len(collected), target_count, star_bound)
+
+        if sync_txt_path and (len(collected) - last_synced >= sync_interval):
+            _flush_txt_list()
+            last_synced = len(collected)
+        return added
 
     try:
         while queue and len(collected) < target_count:
@@ -361,37 +438,35 @@ def fetch_top_repos_by_star_slicing(
                 if not items:
                     break
 
-                new_count = 0
-                for item in items:
-                    name = item.get("full_name", "")
-                    if not name:
+                _ingest_items(items, low)
+
+            # Secondary language slicing: when a single star count has >1000 repos,
+            # slice by major languages to extract repositories beyond the 1,000-item window.
+            if low == high and total_count > 1000 and len(collected) < target_count:
+                for lang in MAJOR_LANGUAGES:
+                    if len(collected) >= target_count:
+                        break
+                    lang_query = f"stars:{low}..{high} fork:false language:{lang}"
+                    lang_resp = _search_github_api(
+                        lang_query, page=1, per_page=100, token_pool=token_pool
+                    )
+                    lang_total = lang_resp.get("total_count", 0)
+                    if lang_total == 0:
                         continue
-                    key = name.lower()
-                    if key not in collected:
-                        record = {
-                            "repo_id": name,
-                            "full_name": name,
-                            "stargazers_count": item.get("stargazers_count", 0),
-                            "forks_count": item.get("forks_count", 0),
-                            "language": item.get("language"),
-                            "description": item.get("description"),
-                            "topics": item.get("topics", []),
-                            "html_url": item.get("html_url"),
-                            "created_at": item.get("created_at"),
-                            "updated_at": item.get("updated_at"),
-                        }
-                        collected[key] = record
-                        new_count += 1
-                        if checkpoint_file:
-                            checkpoint_file.write(json.dumps(record, ensure_ascii=False) + "\n")
-                            checkpoint_file.flush()
-
-                if on_progress:
-                    on_progress(len(collected), target_count, low)
-
-                if sync_txt_path and (len(collected) - last_synced >= sync_interval):
-                    _flush_txt_list()
-                    last_synced = len(collected)
+                    lang_pages = min(10, ceil(lang_total / 100))
+                    for lpage in range(1, lang_pages + 1):
+                        if len(collected) >= target_count:
+                            break
+                        if lpage == 1:
+                            ldata = lang_resp
+                        else:
+                            ldata = _search_github_api(
+                                lang_query, page=lpage, per_page=100, token_pool=token_pool
+                            )
+                        litems = ldata.get("items", [])
+                        if not litems:
+                            break
+                        _ingest_items(litems, low)
 
             # Small delay between ranges to be polite
             time.sleep(0.05)
@@ -422,6 +497,12 @@ def main() -> None:
         type=int,
         default=50,
         help="Minimum star count threshold (default: 50)",
+    )
+    parser.add_argument(
+        "--start-stars",
+        type=int,
+        default=None,
+        help="Optional explicit starting star count for collection queue",
     )
     parser.add_argument(
         "--seed",
@@ -497,6 +578,7 @@ def main() -> None:
         target_count=args.target,
         token_pool=token_pool,
         min_stars=args.min_stars,
+        start_stars=args.start_stars,
         seed_path=args.seed if (args.seed and args.seed.exists()) else None,
         checkpoint_path=args.checkpoint,
         sync_txt_path=args.output_txt,

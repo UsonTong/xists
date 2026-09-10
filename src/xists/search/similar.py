@@ -220,6 +220,9 @@ def find_similar_prepared(
     selected_k = min(len(candidate_indices), max(1, int(top_k)))
     top_indices = candidate_indices[sorted_order[:selected_k]]
 
+    if hasattr(prepared.entries, "prefetch") and len(top_indices) > 0:
+        prepared.entries.prefetch(top_indices)
+
     results: list[SimilarResultItem] = []
     for cand_idx in top_indices:
         cand_entry = prepared.entries[cand_idx]

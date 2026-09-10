@@ -47,6 +47,7 @@ def search(
     query_variants: list[str] | None = None,
     rerank_query: str | None = None,
     filters: SearchFilter | dict[str, Any] | str | None = None,
+    cache: Any = None,
 ) -> dict[str, Any]:
     """Search an in-memory index using an explicitly configured embedder.
 
@@ -59,6 +60,10 @@ def search(
     Index/model incompatibility and embedding endpoint failures are raised as
     their actionable core exceptions.
     """
+
+    extra_kwargs: dict[str, Any] = {}
+    if cache is not None:
+        extra_kwargs["cache"] = cache
 
     return rank(
         query,
@@ -74,6 +79,7 @@ def search(
         query_variants=query_variants,
         rerank_query=rerank_query,
         filters=filters,
+        **extra_kwargs,
     )
 
 

@@ -2117,6 +2117,29 @@ def _normalized_matrix(vectors: list[Any]) -> np.ndarray:
     return np.divide(matrix, norms, out=np.zeros_like(matrix), where=norms != 0)
 
 
+def _safe_embed(embed_fn: Any, config: EmbeddingConfig, text: str, cache: Any) -> list[float]:
+    try:
+        return embed_fn(config, text, cache=cache)
+    except TypeError:
+        return embed_fn(config, text)
+
+
+def _safe_embed_many(
+    embed_many_fn: Any,
+    config: EmbeddingConfig,
+    texts: list[str],
+    cache: Any,
+    input_type: str = "query",
+) -> list[list[float]]:
+    try:
+        return embed_many_fn(config, texts, input_type=input_type, cache=cache)
+    except TypeError:
+        try:
+            return embed_many_fn(config, texts, input_type=input_type)
+        except TypeError:
+            return embed_many_fn(config, texts)
+
+
 def rank_many(
     queries: list[str],
     index: dict[str, Any] | PreparedIndex,
@@ -2134,6 +2157,7 @@ def rank_many(
     query_variants: list[list[str]] | None = None,
     rerank_queries: list[str] | None = None,
     filters: SearchFilter | dict[str, Any] | str | None = None,
+    cache: Any = None,
 ) -> list[dict[str, Any]]:
     """Rank multiple queries with batched embeddings and matrix similarity."""
 
@@ -2178,10 +2202,7 @@ def rank_many(
     query_vectors: list[list[float]] = []
     for start in range(0, len(flattened_variants), batch_size):
         batch = flattened_variants[start : start + batch_size]
-        if embed_many is call_embeddings:
-            query_vectors.extend(embed_many(config, batch, input_type="query"))
-        else:
-            query_vectors.extend(embed_many(config, batch))
+        query_vectors.extend(_safe_embed_many(embed_many, config, batch, cache, input_type="query"))
     if len(query_vectors) != len(flattened_variants):
         raise EmbeddingError(
             f"Embedding count mismatch: sent {len(flattened_variants)}, received {len(query_vectors)}"
@@ -2288,6 +2309,7 @@ def rank(
     query_variants: list[str] | None = None,
     rerank_query: str | None = None,
     filters: SearchFilter | dict[str, Any] | str | None = None,
+    cache: Any = None,
 ) -> dict[str, Any]:
     """Rank index entries against the query."""
 
@@ -2306,7 +2328,7 @@ def rank(
     if rerank_query is None:
         rerank_query = query
 
-    query_vectors = [embed(config, variant) for variant in query_variants]
+    query_vectors = [_safe_embed(embed, config, variant, cache) for variant in query_variants]
     dimension = prepared.dimension
     if dimension is not None and any(len(vector) != dimension for vector in query_vectors):
         raise IndexMismatchError(

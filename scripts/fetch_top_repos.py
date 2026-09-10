@@ -9,6 +9,7 @@ Outputs:
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import sys
@@ -85,16 +86,19 @@ class SearchTokenPool:
                     self._rate_limited_until.pop(token, None)
                     return token
             # All tokens are currently limited; wait for the earliest reset
-            earliest_reset = min(self._rate_limited_until.values())
-            wait_time = max(1.0, earliest_reset - now + 1.0)
-            token = min(self._rate_limited_until, key=lambda k: self._rate_limited_until[k])
-            print(
-                f"\n[!] All GitHub tokens search-limited. Sleeping {wait_time:.1f}s for reset...",
-                flush=True,
-            )
-            time.sleep(wait_time)
-            self._rate_limited_until.pop(token, None)
-            return token
+            if self._rate_limited_until:
+                earliest_reset = min(self._rate_limited_until.values())
+                wait_time = max(1.0, earliest_reset - now + 1.0)
+                token = min(self._rate_limited_until, key=lambda k: self._rate_limited_until[k])
+                print(
+                    f"\n[!] All GitHub tokens search-limited. Sleeping {wait_time:.1f}s for reset...",
+                    flush=True,
+                )
+                time.sleep(wait_time)
+                self._rate_limited_until.pop(token, None)
+                return token
+            time.sleep(2.0)
+            return self.tokens[0]
 
     def mark_rate_limited(self, token: str, reset_timestamp: float) -> None:
         with self._lock:
@@ -154,63 +158,167 @@ def _search_github_api(
             if err.code == 422:
                 return {"total_count": 0, "items": []}
             raise
-        except (urllib.error.URLError, TimeoutError):
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            http.client.HTTPException,
+            ConnectionError,
+            OSError,
+        ):
             time.sleep(2**attempt)
             continue
 
     return {"total_count": 0, "items": []}
 
 
+def _generate_star_queue(start_star: int, min_stars: int) -> deque[tuple[int, int]]:
+    """Generate descending star range brackets for recursive bisection."""
+    milestones = [
+        500000,
+        100000,
+        50000,
+        30000,
+        20000,
+        15000,
+        10000,
+        8000,
+        6000,
+        4000,
+        3000,
+        2000,
+        1500,
+        1000,
+        800,
+        650,
+        500,
+        400,
+        300,
+        250,
+        200,
+        160,
+        130,
+        100,
+        85,
+        70,
+        55,
+        45,
+        35,
+        25,
+        20,
+        min_stars,
+    ]
+    raw_points = sorted({m for m in milestones if min_stars <= m <= start_star}, reverse=True)
+    if start_star not in raw_points:
+        raw_points = sorted(list(set(raw_points + [start_star])), reverse=True)
+    if min_stars not in raw_points:
+        raw_points = sorted(list(set(raw_points + [min_stars])), reverse=True)
+
+    brackets: list[tuple[int, int]] = []
+    current_high = start_star
+    for p in raw_points:
+        if p >= current_high:
+            continue
+        brackets.append((p, current_high))
+        current_high = p - 1
+        if current_high < min_stars:
+            break
+    if current_high >= min_stars:
+        brackets.append((min_stars, current_high))
+    return deque(brackets)
+
+
 def fetch_top_repos_by_star_slicing(
     target_count: int,
     token_pool: SearchTokenPool,
-    min_stars: int = 150,
+    min_stars: int = 50,
+    seed_path: Path | None = None,
     checkpoint_path: Path | None = None,
+    sync_txt_path: Path | None = None,
+    sync_interval: int = 2000,
     on_progress: Callable[[int, int, int], None] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Recursively slice Star count ranges to bypass GitHub Search 1,000 item limit."""
     collected: dict[str, dict[str, Any]] = {}
+    lowest_collected_stars: int | None = None
+    last_synced = 0
 
-    # Resume from checkpoint if present
+    def _flush_txt_list() -> None:
+        if not sync_txt_path:
+            return
+        sync_txt_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = sync_txt_path.with_suffix(".tmp")
+        sorted_repos = sorted(
+            collected.values(),
+            key=lambda r: int(r.get("stargazers_count", 0)),
+            reverse=True,
+        )
+        if target_count and len(sorted_repos) > target_count:
+            sorted_repos = sorted_repos[:target_count]
+        with temp_path.open("w", encoding="utf-8") as f_out:
+            for r in sorted_repos:
+                f_out.write(f"{r['repo_id']}\n")
+        temp_path.replace(sync_txt_path)
+
+    # 1. Load seed repositories if provided
+    if seed_path and seed_path.exists():
+        print(f"[*] Pre-loading seed repositories from: {seed_path}...")
+        with seed_path.open("r", encoding="utf-8") as f_seed:
+            for line in f_seed:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    repo_id = rec.get("full_name") or rec.get("repo_id")
+                    if repo_id:
+                        collected[repo_id.lower()] = rec
+                        stars = int(rec.get("stargazers_count", 0))
+                        if lowest_collected_stars is None or stars < lowest_collected_stars:
+                            lowest_collected_stars = stars
+                except Exception:
+                    pass
+        print(
+            f"[*] Seed loaded {len(collected):,} repositories (lowest stars: {lowest_collected_stars})"
+        )
+
+    # 2. Resume from checkpoint if present
     if checkpoint_path and checkpoint_path.exists():
-        for line in checkpoint_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-                repo_id = rec.get("full_name") or rec.get("repo_id")
-                if repo_id:
-                    collected[repo_id.lower()] = rec
-            except Exception:
-                pass
-        print(f"[*] Resumed {len(collected):,} repositories from checkpoint: {checkpoint_path}")
+        print(f"[*] Resuming from checkpoint: {checkpoint_path}...")
+        with checkpoint_path.open("r", encoding="utf-8") as f_chk:
+            for line in f_chk:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                    repo_id = rec.get("full_name") or rec.get("repo_id")
+                    if repo_id:
+                        collected[repo_id.lower()] = rec
+                        stars = int(rec.get("stargazers_count", 0))
+                        if lowest_collected_stars is None or stars < lowest_collected_stars:
+                            lowest_collected_stars = stars
+                except Exception:
+                    pass
+        print(
+            f"[*] Checkpoint combined. Total unique repositories now: {len(collected):,} "
+            f"(lowest stars: {lowest_collected_stars})"
+        )
 
-    # Queue of star ranges: (min_stars, max_stars)
-    # Start with highest stars (500k) down to min_stars
-    queue: deque[tuple[int, int]] = deque(
-        [
-            (100000, 500000),
-            (50000, 99999),
-            (30000, 49999),
-            (20000, 29999),
-            (15000, 19999),
-            (10000, 14999),
-            (8000, 9999),
-            (6000, 7999),
-            (4000, 5999),
-            (3000, 3999),
-            (2000, 2999),
-            (1500, 1999),
-            (1000, 1499),
-            (750, 999),
-            (500, 749),
-            (350, 499),
-            (250, 349),
-            (180, 249),
-            (min_stars, 179),
-        ]
-    )
+    # Initial flush so the plain text repo list file exists immediately
+    if sync_txt_path and collected:
+        _flush_txt_list()
+        last_synced = len(collected)
+        print(f"[*] Initialized plain text list at: {sync_txt_path} ({len(collected):,} repos)")
+
+    # 3. Determine starting star boundary and initialize queue
+    if lowest_collected_stars is not None and lowest_collected_stars > min_stars:
+        # Start slightly above the lowest collected stars to avoid missing any boundary repos
+        start_star = min(lowest_collected_stars + 5, 500000)
+        print(f"[*] Queue starting from star count: {start_star:,} down to {min_stars:,}")
+        queue = _generate_star_queue(start_star, min_stars)
+    else:
+        print(f"[*] Queue starting fresh from 500,000 down to {min_stars:,}")
+        queue = _generate_star_queue(500000, min_stars)
 
     checkpoint_file = None
     if checkpoint_path:
@@ -281,6 +389,10 @@ def fetch_top_repos_by_star_slicing(
                 if on_progress:
                     on_progress(len(collected), target_count, low)
 
+                if sync_txt_path and (len(collected) - last_synced >= sync_interval):
+                    _flush_txt_list()
+                    last_synced = len(collected)
+
             # Small delay between ranges to be polite
             time.sleep(0.05)
     except KeyboardInterrupt:
@@ -297,36 +409,42 @@ def fetch_top_repos_by_star_slicing(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Fetch Top 100k GitHub Repository Names with Token Rotation."
+        description="Fetch Top GitHub Repository Names with Token Rotation and Slicing."
     )
     parser.add_argument(
         "--target",
         type=int,
-        default=100000,
-        help="Target number of unique repositories to collect (default: 100,000)",
+        default=500000,
+        help="Target number of unique repositories to collect (default: 500,000)",
     )
     parser.add_argument(
         "--min-stars",
         type=int,
-        default=100,
-        help="Minimum star count threshold (default: 100)",
+        default=50,
+        help="Minimum star count threshold (default: 50)",
+    )
+    parser.add_argument(
+        "--seed",
+        type=Path,
+        default=Path("data/top100k_repos.jsonl"),
+        help="Optional seed JSONL/TXT file to pre-populate existing repositories",
     )
     parser.add_argument(
         "--output-txt",
         type=Path,
-        default=Path("data/top100k_repos.txt"),
-        help="Output plain text file path (default: data/top100k_repos.txt)",
+        default=Path("data/top500k_repos.txt"),
+        help="Output plain text file path (default: data/top500k_repos.txt)",
     )
     parser.add_argument(
         "--output-jsonl",
         type=Path,
-        default=Path("data/top100k_repos.jsonl"),
-        help="Output metadata JSONL file path (default: data/top100k_repos.jsonl)",
+        default=Path("data/top500k_repos.jsonl"),
+        help="Output metadata JSONL file path (default: data/top500k_repos.jsonl)",
     )
     parser.add_argument(
         "--checkpoint",
         type=Path,
-        default=Path("data/top100k_repos.partial.jsonl"),
+        default=Path("data/top500k_repos.partial.jsonl"),
         help="Intermediate checkpoint file for resume",
     )
     parser.add_argument(
@@ -342,6 +460,8 @@ def main() -> None:
     print(f"Target count:       {args.target:,}")
     print(f"Min stars:          {args.min_stars:,}")
     print(f"Loaded tokens:      {len(tokens)} token(s) configured")
+    if args.seed and args.seed.exists():
+        print(f"Seed path:          {args.seed}")
     print(f"Output text path:   {args.output_txt}")
     print(f"Output JSONL path:  {args.output_jsonl}")
     print(f"Checkpoint path:    {args.checkpoint}")
@@ -351,27 +471,35 @@ def main() -> None:
 
     start_time = time.time()
     last_print = 0.0
+    is_tty = sys.stdout.isatty()
 
     def progress_callback(current: int, total: int, current_star_bound: int) -> None:
         nonlocal last_print
         now = time.time()
-        if now - last_print >= 0.5 or current >= total:
+        interval = 0.5 if is_tty else 10.0
+        if now - last_print >= interval or current >= total:
             last_print = now
             elapsed = now - start_time
             qps = current / elapsed if elapsed > 0 else 0
             pct = (current / total) * 100.0 if total > 0 else 0
-            sys.stdout.write(
-                f"\r[*] Progress: {current:,}/{total:,} repos ({pct:.1f}%) | "
+            line = (
+                f"[*] Progress: {current:,}/{total:,} repos ({pct:.1f}%) | "
                 f"Stars boundary: ≥{current_star_bound:,} | "
                 f"Rate: {qps:.1f} repos/s | Elapsed: {elapsed:.0f}s"
             )
-            sys.stdout.flush()
+            if is_tty:
+                sys.stdout.write(f"\r{line}")
+                sys.stdout.flush()
+            else:
+                print(line, flush=True)
 
     repos_dict = fetch_top_repos_by_star_slicing(
         target_count=args.target,
         token_pool=token_pool,
         min_stars=args.min_stars,
+        seed_path=args.seed if (args.seed and args.seed.exists()) else None,
         checkpoint_path=args.checkpoint,
+        sync_txt_path=args.output_txt,
         on_progress=progress_callback,
     )
 
@@ -383,6 +511,8 @@ def main() -> None:
         key=lambda r: int(r.get("stargazers_count", 0)),
         reverse=True,
     )
+    if args.target and len(sorted_repos) > args.target:
+        sorted_repos = sorted_repos[: args.target]
 
     # Ensure output directories exist
     args.output_txt.parent.mkdir(parents=True, exist_ok=True)

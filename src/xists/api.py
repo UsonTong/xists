@@ -47,6 +47,8 @@ def search(
     query_variants: list[str] | None = None,
     rerank_query: str | None = None,
     filters: SearchFilter | dict[str, Any] | str | None = None,
+    dense_weight: float | None = None,
+    sparse_weight: float | None = None,
     cache: Any = None,
 ) -> dict[str, Any]:
     """Search an in-memory index using an explicitly configured embedder.
@@ -79,6 +81,8 @@ def search(
         query_variants=query_variants,
         rerank_query=rerank_query,
         filters=filters,
+        dense_weight=dense_weight,
+        sparse_weight=sparse_weight,
         **extra_kwargs,
     )
 

@@ -30,6 +30,8 @@ def cache_to_serializable(cache: dict[str, Any]) -> dict[str, Any]:
         data["ecosystem_set"] = list(data["ecosystem_set"])
     if "topics_set" in data and isinstance(data["topics_set"], (set, frozenset)):
         data["topics_set"] = list(data["topics_set"])
+    if "replaces_set" in data and isinstance(data["replaces_set"], (set, frozenset)):
+        data["replaces_set"] = list(data["replaces_set"])
     if "id_value_tokens" in data and isinstance(data["id_value_tokens"], (tuple, list)):
         data["id_value_tokens"] = list(data["id_value_tokens"])
     return data
@@ -50,6 +52,8 @@ def serializable_to_cache(data: dict[str, Any]) -> dict[str, Any]:
     cache["ecosystem_set"] = frozenset(eco_set) if eco_set else frozenset()
     top_set = data.get("topics_set")
     cache["topics_set"] = frozenset(top_set) if top_set else frozenset()
+    rep_set = data.get("replaces_set")
+    cache["replaces_set"] = frozenset(rep_set) if rep_set else frozenset()
     id_tok = data.get("id_value_tokens")
     cache["id_value_tokens"] = tuple(id_tok) if id_tok else ()
     return cache

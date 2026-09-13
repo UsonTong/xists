@@ -1714,16 +1714,20 @@ def test_hybrid_ranking_strategy_basic_fusion():
     results = result["results"]
     assert len(results) == 2
 
-    # astral-sh/uv is #1 because BM25 rank #1 + dense rank #2 beats pip's dense rank #1 + BM25 rank None
+    # astral-sh/uv is #1 because BM25 rank #1 + dense rank #2 with exact_name intent beats pip's dense rank #1
     assert results[0]["repo_id"] == "astral-sh/uv"
     assert results[0]["ranking_evidence"]["bm25_rank"] == 1
     assert results[0]["ranking_evidence"]["semantic_rank"] == 2
-    assert results[0]["score"] == pytest.approx(1.0 / (60 + 2) + 1.0 / (60 + 1), abs=1e-6)
+    assert results[0]["ranking_evidence"]["fusion"] == "adaptive_weighted_rrf"
+    assert results[0]["ranking_evidence"]["intent_type"] == "exact_name"
+    assert results[0]["ranking_evidence"]["sparse_weight"] == 0.8
+    assert results[0]["ranking_evidence"]["dense_weight"] == 0.2
+    assert results[0]["score"] > results[1]["score"]
 
     assert results[1]["repo_id"] == "pypa/pip"
     assert results[1]["ranking_evidence"]["bm25_rank"] is None
     assert results[1]["ranking_evidence"]["semantic_rank"] == 1
-    assert results[1]["score"] == pytest.approx(1.0 / (60 + 1), abs=1e-6)
+    assert results[1]["score"] == pytest.approx(0.2 / (60 + 1), abs=1e-6)
 
 
 def test_hybrid_pure_semantic_recall():

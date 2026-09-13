@@ -1512,20 +1512,18 @@ def _rank_hybrid_entries_prepared(
 
     # Alternative intent adjustments: down-ranking target and promoting declared replacements
     alternative_target: str | None = None
+    target_doc_indices: set[int] = set()
     if intent_type == "alternative":
         alternative_target = _extract_alternative_target(query, query_ctx)
         if alternative_target:
-            for sub_idx, doc_idx in enumerate(valid_indices):
-                cache = prepared.metadata_caches[doc_idx]
-                repo_id_lower = cache["repo_id_lower"]
-                if (
-                    repo_id_lower == alternative_target
-                    or repo_id_lower.endswith("/" + alternative_target)
-                    or alternative_target in cache["identity_values_lower"]
-                ):
-                    fusion_scores_arr[sub_idx] *= 0.5
-                elif alternative_target in cache.get("replaces_set", frozenset()):
-                    fusion_scores_arr[sub_idx] += 0.05
+            target_ctx = _build_query_context(alternative_target)
+            target_doc_indices = _find_exact_identity_indices(prepared, target_ctx)
+            if target_doc_indices:
+                valid_doc_to_sub = {int(doc_id): sub for sub, doc_id in enumerate(valid_indices)}
+                for doc_id in target_doc_indices:
+                    sub_idx = valid_doc_to_sub.get(doc_id)
+                    if sub_idx is not None:
+                        fusion_scores_arr[sub_idx] *= 0.5
 
     # 6. Two-stage candidate selection
     cand_limit = max(top_k * 4, 64)
@@ -1593,7 +1591,8 @@ def _rank_hybrid_entries_prepared(
         if alternative_target:
             repo_id_lower = cache["repo_id_lower"]
             if (
-                repo_id_lower == alternative_target
+                i in target_doc_indices
+                or repo_id_lower == alternative_target
                 or repo_id_lower.endswith("/" + alternative_target)
                 or alternative_target in cache["identity_values_lower"]
             ):
@@ -1601,6 +1600,7 @@ def _rank_hybrid_entries_prepared(
                 why.append(f"down-ranked target of alternative query ({alternative_target})")
             elif alternative_target in cache.get("replaces_set", frozenset()):
                 replaces_promoted = True
+                fusion_score += 0.05
                 why.append(f"promoted declared replacement for {alternative_target}")
 
         if exact_identity:

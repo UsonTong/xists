@@ -359,3 +359,124 @@ def test_mcp_server_forwards_channel_weights(monkeypatch):
     search_tool.fn(query="test query", dense_weight=0.35, sparse_weight=0.65)
     assert captured["dense_weight"] == 0.35
     assert captured["sparse_weight"] == 0.65
+
+
+def test_cross_language_conflict_penalizes_source_language():
+    index = make_test_index(
+        [
+            {
+                "repo_id": "pallets/flask",
+                "vector": [0.8, 0.6],
+                "metadata": {
+                    "name": "flask",
+                    "summary": "The Python micro framework for building web applications.",
+                    "language": "Python",
+                    "topics": ["python", "web", "microframework"],
+                },
+            },
+            {
+                "repo_id": "gin-gonic/gin",
+                "vector": [0.75, 0.66],
+                "metadata": {
+                    "name": "gin",
+                    "summary": "Gin is a HTTP web framework written in Go (Golang).",
+                    "language": "Go",
+                    "topics": ["go", "golang", "web", "framework"],
+                },
+            },
+        ]
+    )
+
+    # Query asking for a port of flask in Go
+    result = rank(
+        "port of flask written in Go",
+        index,
+        CONFIG,
+        ranking_strategy="hybrid",
+        embed=lambda c, q: [0.78, 0.62],
+    )
+
+    assert result["abstained"] is False
+    results = result["results"]
+    assert len(results) >= 1
+    # Gin (Go) should beat Flask (Python) because Flask is penalized for cross-language conflict
+    assert results[0]["repo_id"] == "gin-gonic/gin"
+    flask_entry = next((r for r in results if r["repo_id"] == "pallets/flask"), None)
+    if flask_entry:
+        assert "cross_language_penalty" in flask_entry["diagnostics"]
+        assert any("cross-language conflict" in w for w in flask_entry["why"])
+
+
+def test_canonical_distractor_defense_breaks_ties_by_stars():
+    index = make_test_index(
+        [
+            {
+                "repo_id": "vuejs-templates/webpack",
+                "vector": [0.9, 0.4358],
+                "metadata": {
+                    "name": "webpack",
+                    "summary": "A full-featured Webpack + vue-loader setup with hot reload.",
+                    "stars": 9626,
+                    "language": "JavaScript",
+                },
+            },
+            {
+                "repo_id": "webpack/webpack",
+                "vector": [0.89, 0.4559],
+                "metadata": {
+                    "name": "webpack",
+                    "summary": "A bundler for javascript and friends. Packs many modules into a few bundled assets.",
+                    "stars": 63800,
+                    "language": "JavaScript",
+                },
+            },
+        ]
+    )
+
+    # Searching exact name "webpack" should rank canonical webpack/webpack #1 over the template
+    res1 = rank(
+        "webpack", index, CONFIG, ranking_strategy="hybrid", embed=lambda c, q: [0.9, 0.4358]
+    )
+    assert res1["results"][0]["repo_id"] == "webpack/webpack"
+
+    # Searching "github webpack" should also recognize exact lookup and rank canonical repo #1
+    res2 = rank(
+        "github webpack", index, CONFIG, ranking_strategy="hybrid", embed=lambda c, q: [0.9, 0.4358]
+    )
+    assert res2["results"][0]["repo_id"] == "webpack/webpack"
+
+
+def test_out_of_domain_abstention_on_fictional_queries():
+    index = make_test_index(
+        [
+            {
+                "repo_id": "astral-sh/uv",
+                "vector": [0.8, 0.6],
+                "metadata": {
+                    "name": "uv",
+                    "summary": "An extremely fast Python package and project manager.",
+                    "language": "Rust",
+                },
+            },
+            {
+                "repo_id": "expressjs/express",
+                "vector": [0.2, 0.9797],
+                "metadata": {
+                    "name": "express",
+                    "summary": "Fast, unopinionated, minimalist web framework for node.",
+                    "language": "JavaScript",
+                },
+            },
+        ]
+    )
+
+    # Impossible fictional query with zero semantic connection and no keyword matches
+    result = rank(
+        "superconducting cold fusion reactor firmware written in bash",
+        index,
+        CONFIG,
+        ranking_strategy="hybrid",
+        embed=lambda c, q: [0.0, 0.0],
+    )
+    assert result["abstained"] is True
+    assert len(result["results"]) == 0

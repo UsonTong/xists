@@ -269,6 +269,9 @@ class IndexManifest(TypedDict, total=False):
     built_at: str
     record_count: int
     vectors_file: str | None
+    scales_file: str | None
+    vector_dtype: str | None
+    vector_quantization: str | None
     skipped: list[dict[str, Any]]
     vectors: list[IndexVectorEntry]
 

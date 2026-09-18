@@ -24,6 +24,11 @@ from xists.search.embed import (
     embed_query,
 )
 from xists.search.index import INDEX_VERSION, SUPPORTED_INDEX_VERSIONS, decode_vector
+from xists.search.quantize import (
+    DEFAULT_CHUNK_SIZE,
+    chunked_dot_product,
+    chunked_matrix_similarity,
+)
 from xists.search.rerank import rerank_text_from_entry
 from xists.types import SearchFilter
 
@@ -1940,6 +1945,9 @@ class PreparedIndex:
         stars_array: np.ndarray | None = None,
         forks_array: np.ndarray | None = None,
         archived_array: np.ndarray | None = None,
+        scales: np.ndarray | None = None,
+        vector_dtype: str | None = None,
+        vector_quantization: str | None = None,
     ) -> None:
         self.raw_index = raw_index
         self.matrix = matrix
@@ -1955,6 +1963,11 @@ class PreparedIndex:
         self.embedding_input_version = embedding_input_version
         self.dimension = dimension
         self.record_count = record_count
+        self.scales = scales
+        self.vector_dtype = vector_dtype or (str(matrix.dtype) if matrix is not None else "float32")
+        self.vector_quantization = vector_quantization or (
+            "sq8" if self.vector_dtype == "int8" else "none"
+        )
         self.bm25_index = (
             bm25_index if bm25_index is not None else BM25Index.build_from_entries(entries)
         )
@@ -2039,6 +2052,56 @@ class PreparedIndex:
         """Return True if the underlying vector matrix is memory-mapped."""
         return isinstance(self.matrix, np.memmap)
 
+    def get_vector(self, idx: int) -> np.ndarray:
+        """Return 1D float32 normalized vector for doc_id."""
+        vec = self.normalized_matrix[idx]
+        if vec.dtype == np.float32:
+            return vec
+        if vec.dtype == np.float16:
+            return vec.astype(np.float32)
+        if vec.dtype == np.int8:
+            scale = float(self.scales[idx]) if self.scales is not None else 1.0
+            return vec.astype(np.float32) * scale
+        return vec.astype(np.float32)
+
+    def get_vectors(self, indices: Sequence[int] | np.ndarray) -> np.ndarray:
+        """Return 2D float32 normalized vectors for a sequence of doc_ids."""
+        sub = self.normalized_matrix[indices]
+        if sub.dtype == np.float32:
+            return sub
+        if sub.dtype == np.float16:
+            return sub.astype(np.float32)
+        if sub.dtype == np.int8:
+            sub_f32 = sub.astype(np.float32)
+            if self.scales is not None:
+                sub_scales = self.scales[indices]
+                return sub_f32 * sub_scales[:, None]
+            return sub_f32
+        return sub.astype(np.float32)
+
+    def score_query_vector(
+        self, query_vec: np.ndarray, *, chunk_size: int = DEFAULT_CHUNK_SIZE
+    ) -> np.ndarray:
+        """Compute 1D semantic similarity dot products against a query vector using chunked memory-safe GEMM."""
+        return chunked_dot_product(
+            self.normalized_matrix,
+            query_vec,
+            scales=self.scales,
+            chunk_size=chunk_size,
+        )
+
+    def score_query_matrix(
+        self, query_matrix: np.ndarray, *, chunk_size: int = DEFAULT_CHUNK_SIZE
+    ) -> np.ndarray:
+        """Compute 2D semantic similarity dot products of shape (Q, N) using chunked memory-safe GEMM."""
+        sim = chunked_matrix_similarity(
+            self.normalized_matrix,
+            query_matrix,
+            scales=self.scales,
+            chunk_size=chunk_size,
+        )
+        return sim.T
+
     @classmethod
     def from_dict(
         cls,
@@ -2088,7 +2151,7 @@ class PreparedIndex:
         if len(matrix) > 0:
             if matrix.ndim != 2:
                 raise IndexMismatchError("Index vectors must be a two-dimensional matrix")
-            if index.get("vectors_normalized") is True:
+            if matrix.dtype in (np.float16, np.int8) or index.get("vectors_normalized") is True:
                 normalized_matrix = matrix
             else:
                 sample_size = min(len(matrix), 16)
@@ -2105,6 +2168,15 @@ class PreparedIndex:
                     )
         else:
             normalized_matrix = np.empty((0, dimension or 0), dtype=np.float32)
+
+        scales: np.ndarray | None = index.get("_scales")
+        if scales is None and index.get("_scales_path"):
+            scales_p = Path(index["_scales_path"])
+            if scales_p.is_file():
+                try:
+                    scales = np.load(scales_p, mmap_mode="r" if mmap else None)
+                except Exception:
+                    scales = None
 
         meta_db: Any = None
         stars_arr: np.ndarray | None = None
@@ -2190,6 +2262,9 @@ class PreparedIndex:
             stars_array=stars_arr,
             forks_array=forks_arr,
             archived_array=archived_arr,
+            scales=scales,
+            vector_dtype=index.get("vector_dtype"),
+            vector_quantization=index.get("vector_quantization"),
         )
 
     @classmethod
@@ -2235,6 +2310,23 @@ class PreparedIndex:
                 normalized_matrix = matrix
             else:
                 normalized_matrix = np.empty((0, dimension or 0), dtype=np.float32)
+
+            scales_path: Path | None = None
+            if manifest.get("scales_file"):
+                scales_candidate = file_path.parent / str(manifest["scales_file"])
+                if scales_candidate.is_file():
+                    scales_path = scales_candidate
+            if scales_path is None:
+                default_scales = file_path.with_name(f"{file_path.stem}.scales.npy")
+                if default_scales.is_file():
+                    scales_path = default_scales
+
+            scales: np.ndarray | None = None
+            if scales_path is not None:
+                try:
+                    scales = np.load(scales_path, mmap_mode="r" if mmap else None)
+                except Exception:
+                    scales = None
 
             bm25_index: BM25Index | None = None
             if bm25_path.is_file():
@@ -2283,6 +2375,9 @@ class PreparedIndex:
                 stars_array=stars_arr,
                 forks_array=forks_arr,
                 archived_array=archived_arr,
+                scales=scales,
+                vector_dtype=manifest.get("vector_dtype"),
+                vector_quantization=manifest.get("vector_quantization"),
             )
             if config is not None:
                 ensure_index_matches_model(prepared, config)
@@ -2484,7 +2579,7 @@ def rank_many(
     q_mat = np.asarray(query_vectors, dtype=np.float32)
     q_norms = np.linalg.norm(q_mat, axis=1, keepdims=True)
     q_norm = np.divide(q_mat, q_norms, out=np.zeros_like(q_mat), where=q_norms != 0)
-    scores = q_norm @ prepared.normalized_matrix.T
+    scores = prepared.score_query_matrix(q_norm)
     ranked: list[dict[str, Any]] = []
     offset = 0
     for row, query in enumerate(queries):
@@ -2630,8 +2725,11 @@ def rank(
     q_mat = np.asarray(query_vectors, dtype=np.float32)
     q_norms = np.linalg.norm(q_mat, axis=1, keepdims=True)
     q_norm = np.divide(q_mat, q_norms, out=np.zeros_like(q_mat), where=q_norms != 0)
-    sim_matrix = q_norm @ prepared.normalized_matrix.T
-    semantic_scores = sim_matrix.max(axis=0)
+    if len(q_norm) == 1:
+        semantic_scores = prepared.score_query_vector(q_norm[0])
+    else:
+        sim_matrix = prepared.score_query_matrix(q_norm)
+        semantic_scores = sim_matrix.max(axis=0)
 
     query_ctx = _build_query_context(query)
     if filter_mask is not None and not np.any(filter_mask):

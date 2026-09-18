@@ -25,6 +25,7 @@ from xists.search.embed import (
     embedding_input_fingerprint,
     embedding_text_from_record,
 )
+from xists.search.quantize import save_quantized_vectors
 
 INDEX_VERSION = 4
 LEGACY_INDEX_VERSION = 3
@@ -186,12 +187,14 @@ def save_index(
     matrix: np.ndarray | None = None,
     bm25_index: Any = None,
     version: int = INDEX_VERSION,
+    quantize: str = "none",
 ) -> None:
     """Save an index document to disk.
 
     For INDEX_VERSION = 4 (default), metadata is saved to JSON and the
     vector matrix is saved as a sidecar binary file (<stem>.vectors.npy) for
     fast mmap loading. A BM25 sparse index is saved as <stem>.bm25.json.
+    Supports quantization to 'float16' or 'sq8' (int8) to minimize storage and memory.
     For INDEX_VERSION = 3, a single JSON document with Base64-encoded vectors
     is written.
     """
@@ -226,13 +229,13 @@ def save_index(
                     vec_matrix, norms, out=np.zeros_like(vec_matrix), where=norms != 0
                 )
 
-        # Atomic write of sidecar .npy
-        temp_vec_path = vectors_path.with_name(
-            f".{vectors_path.name}.tmp.{datetime.now().timestamp()}"
+        quant_mode = (
+            quantize or index.get("vector_quantization") or index.get("vector_dtype") or "none"
         )
-        with temp_vec_path.open("wb") as f:
-            np.save(f, vec_matrix)
-        temp_vec_path.replace(vectors_path)
+        quant_info = save_quantized_vectors(vectors_path, vec_matrix, mode=quant_mode)
+        vector_dtype = quant_info["vector_dtype"]
+        vector_quantization = quant_info["vector_quantization"]
+        scales_file = quant_info["scales_file"]
 
         clean_vectors = []
         for entry in index.get("vectors", []):
@@ -290,6 +293,9 @@ def save_index(
             "built_at": index.get("built_at") or datetime.now(UTC).isoformat(),
             "record_count": len(clean_vectors),
             "vectors_file": vectors_filename,
+            "scales_file": scales_file,
+            "vector_dtype": vector_dtype,
+            "vector_quantization": vector_quantization,
             "bm25_file": bm25_filename,
             "meta_db_file": meta_db_filename,
         }
@@ -316,6 +322,9 @@ def save_index(
             "skipped": index.get("skipped", []),
             "vectors_normalized": True,
             "vectors_file": vectors_filename,
+            "scales_file": scales_file,
+            "vector_dtype": vector_dtype,
+            "vector_quantization": vector_quantization,
             "bm25_file": bm25_filename,
             "meta_db_file": meta_db_filename,
             "vectors": clean_vectors,
@@ -381,6 +390,27 @@ def load_index(path: Path | str, *, mmap: bool = True) -> dict[str, Any]:
                     doc["_matrix"] = matrix
                     doc["_vectors_path"] = str(vectors_path)
                     doc["_mmap"] = bool(mmap)
+                except Exception:
+                    pass
+        if "scales_file" in doc and doc["scales_file"]:
+            scales_path = file_path.parent / doc["scales_file"]
+            if scales_path.is_file():
+                try:
+                    scales = np.load(scales_path, mmap_mode="r" if mmap else None)
+                    doc["_scales"] = scales
+                    doc["_scales_path"] = str(scales_path)
+                except Exception:
+                    pass
+        elif "vectors_file" in doc and (
+            doc.get("vector_quantization") == "sq8"
+            or (doc.get("_matrix") is not None and doc["_matrix"].dtype == np.int8)
+        ):
+            default_scales = file_path.with_name(f"{file_path.stem}.scales.npy")
+            if default_scales.is_file():
+                try:
+                    scales = np.load(default_scales, mmap_mode="r" if mmap else None)
+                    doc["_scales"] = scales
+                    doc["_scales_path"] = str(default_scales)
                 except Exception:
                     pass
         if "bm25_file" in doc and doc["bm25_file"]:

@@ -210,7 +210,7 @@ def compare_projects_prepared(
 
     # Compute pairwise cosine similarity matrix
     num_projects = len(indices)
-    sub_matrix = prepared.normalized_matrix[indices]  # Shape (N, D)
+    sub_matrix = prepared.get_vectors(indices)  # Shape (N, D)
     sim_matrix = sub_matrix @ sub_matrix.T  # Shape (N, N)
 
     matrix: dict[str, dict[str, float]] = {}

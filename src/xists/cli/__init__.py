@@ -65,6 +65,7 @@ from xists.cli.index import (
     index_migrate,
     index_prune,
     index_pull,
+    index_quantize,
     index_stats,
     index_verify,
 )
@@ -348,6 +349,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Number of concurrent embedding requests (default: 1)",
     )
     index_build_parser.add_argument(
+        "--quantize",
+        choices=("none", "float16", "sq8"),
+        default="none",
+        help="Vector quantization format: none (float32, default), float16 (50% smaller), or sq8 (75% smaller int8)",
+    )
+    index_build_parser.add_argument(
         "--format",
         choices=("text", "json"),
         default="text",
@@ -402,12 +409,46 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir", type=Path, default=None, help="Directory to save the migrated index"
     )
     index_migrate_parser.add_argument(
+        "--quantize",
+        choices=("none", "float16", "sq8"),
+        default="none",
+        help="Vector quantization format: none (float32, default), float16, or sq8",
+    )
+    index_migrate_parser.add_argument(
         "--format",
         choices=("text", "json"),
         default="text",
         help="Output format: text (default) or json for scripts and agents",
     )
     index_migrate_parser.set_defaults(func=index_migrate)
+    index_quantize_parser = index_subparsers.add_parser(
+        "quantize", help="Quantize an index into float16 or sq8 to reduce storage and memory"
+    )
+    index_quantize_parser.add_argument(
+        "--index",
+        type=Path,
+        default=workspace.index,
+        help="Target index to quantize (default: workspace index)",
+    )
+    index_quantize_parser.add_argument(
+        "--mode",
+        choices=("float16", "sq8", "float32"),
+        default="float16",
+        help="Quantization mode: float16 (50% reduction), sq8 (75% reduction), or float32",
+    )
+    index_quantize_parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Path to write quantized index (default: overwrite existing index in-place)",
+    )
+    index_quantize_parser.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="Output format: text (default) or json",
+    )
+    index_quantize_parser.set_defaults(func=index_quantize)
     index_pull_parser = index_subparsers.add_parser(
         "pull", help="Pull a pre-built index and records from preset, URL, or bundled demo"
     )
@@ -1122,6 +1163,7 @@ __all__ = [
     "index_migrate",
     "index_prune",
     "index_pull",
+    "index_quantize",
     "index_stats",
     "index_verify",
     "ingest_github",

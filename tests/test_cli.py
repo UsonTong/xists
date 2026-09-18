@@ -19,6 +19,7 @@ from xists.cli import (
     eval_run,
     index_build,
     index_migrate,
+    index_quantize,
     index_stats,
     index_verify,
     ingest_github,
@@ -4366,3 +4367,180 @@ def test_compare_cli_json_and_text(tmp_path, capsys):
     )
     assert compare(args_single) == 1
     assert "between 2 and 5" in capsys.readouterr().err
+
+
+def test_index_quantize_cli_float16_and_sq8(tmp_path, capsys):
+    matrix = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+    doc = {
+        "index_version": 4,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "BAAI/bge-m3",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "dimension": 2,
+        "record_count": 2,
+        "vectors": [
+            {"repo_id": "a/b", "metadata": {}, "embedding_input_fingerprint": "1"},
+            {"repo_id": "c/d", "metadata": {}, "embedding_input_fingerprint": "2"},
+        ],
+    }
+    index_file = tmp_path / "index.json"
+    save_index(index_file, doc, matrix=matrix)
+
+    # 1. Quantize to float16 to new output
+    f16_output = tmp_path / "f16" / "index.json"
+    args_f16 = build_parser().parse_args(
+        [
+            "index",
+            "quantize",
+            "--index",
+            str(index_file),
+            "--mode",
+            "float16",
+            "--output",
+            str(f16_output),
+            "--format",
+            "json",
+        ]
+    )
+    assert index_quantize(args_f16) == 0
+    f16_payload = json.loads(capsys.readouterr().out)
+    assert f16_payload["mode"] == "float16"
+    assert f16_output.exists()
+
+    # 2. In-place quantize to sq8 with text output
+    args_sq8 = build_parser().parse_args(
+        ["index", "quantize", "--index", str(index_file), "--mode", "sq8", "--format", "text"]
+    )
+    assert index_quantize(args_sq8) == 0
+    text_out = capsys.readouterr().out
+    assert "Mode: sq8" in text_out
+    assert (tmp_path / "index.scales.npy").exists()
+
+
+def test_index_quantize_cli_errors(tmp_path, capsys):
+    missing_index = tmp_path / "missing.json"
+    args = build_parser().parse_args(["index", "quantize", "--index", str(missing_index)])
+    assert index_quantize(args) == 2
+    assert "Index file not found" in capsys.readouterr().err
+
+
+def test_index_build_cli_with_quantize(tmp_path, monkeypatch):
+    monkeypatch.setenv("EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://api.example.com/v1")
+    monkeypatch.setenv("EMBEDDING_MODEL", "fixture/embed")
+
+    record = _make_record("repo/one")
+    records_file = tmp_path / "records.json"
+    output_file = tmp_path / "index.json"
+    records_file.write_text(json.dumps([record]), encoding="utf-8")
+
+    def fake_call_embeddings(_config, inputs, *, timeout=60, input_type=None):
+        return [[1.0, 0.0] for _ in inputs]
+
+    args = build_parser().parse_args(
+        [
+            "index",
+            "build",
+            "--records",
+            str(records_file),
+            "--output",
+            str(output_file),
+            "--quantize",
+            "sq8",
+        ]
+    )
+    with patch("xists.cli.call_embeddings", side_effect=fake_call_embeddings):
+        assert index_build(args) == 0
+
+    assert output_file.exists()
+    assert (tmp_path / "index.scales.npy").exists()
+    index_data = json.loads(output_file.read_text(encoding="utf-8"))
+    assert index_data["vector_quantization"] == "sq8"
+    assert index_data["vector_dtype"] == "int8"
+
+
+def test_index_migrate_cli_with_quantize(tmp_path, capsys):
+    # Create legacy v3 index
+    v3_index = tmp_path / "index-v3.json"
+    v3_index.write_text(
+        json.dumps(
+            {
+                "index_version": 3,
+                "record_schema_version": RECORD_SCHEMA_VERSION,
+                "embedding_model": "BAAI/bge-m3",
+                "embedding_input_version": EMBEDDING_INPUT_VERSION,
+                "dimension": 2,
+                "record_count": 1,
+                "vectors": [
+                    {
+                        "repo_id": "repo/legacy",
+                        "embedding_input_fingerprint": "fp1",
+                        "metadata": {"language": "Python"},
+                        "vector": encode_vector([1.0, 0.0]),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    v4_output = tmp_path / "index-v4.json"
+    args = build_parser().parse_args(
+        [
+            "index",
+            "migrate",
+            "--input",
+            str(v3_index),
+            "--output",
+            str(v4_output),
+            "--quantize",
+            "float16",
+            "--format",
+            "json",
+        ]
+    )
+    assert index_migrate(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["vector_quantization"] == "float16"
+    assert v4_output.exists()
+    v4_data = json.loads(v4_output.read_text(encoding="utf-8"))
+    assert v4_data["vector_dtype"] == "float16"
+
+
+def test_index_stats_cli_quantized_format(tmp_path, capsys):
+    matrix = np.array([[1.0, 0.0]], dtype=np.float32)
+    doc = {
+        "index_version": 4,
+        "record_schema_version": RECORD_SCHEMA_VERSION,
+        "embedding_model": "BAAI/bge-m3",
+        "embedding_input_version": EMBEDDING_INPUT_VERSION,
+        "dimension": 2,
+        "record_count": 1,
+        "vectors": [
+            {
+                "repo_id": "a/b",
+                "metadata": {"language": "Python"},
+                "embedding_input_fingerprint": "1",
+            }
+        ],
+    }
+    index_file = tmp_path / "index.json"
+    save_index(index_file, doc, matrix=matrix, quantize="sq8")
+
+    # 1. Text format
+    args_text = build_parser().parse_args(
+        ["index", "stats", "--index", str(index_file), "--format", "text"]
+    )
+    assert index_stats(args_text) == 0
+    out_text = capsys.readouterr().out
+    assert "int8" in out_text
+    assert "sq8" in out_text
+
+    # 2. JSON format
+    args_json = build_parser().parse_args(
+        ["index", "stats", "--index", str(index_file), "--format", "json"]
+    )
+    assert index_stats(args_json) == 0
+    out_json = json.loads(capsys.readouterr().out)
+    assert out_json["vector_dtype"] == "int8"
+    assert out_json["vector_quantization"] == "sq8"
+    assert out_json["estimated_memory_mb"] is not None

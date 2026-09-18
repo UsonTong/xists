@@ -550,6 +550,7 @@ def index_build(args: argparse.Namespace) -> int:
             "vectors": vectors,
         },
         version=INDEX_VERSION,
+        quantize=getattr(args, "quantize", "none"),
     )
     if checkpoint_path.exists():
         checkpoint_path.unlink()
@@ -609,10 +610,16 @@ def _index_stats_report(index: dict[str, Any], *, index_path: Path, limit: int) 
                 topics[topic] += 1
 
     dimension = index.get("dimension")
+    vector_dtype = index.get("vector_dtype") or (
+        str(index["_matrix"].dtype) if index.get("_matrix") is not None else "float32"
+    )
+    vector_quantization = index.get("vector_quantization") or (
+        "sq8" if vector_dtype == "int8" else "none"
+    )
+    bytes_per_elem = 1 if vector_dtype == "int8" else (2 if vector_dtype == "float16" else 4)
     estimated_memory_mb: float | None = None
     if isinstance(dimension, int) and dimension > 0:
-        # Search materializes vectors as a float32 matrix (4 bytes per value).
-        estimated_memory_mb = round(len(vectors) * dimension * 4 / 1024 / 1024, 1)
+        estimated_memory_mb = round(len(vectors) * dimension * bytes_per_elem / 1024 / 1024, 1)
 
     payload = {
         "index": str(index_path),
@@ -622,6 +629,8 @@ def _index_stats_report(index: dict[str, Any], *, index_path: Path, limit: int) 
         "embedding_base_url": index.get("embedding_base_url"),
         "embedding_input_version": index.get("embedding_input_version"),
         "dimension": index.get("dimension"),
+        "vector_dtype": vector_dtype,
+        "vector_quantization": vector_quantization,
         "built_at": index.get("built_at"),
         "record_count": index.get("record_count"),
         "vector_count": len(vectors),
@@ -636,12 +645,16 @@ def _index_stats_report(index: dict[str, Any], *, index_path: Path, limit: int) 
 
 
 def _format_index_stats_text(report: dict[str, Any]) -> str:
+    quant_info = report.get("vector_quantization") or "none"
+    dtype_info = report.get("vector_dtype") or "float32"
+    format_label = f"{dtype_info} ({quant_info})" if quant_info != "none" else dtype_info
     return _format_command_summary(
         "Index",
         [
             ("File", report["index"]),
             ("Projects", report.get("record_count")),
             ("Vectors", report.get("vector_count")),
+            ("Format", format_label),
             ("Model", report.get("embedding_model")),
             ("Dimensions", report.get("dimension")),
             ("Built", report.get("built_at")),
@@ -911,19 +924,24 @@ def index_migrate(args: argparse.Namespace) -> int:
             else np.empty((0, dimension or 0), dtype=np.float32)
         )
 
-    save_index(output_path, index, matrix=matrix, version=4)
+    quantize_mode = getattr(args, "quantize", "none")
+    save_index(output_path, index, matrix=matrix, version=4, quantize=quantize_mode)
 
     input_size = args.input.stat().st_size
     output_json_size = output_path.stat().st_size
     vectors_file = output_path.with_name(f"{output_path.stem}.vectors.npy")
     output_npy_size = vectors_file.stat().st_size if vectors_file.exists() else 0
-    total_output_size = output_json_size + output_npy_size
+    scales_file = output_path.with_name(f"{output_path.stem}.scales.npy")
+    scales_size = scales_file.stat().st_size if scales_file.exists() else 0
+    total_output_size = output_json_size + output_npy_size + scales_size
     reduction_pct = ((input_size - total_output_size) / input_size * 100) if input_size > 0 else 0.0
 
     payload = {
         "input": str(args.input),
         "output": str(output_path),
         "vectors_file": str(vectors_file),
+        "scales_file": str(scales_file) if scales_size > 0 else None,
+        "vector_quantization": quantize_mode,
         "source_version": source_version,
         "target_version": 4,
         "record_count": len(vectors),
@@ -931,7 +949,7 @@ def index_migrate(args: argparse.Namespace) -> int:
         "source_size_bytes": input_size,
         "target_size_bytes": total_output_size,
         "target_json_bytes": output_json_size,
-        "target_vectors_bytes": output_npy_size,
+        "target_vectors_bytes": output_npy_size + scales_size,
         "size_reduction_percent": round(reduction_pct, 2),
     }
 
@@ -1173,6 +1191,63 @@ def index_prune(args: argparse.Namespace) -> int:
     return 0
 
 
+def index_quantize(args: argparse.Namespace) -> int:
+    """Quantize an existing vector index to float16 or sq8 (int8) to reduce storage and memory."""
+    index_path = Path(args.index)
+    if not index_path.exists():
+        print(f"Index file not found: {index_path}", file=sys.stderr)
+        return 2
+
+    mode = getattr(args, "mode", "float16")
+    output_path = Path(args.output) if getattr(args, "output", None) else index_path
+
+    try:
+        from xists.search.index import load_index
+
+        index = load_index(index_path, mmap=True)
+    except Exception as error:
+        print(f"Failed to load index {index_path}: {error}", file=sys.stderr)
+        return 1
+
+    matrix = index.get("_matrix")
+    if matrix is None or not isinstance(matrix, np.ndarray):
+        print(f"No vector matrix found for index {index_path}", file=sys.stderr)
+        return 1
+
+    old_size = 0
+    if index.get("_vectors_path") and Path(index["_vectors_path"]).exists():
+        old_size = Path(index["_vectors_path"]).stat().st_size
+
+    save_index(output_path, index, matrix=matrix, version=4, quantize=mode)
+
+    new_vectors_path = output_path.with_name(f"{output_path.stem}.vectors.npy")
+    new_size = new_vectors_path.stat().st_size if new_vectors_path.exists() else 0
+    scales_path = output_path.with_name(f"{output_path.stem}.scales.npy")
+    scales_size = scales_path.stat().st_size if scales_path.exists() else 0
+    total_new_size = new_size + scales_size
+
+    reduction = ((old_size - total_new_size) / old_size * 100) if old_size > 0 else 0.0
+
+    payload = {
+        "index": str(output_path),
+        "mode": mode,
+        "record_count": index.get("record_count", len(matrix)),
+        "dimension": matrix.shape[1] if matrix.ndim == 2 else None,
+        "original_vector_bytes": old_size,
+        "quantized_vector_bytes": total_new_size,
+        "size_reduction_percent": round(reduction, 2),
+    }
+
+    if getattr(args, "format", "text") == "json":
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"Successfully quantized index {index_path} -> {output_path}")
+        print(f"  Mode: {mode}")
+        print(f"  Original size: {old_size / (1024 * 1024):.2f} MB")
+        print(f"  New size: {total_new_size / (1024 * 1024):.2f} MB ({reduction:.1f}% reduction)")
+    return 0
+
+
 __all__ = [
     "_compute_checkpoint_checksum",
     "_format_index_stats_text",
@@ -1188,6 +1263,7 @@ __all__ = [
     "index_migrate",
     "index_prune",
     "index_pull",
+    "index_quantize",
     "index_stats",
     "index_verify",
 ]

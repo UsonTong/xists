@@ -189,8 +189,8 @@ def find_similar_prepared(
             "elapsed_ms": elapsed,
         }
 
-    target_vec = prepared.normalized_matrix[target_idx]
-    similarities = prepared.normalized_matrix @ target_vec
+    target_vec = prepared.get_vector(target_idx)
+    similarities = prepared.score_query_vector(target_vec)
 
     # Exclude self
     valid_mask = np.ones(len(prepared.entries), dtype=bool)

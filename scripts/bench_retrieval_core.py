@@ -599,6 +599,102 @@ def benchmark_adaptive_intent_hybrid_fusion(
     }
 
 
+def benchmark_quantized_storage_and_gemm(
+    entries: list[dict[str, Any]], matrix: np.ndarray, temp_dir: Path
+) -> dict[str, Any]:
+    """Measure storage reduction, working heap memory, search latency, and ranking fidelity across float32, float16, and SQ8 int8."""
+    modes = ["none", "float16", "sq8"]
+    mode_labels = {"none": "float32", "float16": "float16", "sq8": "int8 (sq8)"}
+    results: dict[str, Any] = {}
+
+    sample_queries = [
+        "web async networking library",
+        "distributed key-value database engine",
+        "optimizing compiler syntax tree parser",
+        "cryptographic authentication protocol",
+        "high throughput queue in rust",
+    ]
+    query_vecs = [matrix[i].tolist() for i in range(len(sample_queries))]
+
+    baseline_rankings: list[list[str]] = []
+
+    for mode in modes:
+        mode_label = mode_labels[mode]
+        idx_path = temp_dir / f"bench_index_{mode}.json"
+        doc = {
+            "index_version": 4,
+            "embedding_input_version": 3,
+            "record_schema_version": 2,
+            "embedding_model": "bge-m3",
+            "dimension": matrix.shape[1],
+            "record_count": len(entries),
+            "vectors": entries,
+        }
+        save_index(idx_path, doc, matrix=matrix, version=4, quantize=mode)
+
+        vec_file = idx_path.with_name(f"{idx_path.stem}.vectors.npy")
+        scales_file = idx_path.with_name(f"{idx_path.stem}.scales.npy")
+        storage_bytes = vec_file.stat().st_size if vec_file.exists() else 0
+        if scales_file.exists():
+            storage_bytes += scales_file.stat().st_size
+
+        prepared = PreparedIndex.from_path(idx_path, CONFIG, mmap=True)
+
+        # Measure search latency
+        latencies_ms: list[float] = []
+        rankings: list[list[str]] = []
+        runs = 10
+        for _ in range(runs):
+            for q, v in zip(sample_queries, query_vecs):
+                t0 = time.perf_counter()
+                res = rank(q, prepared, CONFIG, top_k=10, embed=lambda c, _q, vec=v: vec)
+                latencies_ms.append((time.perf_counter() - t0) * 1000)
+                if len(rankings) < len(sample_queries):
+                    rankings.append([item["repo_id"] for item in res.get("results", [])])
+
+        # Measure peak working heap during search
+        tracemalloc.start()
+        for q, v in zip(sample_queries, query_vecs):
+            _ = rank(q, prepared, CONFIG, top_k=10, embed=lambda c, _q, vec=v: vec)
+        _, peak_search_ram = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        if mode == "none":
+            baseline_rankings = rankings
+            overlap_pct = 100.0
+        else:
+            total_overlap = 0
+            total_items = 0
+            for base_r, r in zip(baseline_rankings, rankings):
+                overlap = len(set(base_r) & set(r))
+                total_overlap += overlap
+                total_items += max(len(base_r), 1)
+            overlap_pct = round((total_overlap / total_items) * 100, 1)
+
+        avg_lat = float(np.mean(latencies_ms))
+        results[mode] = {
+            "format": mode_label,
+            "vector_dtype": prepared.vector_dtype,
+            "vector_quantization": prepared.vector_quantization,
+            "storage_bytes": storage_bytes,
+            "storage_mb": round(storage_bytes / (1024 * 1024), 2),
+            "peak_search_ram_kb": round(peak_search_ram / 1024, 2),
+            "avg_search_latency_ms": round(avg_lat, 3),
+            "throughput_qps": round(1000.0 / max(avg_lat, 0.001), 1),
+            "top10_retention_pct": overlap_pct,
+        }
+
+    f32_bytes = results["none"]["storage_bytes"]
+    results["float16"]["storage_reduction_pct"] = round(
+        (f32_bytes - results["float16"]["storage_bytes"]) / f32_bytes * 100, 1
+    )
+    results["sq8"]["storage_reduction_pct"] = round(
+        (f32_bytes - results["sq8"]["storage_bytes"]) / f32_bytes * 100, 1
+    )
+
+    return results
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--count", type=int, default=5000, help="Number of synthetic vectors")
@@ -704,6 +800,26 @@ def main() -> int:
             f"throughput: {adaptive_res['overall']['throughput_qps']} qps)\n"
         )
 
+        print("8. Benchmarking Quantized Vector Storage & Chunked GEMM Dequantization...")
+        quant_res = benchmark_quantized_storage_and_gemm(entries, matrix, temp_path)
+        print(
+            f"   - Float32: Storage {quant_res['none']['storage_mb']} MB, "
+            f"Peak Heap {quant_res['none']['peak_search_ram_kb']:.1f} KB, "
+            f"Latency {quant_res['none']['avg_search_latency_ms']} ms ({quant_res['none']['throughput_qps']} qps)"
+        )
+        print(
+            f"   - Float16: Storage {quant_res['float16']['storage_mb']} MB ({quant_res['float16']['storage_reduction_pct']}% reduction), "
+            f"Peak Heap {quant_res['float16']['peak_search_ram_kb']:.1f} KB, "
+            f"Latency {quant_res['float16']['avg_search_latency_ms']} ms ({quant_res['float16']['throughput_qps']} qps), "
+            f"Top-10 Match: {quant_res['float16']['top10_retention_pct']}%"
+        )
+        print(
+            f"   - SQ8 (INT8): Storage {quant_res['sq8']['storage_mb']} MB ({quant_res['sq8']['storage_reduction_pct']}% reduction), "
+            f"Peak Heap {quant_res['sq8']['peak_search_ram_kb']:.1f} KB, "
+            f"Latency {quant_res['sq8']['avg_search_latency_ms']} ms ({quant_res['sq8']['throughput_qps']} qps), "
+            f"Top-10 Match: {quant_res['sq8']['top10_retention_pct']}%\n"
+        )
+
     summary = {
         "status": "success",
         "mmap_loading": mmap_res,
@@ -713,6 +829,7 @@ def main() -> int:
         "query_embedding_cache": cache_res,
         "batched_gemm_retrieval": gemm_res,
         "adaptive_intent_hybrid_fusion": adaptive_res,
+        "quantized_storage_and_gemm": quant_res,
     }
     print("Benchmark summary:")
     print(json.dumps(summary, indent=2))
